@@ -8,6 +8,7 @@ import {
   isTerminalDescriptorLive,
   terminalDescriptor,
   terminalSessionGroupKey,
+  terminalSessionScope,
 } from '#/renderer/components/terminal/terminal-session-utils.ts'
 import { TerminalSessionContext } from '#/renderer/components/terminal/terminal-session-context.ts'
 import type {
@@ -53,9 +54,10 @@ export function TerminalSessionProvider({ children }: TerminalSessionProviderPro
     const offExit = terminalBridge.onExit((event) => {
       for (const [key, session] of Array.from(sessionsRef.current.entries())) {
         if (!session.handleExit(event)) continue
-        const { repoRoot, worktreePath } = session.descriptor
+        const repoId = terminalDescriptorRepoId(session.descriptor)
+        const { worktreePath } = session.descriptor
         removeSession(key, { dispose: true })
-        useReposStore.getState().dismissExitedTerminalDetail(repoRoot, worktreePath)
+        useReposStore.getState().dismissExitedTerminalDetail(repoId, worktreePath)
         notify()
         break
       }
@@ -89,7 +91,7 @@ export function TerminalSessionProvider({ children }: TerminalSessionProviderPro
   }, [notify, repos])
 
   const createTerminalDescriptor = useCallback((base: TerminalSessionBase): TerminalDescriptor => {
-    const groupKey = terminalSessionGroupKey(base.repoRoot, base.worktreePath)
+    const groupKey = terminalSessionGroupKey(terminalSessionScope(base))
     const index = nextIndexByGroupRef.current.get(groupKey) ?? 1
     nextIndexByGroupRef.current.set(groupKey, index + 1)
     return terminalDescriptor(base, `terminal-${index}`, index)
@@ -114,7 +116,7 @@ export function TerminalSessionProvider({ children }: TerminalSessionProviderPro
 
   const ensureDefault = useCallback(
     (base: TerminalSessionBase): string => {
-      const groupKey = terminalSessionGroupKey(base.repoRoot, base.worktreePath)
+      const groupKey = terminalSessionGroupKey(terminalSessionScope(base))
       const activeKey = activeKeyByGroupRef.current.get(groupKey)
       if (activeKey && sessionsRef.current.has(activeKey)) return activeKey
       const existing = Array.from(sessionsRef.current.values()).find(
@@ -278,4 +280,8 @@ export function TerminalSessionProvider({ children }: TerminalSessionProviderPro
       <div ref={parkingRootRef} className="goblin-terminal-parking" aria-hidden="true" />
     </TerminalSessionContext.Provider>
   )
+}
+
+function terminalDescriptorRepoId(descriptor: TerminalDescriptor): string {
+  return descriptor.kind === 'remote' ? descriptor.repoId : descriptor.repoRoot
 }

@@ -25,7 +25,7 @@ export function runBranchViewModeChangedWorkflow(
   if (options.shouldRefreshLog && options.selectedForLog) {
     void get().refreshBranchLog(options.id, options.selectedForLog, { token: options.token })
   }
-  if (options.selectedForPullRequest) {
+  if (options.selectedForPullRequest && localRepoFresh(get, options.id, options.token)) {
     void get().refreshPullRequests(options.id, [options.selectedForPullRequest], {
       token: options.token,
       mode: 'full',
@@ -39,7 +39,7 @@ export function runDetailTabChangedWorkflow(
 ): void {
   if (options.tab === 'commits') void get().refreshBranchLog(options.id, undefined, { token: options.token })
   if (options.tab === 'changes') void get().refreshStatus(options.id, { token: options.token })
-  if (options.tab === 'status' && options.selectedBranch) {
+  if (options.tab === 'status' && options.selectedBranch && localRepoFresh(get, options.id, options.token)) {
     void get().refreshPullRequests(options.id, [options.selectedBranch], { token: options.token, mode: 'full' })
   }
 }
@@ -49,14 +49,16 @@ export function runSelectedBranchChangedWorkflow(
   options: { id: string; token: number; branch: string; tab: DetailTab | undefined },
 ): void {
   if (options.tab === 'commits') void get().refreshBranchLog(options.id, options.branch, { token: options.token })
-  void get().refreshPullRequests(options.id, [options.branch], { token: options.token, mode: 'full' })
+  if (localRepoFresh(get, options.id, options.token)) {
+    void get().refreshPullRequests(options.id, [options.branch], { token: options.token, mode: 'full' })
+  }
 }
 
 export function runSelectedBranchStatusWorkflow(
   get: ReposGet,
   options: { id: string; token: number; selectedBranch: string | null | undefined },
 ): void {
-  if (options.selectedBranch) {
+  if (options.selectedBranch && localRepoFresh(get, options.id, options.token)) {
     void get().refreshPullRequests(options.id, [options.selectedBranch], { token: options.token, mode: 'full' })
   }
 }
@@ -71,9 +73,9 @@ export async function runBranchActionRefreshWorkflow(
   ])
 }
 
-function repoFresh(get: ReposGet, id: string, token: number): boolean {
+function localRepoFresh(get: ReposGet, id: string, token: number): boolean {
   const repo = get().repos[id]
-  return !!repo && repo.instanceToken === token
+  return !!repo && repo.kind !== 'remote' && repo.instanceToken === token
 }
 
 async function refreshSelectedPullRequest(get: ReposGet, id: string, token: number): Promise<void> {
@@ -86,11 +88,11 @@ async function refreshPullRequestsAfterSnapshot(
   get: ReposGet,
   options: { id: string; token: number; branchNames: string[]; isSnapshotCurrent: () => boolean },
 ): Promise<void> {
-  if (!options.isSnapshotCurrent() || !repoFresh(get, options.id, options.token)) return
+  if (!options.isSnapshotCurrent() || !localRepoFresh(get, options.id, options.token)) return
   await get().refreshPullRequests(options.id, options.branchNames, { token: options.token, mode: 'summary' })
-  if (!options.isSnapshotCurrent() || !repoFresh(get, options.id, options.token)) return
+  if (!options.isSnapshotCurrent() || !localRepoFresh(get, options.id, options.token)) return
   await refreshSelectedPullRequest(get, options.id, options.token)
-  if (!options.isSnapshotCurrent() || !repoFresh(get, options.id, options.token)) return
+  if (!options.isSnapshotCurrent() || !localRepoFresh(get, options.id, options.token)) return
   await get().refreshPullRequests(options.id, options.branchNames, {
     token: options.token,
     mode: 'full',
@@ -110,8 +112,13 @@ export function runSnapshotSuccessWorkflow(
   },
 ): void {
   if (!options.isSnapshotCurrent()) return
-  persistRepoCache(set, get().repos[options.id], options.token)
-  void terminalBridge.pruneRepo({ repoRoot: options.id, worktreePaths: options.worktreePaths }).catch((err) => {
+  const repo = get().repos[options.id]
+  persistRepoCache(set, repo, options.token)
+  const pruneInput =
+    repo?.kind === 'remote'
+      ? { kind: 'remote' as const, repoId: options.id, worktreePaths: options.worktreePaths }
+      : { repoRoot: options.id, worktreePaths: options.worktreePaths }
+  void terminalBridge.pruneRepo(pruneInput).catch((err) => {
     console.warn('[terminal] failed to prune repo sessions', err)
   })
   void (async () => {

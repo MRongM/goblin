@@ -1,5 +1,5 @@
 import { beforeAll, beforeEach, describe, expect, test, vi } from 'vitest'
-import { ipcMain } from 'electron'
+import { dialog, ipcMain } from 'electron'
 import { isAncestor, getCurrentBranch, getUpstream } from '#/main/git/branches.ts'
 import { getWorktrees } from '#/main/git/worktrees.ts'
 import { getWorkingStatus } from '#/main/git/status.ts'
@@ -157,6 +157,7 @@ vi.mock('#/main/system/terminals.ts', () => ({
 vi.mock('#/main/system/editors.ts', () => ({
   getResolvedEditorApp: vi.fn(() => null),
   openInPreferredEditor: vi.fn(),
+  openRemoteInPreferredEditor: vi.fn(() => ({ ok: true, message: 'ok' })),
 }))
 
 vi.mock('#/main/events.ts', () => ({
@@ -193,7 +194,12 @@ vi.mock('#/main/ssh/diagnostics.ts', () => ({
 }))
 
 vi.mock('#/main/ssh/git.ts', () => ({
+  createRemoteWorktree: vi.fn(() => ({ ok: true, message: 'ok' })),
+  fetchRemoteRepository: vi.fn(() => ({ ok: true, message: 'ok' })),
+  getRemoteLog: vi.fn(() => []),
   getRemoteSnapshot: vi.fn(() => ({ branches: [], current: '' })),
+  getRemoteStatus: vi.fn(() => []),
+  removeRemoteWorktree: vi.fn(() => ({ ok: true, message: 'ok' })),
 }))
 
 vi.mock('#/main/ssh/path-picker.ts', () => ({
@@ -205,6 +211,16 @@ const trustedSender = { id: 1 }
 const trustedEvent = {
   sender: trustedSender,
   senderFrame: { url: 'file:///app/dist/renderer/index.html?theme=light' },
+}
+
+const REMOTE_TARGET = {
+  id: 'ssh://deploy@prod:22/srv/goblin',
+  alias: null,
+  host: 'prod',
+  user: 'deploy',
+  port: 22,
+  remotePath: '/srv/goblin',
+  displayName: 'prod:goblin',
 }
 
 async function invokeRpc(
@@ -355,6 +371,89 @@ describe('main repo rpc cancellation', () => {
 
     expect(result.ok).toBe(true)
     if (result.ok) expect(result.data).toMatchObject({ target: { identityFile: '~/.ssh/prod_ed25519' } })
+  })
+
+  test('opens an SSH identity file dialog in the local .ssh directory', async () => {
+    vi.mocked(dialog.showOpenDialog).mockResolvedValueOnce({
+      canceled: false,
+      filePaths: ['/Users/deploy/.ssh/id_ed25519'],
+    })
+
+    const result = await invokeRpc('remote.identityFileDialog')
+
+    expect(result).toEqual({ ok: true, data: '/Users/deploy/.ssh/id_ed25519' })
+    expect(dialog.showOpenDialog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        defaultPath: expect.stringMatching(/[/\\]\.ssh$/),
+        properties: expect.arrayContaining(['openFile', 'showHiddenFiles']),
+        title: 'Choose SSH Private Key',
+      }),
+    )
+  })
+
+  test('accepts remote fetch, status, log, and create worktree procedures', async () => {
+    await expect(invokeRpc('remote.fetch', { target: REMOTE_TARGET })).resolves.toMatchObject({ ok: true })
+    await expect(invokeRpc('remote.status', { target: REMOTE_TARGET })).resolves.toMatchObject({ ok: true })
+    await expect(
+      invokeRpc('remote.log', {
+        target: REMOTE_TARGET,
+        branch: 'feature/x',
+        count: 30,
+        skip: 0,
+      }),
+    ).resolves.toMatchObject({ ok: true })
+    await expect(
+      invokeRpc('remote.createWorktree', {
+        target: REMOTE_TARGET,
+        worktreePath: '/srv/goblin-feature-x',
+        newBranch: 'feature/x',
+        baseBranch: 'main',
+      }),
+    ).resolves.toMatchObject({ ok: true })
+    await expect(
+      invokeRpc('remote.openEditor', {
+        target: REMOTE_TARGET,
+        path: '/srv/goblin-feature-x',
+      }),
+    ).resolves.toMatchObject({ ok: true, data: { ok: true, message: 'ok' } })
+    await expect(
+      invokeRpc('remote.removeWorktree', {
+        target: REMOTE_TARGET,
+        branch: 'feature/x',
+        worktreePath: '/srv/goblin-feature-x',
+        alsoDeleteBranch: true,
+        forceDeleteBranch: false,
+      }),
+    ).resolves.toMatchObject({ ok: true, data: { ok: true, message: 'ok' } })
+  })
+
+  test('rejects invalid remote worktree create arguments at the router boundary', async () => {
+    const result = await invokeRpc('remote.createWorktree', {
+      target: REMOTE_TARGET,
+      worktreePath: 'relative/path',
+      newBranch: 'feature/x',
+      baseBranch: 'main',
+    })
+
+    expect(result.ok).toBe(false)
+  })
+
+  test('rejects invalid remote editor and remove worktree paths at the router boundary', async () => {
+    await expect(
+      invokeRpc('remote.openEditor', {
+        target: REMOTE_TARGET,
+        path: 'relative/path',
+      }),
+    ).resolves.toMatchObject({ ok: false })
+
+    await expect(
+      invokeRpc('remote.removeWorktree', {
+        target: REMOTE_TARGET,
+        branch: 'feature/x',
+        worktreePath: 'relative/path',
+        alsoDeleteBranch: false,
+      }),
+    ).resolves.toMatchObject({ ok: false })
   })
 
   test('does not expose a raw remote command RPC procedure', async () => {

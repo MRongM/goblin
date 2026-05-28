@@ -1,10 +1,12 @@
 import { ipcMain } from 'electron'
 import type { WebContents } from 'electron'
+import os from 'node:os'
 import path from 'node:path'
 import { getWorktrees } from '#/main/git/worktrees.ts'
 import { resolveKnownWorktree } from '#/main/git/guards.ts'
-import { isValidAbsolutePath, isValidBranch, isValidCwd } from '#/main/ipc/validation.ts'
+import { isValidAbsolutePath, isValidBranch, isValidCwd, MAX_IPC_PATH_LENGTH } from '#/main/ipc/validation.ts'
 import { isTrustedIpcEvent } from '#/main/ipc/trusted-webcontents.ts'
+import { buildRemoteTerminalInvocation } from '#/main/ssh/commands.ts'
 import {
   closeAllTerminalSessions,
   closeOwnedTerminalSession,
@@ -18,8 +20,11 @@ import {
   wireTerminalSessionCleanup,
   writeTerminalSession,
 } from '#/main/terminal-core.ts'
+import { normalizeRemoteTarget } from '#/shared/remote-repo.ts'
 import {
   isValidTerminalSize,
+  type LocalTerminalOpenInput,
+  type RemoteTerminalOpenInput,
   type TerminalMutationResult,
   type TerminalOpenInput,
   type TerminalOpenResult,
@@ -69,6 +74,11 @@ export function wireTerminalIpc(): void {
   })
   ipcMain.handle('goblin:terminal-prune-repo', (event, input: TerminalPruneRepoInput): TerminalMutationResult => {
     if (!isTrustedIpcEvent(event)) return false
+    if (input?.kind === 'remote') {
+      if (!isValidRemoteRepoId(input.repoId) || !isValidTerminalWorktreePathList(input.worktreePaths)) return false
+      pruneRemoteRepoSessions(event.sender.id, input.repoId, input.worktreePaths)
+      return true
+    }
     if (!isValidCwd(input?.repoRoot) || !isValidTerminalWorktreePathList(input?.worktreePaths)) return false
     pruneRepoSessions(event.sender.id, input.repoRoot, input.worktreePaths)
     return true
@@ -80,6 +90,15 @@ export function wireTerminalIpc(): void {
 async function openGoblinWorktreeTerminal(
   ownerWebContentsId: number,
   input: TerminalOpenInput,
+  options: { restart?: boolean } = {},
+): Promise<TerminalOpenResult> {
+  if (input?.kind === 'remote') return openGoblinRemoteTerminal(ownerWebContentsId, input, options)
+  return openGoblinLocalWorktreeTerminal(ownerWebContentsId, input, options)
+}
+
+async function openGoblinLocalWorktreeTerminal(
+  ownerWebContentsId: number,
+  input: LocalTerminalOpenInput,
   options: { restart?: boolean } = {},
 ): Promise<TerminalOpenResult> {
   if (
@@ -109,6 +128,37 @@ async function openGoblinWorktreeTerminal(
   })
 }
 
+async function openGoblinRemoteTerminal(
+  ownerWebContentsId: number,
+  input: RemoteTerminalOpenInput,
+  options: { restart?: boolean } = {},
+): Promise<TerminalOpenResult> {
+  const targetInput = input.target && typeof input.target === 'object' ? input.target : {}
+  const target = normalizeRemoteTarget(targetInput)
+  if (
+    !target ||
+    target.id !== input.target.id ||
+    !isValidBranch(input.branch) ||
+    !isValidRemoteAbsolutePath(input.worktreePath) ||
+    !isValidTerminalId(input.terminalId) ||
+    !isValidTerminalSize(input.cols, input.rows)
+  ) {
+    return { ok: false, message: 'error.invalid-arguments' }
+  }
+
+  const invocation = buildRemoteTerminalInvocation(target, input.worktreePath, { cols: input.cols, rows: input.rows })
+  return openTerminalSession({
+    ownerWebContentsId,
+    scope: target.id,
+    key: remoteSessionKey(target.id, input.worktreePath, input.terminalId),
+    cwd: os.homedir(),
+    cols: input.cols,
+    rows: input.rows,
+    forceNew: options.restart === true,
+    command: { command: invocation.command, args: invocation.args },
+  })
+}
+
 const terminalOwnerCleanupIds = new Set<number>()
 
 function registerTerminalOwnerCleanup(webContents: WebContents): void {
@@ -130,6 +180,11 @@ export function pruneRepoSessions(ownerWebContentsId: number, repoRoot: string, 
   pruneTerminalScope(ownerWebContentsId, root, liveKeys)
 }
 
+export function pruneRemoteRepoSessions(ownerWebContentsId: number, repoId: string, worktreePaths: string[]): void {
+  const liveKeys = new Set(worktreePaths.filter(isValidRemoteAbsolutePath).map((p) => remoteSessionKey(repoId, p)))
+  pruneTerminalScope(ownerWebContentsId, repoId, liveKeys)
+}
+
 function isValidTerminalWorktreePathList(value: unknown): boolean {
   return (
     Array.isArray(value) &&
@@ -142,6 +197,24 @@ function isValidTerminalId(value: unknown): value is string {
   return typeof value === 'string' && TERMINAL_ID_RE.test(value)
 }
 
+function isValidRemoteAbsolutePath(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length > 0 &&
+    value.length <= MAX_IPC_PATH_LENGTH &&
+    value.startsWith('/') &&
+    !value.includes('\0')
+  )
+}
+
+function isValidRemoteRepoId(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0 && value.length <= MAX_IPC_PATH_LENGTH && !value.includes('\0')
+}
+
 function sessionKey(repoRoot: string, worktreePath: string, terminalId?: string): string {
   return terminalId ? `${repoRoot}\0${worktreePath}\0${terminalId}` : `${repoRoot}\0${worktreePath}`
+}
+
+function remoteSessionKey(repoId: string, worktreePath: string, terminalId?: string): string {
+  return terminalId ? `remote\0${repoId}\0${worktreePath}\0${terminalId}` : `remote\0${repoId}\0${worktreePath}`
 }

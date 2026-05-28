@@ -140,6 +140,23 @@ describe('isRepoSyncBlocked', () => {
       ),
     ).toBe(false)
   })
+
+  test('does not block manual sync for remote repositories', () => {
+    const remote = emptyRepo('ssh://deploy@prod:22/srv/goblin', 'prod:goblin', {
+      kind: 'remote',
+      remoteTarget: {
+        id: 'ssh://deploy@prod:22/srv/goblin',
+        alias: null,
+        host: 'prod',
+        user: 'deploy',
+        port: 22,
+        remotePath: '/srv/goblin',
+        displayName: 'prod:goblin',
+      },
+    })
+
+    expect(isRepoSyncBlocked(remote)).toBe(false)
+  })
 })
 
 describe('getRepoSyncPresentation', () => {

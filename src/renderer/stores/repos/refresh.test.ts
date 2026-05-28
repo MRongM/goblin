@@ -62,24 +62,70 @@ function logEntry(index: number): LogEntry {
 }
 
 describe('remote fetch timestamps', () => {
-  test('refreshSnapshot skips remote repositories during Phase 1', async () => {
+  test('refreshSnapshot loads remote repositories through remote RPC', async () => {
     const token = seedRemoteRepo()
-    let snapshotCalls = 0
-    rpcHandlers['repo.snapshot'] = async () => {
-      snapshotCalls += 1
-      return { branches: [], current: '' }
+    const remoteSnapshots: string[] = []
+    rpcHandlers['remote.snapshot'] = async ({ target }: { target: RemoteRepoTarget }) => {
+      remoteSnapshots.push(target.id)
+      return { branches: [branch('feature/remote')], current: 'feature/remote' }
     }
 
     await useReposStore.getState().refreshSnapshot(REMOTE_TARGET.id, { token })
 
-    expect(snapshotCalls).toBe(0)
-    expect(useReposStore.getState().repos[REMOTE_TARGET.id]?.resources.snapshot.phase).toBe('idle')
+    const repo = useReposStore.getState().repos[REMOTE_TARGET.id]
+    expect(remoteSnapshots).toEqual([REMOTE_TARGET.id])
+    expect(repo?.data.branches.map((item) => item.name)).toEqual(['feature/remote'])
+    expect(repo?.ui.selectedBranch).toBe('feature/remote')
+    expect(repo?.resources.snapshot.phase).toBe('idle')
   })
 
-  test('backgroundFetch skips remote repositories during Phase 1', async () => {
+  test('refreshStatus loads remote worktree status through remote RPC', async () => {
+    const token = seedRemoteRepo()
+    const status: WorktreeStatus[] = [
+      { path: '/srv/goblin-feature', isMain: false, entries: [{ x: ' ', y: 'M', path: 'a.txt' }] },
+    ]
+    rpcHandlers['remote.status'] = async ({ target }: { target: RemoteRepoTarget }) => {
+      expect(target.id).toBe(REMOTE_TARGET.id)
+      return status
+    }
+
+    await useReposStore.getState().refreshStatus(REMOTE_TARGET.id, { token })
+
+    const repo = useReposStore.getState().repos[REMOTE_TARGET.id]
+    expect(repo?.data.status).toEqual(status)
+    expect(repo?.data.statusLoaded).toBe(true)
+  })
+
+  test('refreshBranchLog loads remote commits through remote RPC', async () => {
+    const token = seedRemoteRepo()
+    useReposStore.setState((s) => ({
+      repos: {
+        ...s.repos,
+        [REMOTE_TARGET.id]: replaceRepo(s.repos[REMOTE_TARGET.id]!, (repo) => {
+          repo.data.branches = [branch('feature/remote')]
+          repo.ui.selectedBranch = 'feature/remote'
+        }),
+      },
+    }))
+    rpcHandlers['remote.log'] = async ({ target, branch: branchName, count, skip }: any) => {
+      expect(target.id).toBe(REMOTE_TARGET.id)
+      expect(branchName).toBe('feature/remote')
+      expect(count).toBe(INITIAL_LOG_COUNT + 1)
+      expect(skip).toBe(0)
+      return [logEntry(1)]
+    }
+
+    await useReposStore.getState().refreshBranchLog(REMOTE_TARGET.id, undefined, { token })
+
+    expect(useReposStore.getState().repos[REMOTE_TARGET.id]?.data.logsByBranch['feature/remote']?.entries).toEqual([
+      logEntry(1),
+    ])
+  })
+
+  test('backgroundFetch still skips remote repositories', async () => {
     seedRemoteRepo()
     let fetchCalls = 0
-    rpcHandlers['repo.fetch'] = async () => {
+    rpcHandlers['remote.fetch'] = async () => {
       fetchCalls += 1
       return { ok: true, message: 'ok' }
     }
@@ -88,6 +134,58 @@ describe('remote fetch timestamps', () => {
 
     expect(fetchCalls).toBe(0)
     expect(useReposStore.getState().repos[REMOTE_TARGET.id]?.resources.fetch.loadedAt).toBeNull()
+  })
+
+  test('manual sync fetches remote repositories and refreshes remote data', async () => {
+    const token = seedRemoteRepo()
+    const calls: string[] = []
+    rpcHandlers['remote.fetch'] = async ({ target }: { target: RemoteRepoTarget }) => {
+      calls.push(`fetch:${target.id}`)
+      return { ok: true, message: 'ok' }
+    }
+    rpcHandlers['remote.snapshot'] = async () => {
+      calls.push('snapshot')
+      return { branches: [branch('feature/remote')], current: 'feature/remote' }
+    }
+    rpcHandlers['remote.status'] = async () => {
+      calls.push('status')
+      return []
+    }
+
+    await useReposStore.getState().syncAndRefresh(REMOTE_TARGET.id, { token })
+
+    expect(calls).toContain(`fetch:${REMOTE_TARGET.id}`)
+    expect(calls).toContain('snapshot')
+    expect(calls).toContain('status')
+    expect(useReposStore.getState().repos[REMOTE_TARGET.id]?.resources.fetch.loadedAt).not.toBeNull()
+  })
+
+  test('remote snapshot refresh prunes remote terminal sessions to current remote worktree paths', async () => {
+    const token = seedRemoteRepo()
+    const pruneCalls: TerminalPruneRepoInput[] = []
+    overrideTerminalBridge({
+      pruneRepo: async (input) => {
+        pruneCalls.push(input)
+        return true
+      },
+    })
+    rpcHandlers['remote.snapshot'] = async () => ({
+      branches: [
+        branch('main', undefined, { worktreePath: '/srv/goblin' }),
+        branch('feature/x', undefined, { worktreePath: '/srv/goblin-feature-x' }),
+      ],
+      current: 'main',
+    })
+
+    await useReposStore.getState().refreshSnapshot(REMOTE_TARGET.id, { token })
+
+    expect(pruneCalls).toEqual([
+      {
+        kind: 'remote',
+        repoId: REMOTE_TARGET.id,
+        worktreePaths: ['/srv/goblin', '/srv/goblin-feature-x'],
+      },
+    ])
   })
 
   test('manual sync records the remote fetch settled time', async () => {

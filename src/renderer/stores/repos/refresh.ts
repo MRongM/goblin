@@ -3,7 +3,7 @@ import { branchForVisibleLog, selectedBranchForBranchSet } from '#/renderer/stor
 import { runExclusiveOperation, runLatestOperation } from '#/renderer/stores/repos/operation-runner.ts'
 import { persistRepoCache } from '#/renderer/stores/repos/persistence.ts'
 import { runLatestResourceOperation } from '#/renderer/stores/repos/resource-runner.ts'
-import { canStartRemoteFetch } from '#/renderer/stores/repos/sync-state.ts'
+import { canStartManualFetch, canStartRemoteFetch } from '#/renderer/stores/repos/sync-state.ts'
 import {
   pruneRepoBranchLogOperations,
   pruneRepoBranchPullRequestOperations,
@@ -101,10 +101,9 @@ export function createRefreshActions(set: ReposSet, get: ReposGet) {
   ): Promise<ExecResult | null> {
     const repoBefore = get().repos[id]
     if (!repoBefore) return null
-    if (!localRepoAvailable(repoBefore)) return null
     const token = options?.token ?? repoBefore.instanceToken
     if (repoBefore.instanceToken !== token) return null
-    if (!canStartRemoteFetch(repoBefore)) return { ok: false, message: 'error.network-op-in-progress' }
+    if (!canStartManualFetch(repoBefore)) return { ok: false, message: 'error.network-op-in-progress' }
     updateIfFresh(set, id, token, (r) => {
       startResource(r.resources.fetch, { hasData: r.resources.fetch.loadedAt !== null })
     })
@@ -155,7 +154,6 @@ export function createRefreshActions(set: ReposSet, get: ReposGet) {
   ): Promise<void> {
     const repoBefore = get().repos[id]
     if (!repoBefore) return
-    if (!localRepoAvailable(repoBefore)) return
     const token = options?.token ?? repoBefore.instanceToken
     if (repoBefore.instanceToken !== token) return
     const branch = branchArg ?? branchForVisibleLog(repoBefore)
@@ -171,6 +169,18 @@ export function createRefreshActions(set: ReposSet, get: ReposGet) {
     const pageSize = append ? Math.min(LOG_PAGE_SIZE, MAX_LOG_COUNT - loaded) : INITIAL_LOG_COUNT
     if (pageSize <= 0) return
     const requestCount = pageSize + 1
+    const logTask =
+      repoBefore.kind === 'remote'
+        ? repoBefore.remoteTarget
+          ? (signal: AbortSignal) =>
+              rpc.remote.log.query(
+                { target: repoBefore.remoteTarget!, branch, count: requestCount, skip: loaded },
+                { signal },
+              )
+          : null
+        : (signal: AbortSignal) =>
+            rpc.repo.log.query({ cwd: id, branch, count: requestCount, skip: loaded }, { signal })
+    if (!logTask) return
     await runLatestResourceOperation({
       set,
       get,
@@ -186,7 +196,7 @@ export function createRefreshActions(set: ReposSet, get: ReposGet) {
         r.resources.logsByBranch[branch] ??= idleResource()
         return { hasData: (r.data.logsByBranch[branch]?.entries.length ?? 0) > 0 }
       },
-      task: (signal) => rpc.repo.log.query({ cwd: id, branch, count: requestCount, skip: loaded }, { signal }),
+      task: logTask,
       applyResult: (r, log) => {
         if (!r.data.branches.some((b) => b.name === branch)) return false
         const prev = r.data.logsByBranch[branch] ?? emptyBranchLog()
@@ -426,9 +436,15 @@ export function createRefreshActions(set: ReposSet, get: ReposGet) {
     async refreshStatus(id: string, options?: { token?: number }) {
       const repoBefore = get().repos[id]
       if (!repoBefore) return
-      if (!localRepoAvailable(repoBefore)) return
       const token = options?.token ?? repoBefore.instanceToken
       if (repoBefore.instanceToken !== token) return
+      const statusTask =
+        repoBefore.kind === 'remote'
+          ? repoBefore.remoteTarget
+            ? (signal: AbortSignal) => rpc.remote.status.query({ target: repoBefore.remoteTarget! }, { signal })
+            : null
+          : (signal: AbortSignal) => rpc.repo.status.query({ cwd: id }, { signal })
+      if (!statusTask) return
       await runLatestResourceOperation({
         set,
         get,
@@ -440,7 +456,7 @@ export function createRefreshActions(set: ReposSet, get: ReposGet) {
         target: { key: 'status', reason: 'status' },
         selectResource: (r) => r.resources.status,
         start: (r) => ({ hasData: r.data.statusLoaded || r.data.status.length > 0 }),
-        task: (signal) => rpc.repo.status.query({ cwd: id }, { signal }),
+        task: statusTask,
         applyResult: (r, status) => {
           r.data.status = status
           r.data.statusLoaded = true
@@ -456,7 +472,6 @@ export function createRefreshActions(set: ReposSet, get: ReposGet) {
     async refreshAll(id: string, options?: { token?: number }) {
       const repoBefore = get().repos[id]
       if (!repoBefore) return
-      if (!localRepoAvailable(repoBefore)) return
       const token = options?.token ?? repoBefore.instanceToken
       if (repoBefore.instanceToken !== token) return
       await runRefreshAllWorkflow(get, { id, token })
@@ -465,13 +480,19 @@ export function createRefreshActions(set: ReposSet, get: ReposGet) {
     async syncAndRefresh(id: string, options?: { token?: number }) {
       const repoBefore = get().repos[id]
       if (!repoBefore) return
-      if (!localRepoAvailable(repoBefore)) return
       const token = options?.token ?? repoBefore.instanceToken
       if (repoBefore.instanceToken !== token) return
-      if (!canStartRemoteFetch(repoBefore)) return
+      if (!canStartManualFetch(repoBefore)) return
+      const fetchTask =
+        repoBefore.kind === 'remote'
+          ? repoBefore.remoteTarget
+            ? (signal: AbortSignal) => rpc.remote.fetch.mutate({ target: repoBefore.remoteTarget! }, { signal })
+            : null
+          : (signal: AbortSignal) => rpc.repo.fetch.mutate({ cwd: id }, { signal })
+      if (!fetchTask) return
       let result: ExecResult | null
       try {
-        result = await runNetworkTask(id, (signal) => rpc.repo.fetch.mutate({ cwd: id }, { signal }), {
+        result = await runNetworkTask(id, fetchTask, {
           token,
           reason: 'user-fetch',
           priority: 100,

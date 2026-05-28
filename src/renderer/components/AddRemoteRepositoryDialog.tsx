@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { FileKey } from 'lucide-react'
 import {
   Dialog,
   DialogContent,
@@ -137,6 +138,19 @@ export function AddRemoteRepositoryDialog({ open, onClose, onAddRemote }: Props)
     }
   }
 
+  async function handleIdentityFileBrowse() {
+    setError(null)
+    try {
+      const selectedPath = await rpc.remote.identityFileDialog.mutate()
+      if (!selectedPath) return
+      setIdentityFile(selectedPath)
+      setTarget(null)
+      setDiagnostics(null)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
   async function handleSubmit() {
     if (!canSubmit) return
     setLoading(true)
@@ -223,18 +237,34 @@ export function AddRemoteRepositoryDialog({ open, onClose, onAddRemote }: Props)
           )}
 
           <div>
-            <Field
-              label={t('remote.private-key')}
-              id="remote-private-key"
-              value={identityFile}
-              disabled={loading}
-              placeholder="~/.ssh/id_ed25519"
-              onChange={(value) => {
-                setIdentityFile(value)
-                setTarget(null)
-                setDiagnostics(null)
-              }}
-            />
+            <label className="block text-sm font-medium text-foreground" htmlFor="remote-private-key">
+              {t('remote.private-key')}
+            </label>
+            <div className="mt-1 flex gap-2">
+              <input
+                id="remote-private-key"
+                value={identityFile}
+                disabled={loading}
+                placeholder="~/.ssh/id_ed25519"
+                onChange={(event) => {
+                  setIdentityFile(event.target.value)
+                  setTarget(null)
+                  setDiagnostics(null)
+                }}
+                className="min-w-0 flex-1 rounded-md border border-input bg-background px-3 py-2 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-ring"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                disabled={loading}
+                aria-label={t('remote.choose-private-key')}
+                title={t('remote.choose-private-key')}
+                onClick={() => void handleIdentityFileBrowse()}
+              >
+                <FileKey />
+              </Button>
+            </div>
             <div className="mt-1 text-xs leading-4 text-muted-foreground">{t('remote.private-key-help')}</div>
           </div>
 

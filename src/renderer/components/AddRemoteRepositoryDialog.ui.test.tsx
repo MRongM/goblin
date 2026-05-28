@@ -1,0 +1,64 @@
+/* @vitest-environment jsdom */
+import { act } from 'react'
+import { createRoot, type Root } from 'react-dom/client'
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
+import { AddRemoteRepositoryDialog } from '#/renderer/components/AddRemoteRepositoryDialog.tsx'
+
+const rpcMocks = vi.hoisted(() => ({
+  identityFileDialog: vi.fn(),
+  listSshHosts: vi.fn(),
+  resolveTarget: vi.fn(),
+  testRepository: vi.fn(),
+}))
+
+vi.mock('#/renderer/rpc.ts', () => ({
+  rpc: {
+    remote: {
+      identityFileDialog: { mutate: rpcMocks.identityFileDialog },
+      listSshHosts: { query: rpcMocks.listSshHosts },
+      resolveTarget: { query: rpcMocks.resolveTarget },
+      testRepository: { query: rpcMocks.testRepository },
+    },
+  },
+}))
+
+vi.mock('#/renderer/stores/i18n.ts', () => ({
+  useT: () => (key: string) => key,
+}))
+
+describe('AddRemoteRepositoryDialog UI', () => {
+  let host: HTMLDivElement
+  let root: Root
+
+  beforeEach(() => {
+    ;(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+    host = document.createElement('div')
+    document.body.appendChild(host)
+    root = createRoot(host)
+    rpcMocks.identityFileDialog.mockResolvedValue('/Users/deploy/.ssh/id_ed25519')
+    rpcMocks.listSshHosts.mockResolvedValue([])
+  })
+
+  afterEach(() => {
+    act(() => root.unmount())
+    host.remove()
+    document.body.innerHTML = ''
+  })
+
+  test('fills the private key field from the native identity file picker', async () => {
+    await act(async () => {
+      root.render(<AddRemoteRepositoryDialog open={true} onClose={vi.fn()} onAddRemote={vi.fn()} />)
+    })
+
+    const chooseButton = document.querySelector<HTMLButtonElement>('button[aria-label="remote.choose-private-key"]')
+    expect(chooseButton).not.toBeNull()
+
+    await act(async () => {
+      chooseButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+
+    const input = document.querySelector<HTMLInputElement>('#remote-private-key')
+    expect(rpcMocks.identityFileDialog).toHaveBeenCalledTimes(1)
+    expect(input?.value).toBe('/Users/deploy/.ssh/id_ed25519')
+  })
+})

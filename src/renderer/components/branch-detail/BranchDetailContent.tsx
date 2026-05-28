@@ -72,7 +72,7 @@ export function BranchDetailContent({ repo, detail, detailId, contentId, layout 
         />
       )}
       {repo.ui.detailTab === 'terminal' && branch.worktreePath && (
-        <BranchTerminalTab detailId={detailId} repoId={repo.id} branch={branch} />
+        <BranchTerminalTab detailId={detailId} repo={repo} branch={branch} />
       )}
     </div>
   )
@@ -221,17 +221,30 @@ function BranchCommitsTab({
 
 function BranchTerminalTab({
   detailId,
-  repoId,
+  repo,
   branch,
 }: {
   detailId: string
-  repoId: string
+  repo: RepoState
   branch: BranchDetailBranch
 }) {
   if (!branch.worktreePath) return null
+  const base =
+    repo.kind === 'remote'
+      ? repo.remoteTarget
+        ? {
+            kind: 'remote' as const,
+            repoId: repo.id,
+            target: repo.remoteTarget,
+            branch: branch.name,
+            worktreePath: branch.worktreePath,
+          }
+        : null
+      : { kind: 'local' as const, repoRoot: repo.id, branch: branch.name, worktreePath: branch.worktreePath }
+  if (!base) return null
   return (
     <BranchTabPanel detailId={detailId} tabId="terminal">
-      <TerminalSlot repoRoot={repoId} branch={branch.name} worktreePath={branch.worktreePath} />
+      <TerminalSlot base={base} />
     </BranchTabPanel>
   )
 }

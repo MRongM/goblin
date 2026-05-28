@@ -230,9 +230,27 @@ export interface AppRpcHandlers {
   }
   remote: {
     listSshHosts: () => Promise<SshConfigHost[]>
+    identityFileDialog: () => Promise<string | null>
     resolveTarget: (input: RemoteConnectionInput) => Promise<ResolvedRemoteTarget>
     testRepository: (input: { target: RemoteRepoTarget }) => Promise<RemoteDiagnosticsResult>
     snapshot: (input: { target: RemoteRepoTarget }) => Promise<RepoSnapshot | null>
+    fetch: (input: { target: RemoteRepoTarget }) => Promise<ExecResult>
+    status: (input: { target: RemoteRepoTarget }) => Promise<WorktreeStatus[]>
+    log: (input: { target: RemoteRepoTarget; branch: string; count?: number; skip?: number }) => Promise<LogEntry[]>
+    createWorktree: (input: {
+      target: RemoteRepoTarget
+      worktreePath: string
+      newBranch: string
+      baseBranch: string
+    }) => Promise<ExecResult>
+    openEditor: (input: { target: RemoteRepoTarget; path: string }) => Promise<ExecResult>
+    removeWorktree: (input: {
+      target: RemoteRepoTarget
+      branch: string
+      worktreePath: string
+      alsoDeleteBranch: boolean
+      forceDeleteBranch?: boolean
+    }) => Promise<ExecResult>
     home: (input: { target: RemoteRepoTarget }) => Promise<string>
     listDirectory: (input: { target: RemoteRepoTarget; path: string }) => Promise<RemoteDirectoryListing>
   }
@@ -297,6 +315,10 @@ const RemoteConnectionInputSchema = v.union([
     identityFile: v.optional(v.string()),
   }),
 ])
+const RemoteAbsolutePath = v.pipe(
+  v.string(),
+  v.check((value) => value.startsWith('/') && !value.includes('\0'), 'Invalid remote path'),
+)
 
 export function createAppRouter(handlers: AppRpcHandlers) {
   return t.router({
@@ -385,11 +407,48 @@ export function createAppRouter(handlers: AppRpcHandlers) {
     }),
     remote: t.router({
       listSshHosts: p.input(EmptyInput).query(() => handlers.remote.listSshHosts()),
+      identityFileDialog: p.input(EmptyInput).mutation(() => handlers.remote.identityFileDialog()),
       resolveTarget: p.input(RemoteConnectionInputSchema).query(({ input }) => handlers.remote.resolveTarget(input)),
       testRepository: p
         .input(v.object({ target: RemoteTargetSchema }))
         .query(({ input }) => handlers.remote.testRepository(input)),
       snapshot: p.input(v.object({ target: RemoteTargetSchema })).query(({ input }) => handlers.remote.snapshot(input)),
+      fetch: p.input(v.object({ target: RemoteTargetSchema })).mutation(({ input }) => handlers.remote.fetch(input)),
+      status: p.input(v.object({ target: RemoteTargetSchema })).query(({ input }) => handlers.remote.status(input)),
+      log: p
+        .input(
+          v.object({
+            target: RemoteTargetSchema,
+            branch: v.string(),
+            count: v.optional(FiniteNumber),
+            skip: v.optional(FiniteNumber),
+          }),
+        )
+        .query(({ input }) => handlers.remote.log(input)),
+      createWorktree: p
+        .input(
+          v.object({
+            target: RemoteTargetSchema,
+            worktreePath: RemoteAbsolutePath,
+            newBranch: v.string(),
+            baseBranch: v.string(),
+          }),
+        )
+        .mutation(({ input }) => handlers.remote.createWorktree(input)),
+      openEditor: p
+        .input(v.object({ target: RemoteTargetSchema, path: RemoteAbsolutePath }))
+        .mutation(({ input }) => handlers.remote.openEditor(input)),
+      removeWorktree: p
+        .input(
+          v.object({
+            target: RemoteTargetSchema,
+            branch: v.string(),
+            worktreePath: RemoteAbsolutePath,
+            alsoDeleteBranch: v.boolean(),
+            forceDeleteBranch: v.optional(v.boolean()),
+          }),
+        )
+        .mutation(({ input }) => handlers.remote.removeWorktree(input)),
       home: p.input(v.object({ target: RemoteTargetSchema })).query(({ input }) => handlers.remote.home(input)),
       listDirectory: p
         .input(v.object({ target: RemoteTargetSchema, path: v.string() }))

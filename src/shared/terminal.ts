@@ -1,4 +1,7 @@
-export interface TerminalOpenInput {
+import type { RemoteRepoTarget } from '#/shared/remote-repo.ts'
+
+export interface LocalTerminalOpenInput {
+  kind?: 'local'
   repoRoot: string
   branch: string
   worktreePath: string
@@ -7,6 +10,17 @@ export interface TerminalOpenInput {
   rows: number
 }
 
+export interface RemoteTerminalOpenInput {
+  kind: 'remote'
+  target: RemoteRepoTarget
+  branch: string
+  worktreePath: string
+  terminalId: string
+  cols: number
+  rows: number
+}
+
+export type TerminalOpenInput = LocalTerminalOpenInput | RemoteTerminalOpenInput
 export type TerminalRestartInput = TerminalOpenInput
 
 export type TerminalOpenResult =
@@ -35,10 +49,9 @@ export interface TerminalSessionInput {
   sessionId: string
 }
 
-export interface TerminalPruneRepoInput {
-  repoRoot: string
-  worktreePaths: string[]
-}
+export type TerminalPruneRepoInput =
+  | { kind?: 'local'; repoRoot: string; worktreePaths: string[] }
+  | { kind: 'remote'; repoId: string; worktreePaths: string[] }
 
 export type TerminalMutationResult = boolean
 

@@ -1,6 +1,7 @@
 import type { RepoBranchActionKind } from '#/renderer/stores/repos/branch-action-types.ts'
 import { resourceBusy } from '#/renderer/stores/repos/resources.ts'
 import type { RepoState } from '#/renderer/stores/repos/types.ts'
+import type { BranchInfo } from '#/renderer/types.ts'
 
 export type BranchActionItemId =
   | 'copyPatch'
@@ -18,7 +19,13 @@ export function isBranchActionBlocked(repo: RepoState): boolean {
 }
 
 export function repoBranchActionsAvailable(repo: RepoState): boolean {
-  return repo.kind !== 'remote'
+  return repo.kind !== 'remote' || !!repo.remoteTarget
+}
+
+export function branchActionsAvailable(repo: RepoState, branch: BranchInfo | null | undefined): boolean {
+  if (!branch || !repoBranchActionsAvailable(repo)) return false
+  if (repo.kind !== 'remote') return true
+  return !!branch.worktreePath
 }
 
 export function branchActionItemIdFromKind(kind: RepoBranchActionKind | null): BranchActionItemId | null {

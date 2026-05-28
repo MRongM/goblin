@@ -249,6 +249,17 @@ export class ManagedTerminalSession {
   }
 
   private terminalOpenInput(term: XTermTerminal): TerminalOpenInput {
+    if (this.descriptor.kind === 'remote') {
+      return {
+        kind: 'remote',
+        target: this.descriptor.target,
+        branch: this.descriptor.branch,
+        worktreePath: this.descriptor.worktreePath,
+        terminalId: this.descriptor.terminalId,
+        cols: term.cols,
+        rows: term.rows,
+      }
+    }
     return {
       repoRoot: this.descriptor.repoRoot,
       branch: this.descriptor.branch,
@@ -260,14 +271,7 @@ export class ManagedTerminalSession {
   }
 
   private terminalRestartInput(term: XTermTerminal): TerminalRestartInput {
-    return {
-      repoRoot: this.descriptor.repoRoot,
-      branch: this.descriptor.branch,
-      worktreePath: this.descriptor.worktreePath,
-      terminalId: this.descriptor.terminalId,
-      cols: term.cols,
-      rows: term.rows,
-    }
+    return this.terminalOpenInput(term)
   }
 
   private async replayActiveView(

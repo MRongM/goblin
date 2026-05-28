@@ -235,13 +235,23 @@ const terminalCalls = {
 const invokeRpc = vi.fn<Window['goblin']['invokeRpc']>()
 
 const descriptor = {
-  key: '/repo\0/worktree',
-  groupKey: '/repo\0/worktree',
+  key: 'local\0/repo\0/worktree\0terminal-1',
+  groupKey: 'local\0/repo\0/worktree',
   terminalId: 'terminal-1',
   index: 1,
+  kind: 'local' as const,
   repoRoot: '/repo',
   branch: 'feature',
   worktreePath: '/worktree',
+}
+const REMOTE_TARGET = {
+  id: 'ssh://deploy@prod:22/srv/goblin',
+  alias: null,
+  host: 'prod',
+  user: 'deploy',
+  port: 22,
+  remotePath: '/srv/goblin',
+  displayName: 'prod:goblin',
 }
 
 beforeEach(() => {
@@ -320,6 +330,36 @@ describe('ManagedTerminalSession', () => {
     expect(xtermMocks.terminals[0]!.options.minimumContrastRatio).toBe(4.5)
     expect(terminalCalls.restart).not.toHaveBeenCalled()
     expect(session.snapshot().phase).toBe('open')
+  })
+
+  test('opens remote terminal sessions with remote target payload', async () => {
+    const remoteDescriptor = {
+      key: 'remote\0ssh://deploy@prod:22/srv/goblin\0/srv/goblin-feature\0terminal-1',
+      groupKey: 'remote\0ssh://deploy@prod:22/srv/goblin\0/srv/goblin-feature',
+      terminalId: 'terminal-1',
+      index: 1,
+      kind: 'remote' as const,
+      repoId: 'ssh://deploy@prod:22/srv/goblin',
+      target: REMOTE_TARGET,
+      branch: 'feature',
+      worktreePath: '/srv/goblin-feature',
+    }
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const session = new ManagedTerminalSession(remoteDescriptor, vi.fn())
+
+    session.attach(host)
+
+    await flushUntil(() => terminalCalls.open.mock.calls.length === 1)
+    expect(terminalCalls.open).toHaveBeenCalledWith({
+      kind: 'remote',
+      target: remoteDescriptor.target,
+      branch: 'feature',
+      worktreePath: '/srv/goblin-feature',
+      terminalId: 'terminal-1',
+      cols: 100,
+      rows: 30,
+    })
   })
 
   test('loads terminal addons and exposes search and serialization', async () => {

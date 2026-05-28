@@ -10,6 +10,7 @@ import { execa } from 'execa'
 import { existsSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { app } from 'electron'
+import type { RemoteRepoTarget } from '#/shared/remote-repo.ts'
 
 const OPEN_TIMEOUT_MS = 10_000
 
@@ -62,6 +63,42 @@ export function openByAppCli(appName: string, cliName: string, dir: string): Pro
   }).then((result) => {
     if (result.failed) {
       const message = result.stderr?.trim() || result.shortMessage || result.message || 'error.editor-not-installed'
+      return { ok: false, message }
+    }
+    return { ok: true, message: dir }
+  })
+}
+
+function isUsableRemoteDirectory(p: string): boolean {
+  return p.length > 0 && p.length <= 4096 && p.startsWith('/') && !p.includes('\0')
+}
+
+export function remoteEditorAuthority(target: RemoteRepoTarget): string {
+  return target.alias ?? `${target.user}@${target.host}`
+}
+
+export function remoteEditorArgs(target: RemoteRepoTarget, dir: string): string[] {
+  return ['--remote', `ssh-remote+${remoteEditorAuthority(target)}`, dir]
+}
+
+export function openRemoteByAppCli(
+  appName: string,
+  cliName: string,
+  target: RemoteRepoTarget,
+  dir: string,
+): Promise<{ ok: boolean; message: string }> {
+  if (!isUsableRemoteDirectory(dir)) return Promise.resolve({ ok: false, message: 'error.invalid-path' })
+
+  const cli = resolveAppCli(appName, cliName)
+  if (!cli) return Promise.resolve({ ok: false, message: 'error.editor-not-installed' })
+
+  return execa(cli, remoteEditorArgs(target, dir), {
+    timeout: OPEN_TIMEOUT_MS,
+    forceKillAfterDelay: 500,
+    reject: false,
+  }).then((result) => {
+    if (result.failed) {
+      const message = result.stderr?.trim() || result.shortMessage || result.message || 'error.remote-editor-unavailable'
       return { ok: false, message }
     }
     return { ok: true, message: dir }

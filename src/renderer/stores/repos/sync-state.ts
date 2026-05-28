@@ -2,9 +2,8 @@ import { repoOperation, repoOperationBusy } from '#/renderer/stores/repos/runtim
 import { resourceBusy } from '#/renderer/stores/repos/resources.ts'
 import type { RepoState } from '#/renderer/stores/repos/types.ts'
 
-export function canStartRemoteFetch(repo: RepoState | undefined): repo is RepoState {
+export function canStartManualFetch(repo: RepoState | undefined): repo is RepoState {
   if (!repo) return false
-  if (repo.kind === 'remote') return false
   // Network writes must not overlap with core repo reads/writes that mutate
   // branch/status truth. Log and PR refreshes are metadata reads, so they can
   // remain visible without blocking manual sync/pull/push.
@@ -18,6 +17,10 @@ export function canStartRemoteFetch(repo: RepoState | undefined): repo is RepoSt
     !repoOperationBusy(repo.id, 'snapshot') &&
     !repoOperationBusy(repo.id, 'status')
   )
+}
+
+export function canStartRemoteFetch(repo: RepoState | undefined): repo is RepoState {
+  return !!repo && repo.kind !== 'remote' && canStartManualFetch(repo)
 }
 
 export function isRemoteFetchDue(

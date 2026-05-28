@@ -18,6 +18,11 @@ const MAX_SESSION_BUFFER_CHARS = 16 * 1024 * 1024
 const MAX_TERMINAL_WRITE_CHARS = 1024 * 1024
 const SESSION_ID_RE = /^[A-Za-z0-9_-]{16,64}$/
 
+export interface TerminalCommandSpec {
+  command: string
+  args: string[]
+}
+
 export interface TerminalOpenSessionInput {
   ownerWebContentsId: number
   scope: string
@@ -26,6 +31,7 @@ export interface TerminalOpenSessionInput {
   cols: number
   rows: number
   forceNew?: boolean
+  command?: TerminalCommandSpec
 }
 
 interface TerminalSession {
@@ -91,10 +97,12 @@ export function openTerminalSession(input: TerminalOpenSessionInput): TerminalOp
   sessionIdByOwnerKey.set(ownerKey, id)
 
   try {
-    const shell = process.env.SHELL || (process.platform === 'win32' ? process.env.COMSPEC || 'cmd.exe' : '/bin/zsh')
-    const args = process.platform === 'win32' ? [] : ['-l']
+    const command = input.command ?? {
+      command: process.env.SHELL || (process.platform === 'win32' ? process.env.COMSPEC || 'cmd.exe' : '/bin/zsh'),
+      args: process.platform === 'win32' ? [] : ['-l'],
+    }
     const env = { ...process.env, TERM: 'xterm-256color' }
-    session.pty = pty.spawn(shell, args, {
+    session.pty = pty.spawn(command.command, command.args, {
       name: 'xterm-256color',
       cols: size.cols,
       rows: size.rows,
@@ -299,6 +307,7 @@ function sessionOwnerKey(ownerWebContentsId: number, key: string): string {
 
 function terminalPruneKey(key: string): string {
   const parts = key.split('\0')
+  if (parts[0] === 'remote' && parts.length >= 3) return `${parts[0]}\0${parts[1]}\0${parts[2]}`
   return parts.length >= 2 ? `${parts[0]}\0${parts[1]}` : key
 }
 

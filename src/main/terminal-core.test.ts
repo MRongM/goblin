@@ -5,6 +5,7 @@ import {
   closeTerminalKey,
   closeTerminalOwner,
   openTerminalSession,
+  pruneTerminalScope,
   resizeTerminalSession,
   writeTerminalSession,
 } from '#/main/terminal-core.ts'
@@ -188,6 +189,40 @@ describe('terminal core sessions', () => {
     expect(mockPtys[0]!.resize).toHaveBeenCalledTimes(1)
     expect(mockPtys[0]!.resize).toHaveBeenCalledWith(81, 24)
     expect(mockPtys[0]!.kill).toHaveBeenCalledTimes(1)
+  })
+
+  test('prunes remote sessions by repository and worktree key', () => {
+    const kept = openTerminalSession({
+      ownerWebContentsId: 1,
+      scope: 'ssh://deploy@prod:22/srv/goblin',
+      key: 'remote\0ssh://deploy@prod:22/srv/goblin\0/srv/goblin-feature\0terminal-1',
+      cwd: '/tmp',
+      cols: 80,
+      rows: 24,
+    })
+    const stale = openTerminalSession({
+      ownerWebContentsId: 1,
+      scope: 'ssh://deploy@prod:22/srv/goblin',
+      key: 'remote\0ssh://deploy@prod:22/srv/goblin\0/srv/goblin-stale\0terminal-1',
+      cwd: '/tmp',
+      cols: 80,
+      rows: 24,
+    })
+    expect(kept.ok).toBe(true)
+    expect(stale.ok).toBe(true)
+    if (!kept.ok || !stale.ok) return
+
+    pruneTerminalScope(
+      1,
+      'ssh://deploy@prod:22/srv/goblin',
+      new Set(['remote\0ssh://deploy@prod:22/srv/goblin\0/srv/goblin-feature']),
+    )
+
+    expect(writeTerminalSession(1, kept.sessionId, 'kept')).toBe(true)
+    expect(writeTerminalSession(1, stale.sessionId, 'stale')).toBe(false)
+    expect(mockPtys[0]!.write).toHaveBeenCalledWith('kept')
+    expect(mockPtys[0]!.kill).not.toHaveBeenCalled()
+    expect(mockPtys[1]!.kill).toHaveBeenCalledTimes(1)
   })
 
   test('reopens cleanly after spawn failures', () => {

@@ -17,7 +17,7 @@ import { useAsyncPending } from '#/renderer/hooks/useAsyncPending.ts'
 export type { BranchActionItemId } from '#/renderer/hooks/branch-action-state.ts'
 
 const SILENT_SUCCESS_OPS = new Set<BranchActionItemId>(['github', 'terminal', 'editor'])
-type LocalBranchActionItemId = 'copyPatch' | 'github' | 'terminal' | 'editor'
+type UiOnlyBranchActionItemId = 'copyPatch' | 'github' | 'terminal' | 'editor'
 
 interface RemoveConfirm {
   branch: string
@@ -34,7 +34,7 @@ export function useBranchActions(repo: RepoState, branch: BranchInfo) {
     pending: pendingLocalAction,
     hasPending: hasPendingLocalAction,
     run: runPendingLocalAction,
-  } = useAsyncPending<LocalBranchActionItemId>()
+  } = useAsyncPending<UiOnlyBranchActionItemId>()
   const [pushConfirm, setPushConfirm] = useState<string | null>(null)
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
   const [forceDeleteConfirm, setForceDeleteConfirm] = useState<string | null>(null)
@@ -43,7 +43,7 @@ export function useBranchActions(repo: RepoState, branch: BranchInfo) {
   const [removeAlsoDeletes, setRemoveAlsoDeletes] = useState(true)
 
   function runUiAction(
-    op: LocalBranchActionItemId,
+    op: UiOnlyBranchActionItemId,
     fn: () => Promise<ExecResult>,
     options?: { handleResult?: (result: ExecResult) => boolean },
   ) {
@@ -119,7 +119,13 @@ export function useBranchActions(repo: RepoState, branch: BranchInfo) {
   function openEditor() {
     if (!branch.worktreePath) return
     const worktreePath = branch.worktreePath
-    return runUiAction('editor', () => rpc.repo.openEditor.mutate({ path: worktreePath }))
+    return runUiAction('editor', () =>
+      repo.kind === 'remote'
+        ? repo.remoteTarget
+          ? rpc.remote.openEditor.mutate({ target: repo.remoteTarget, path: worktreePath })
+          : Promise.resolve({ ok: false, message: 'error.remote-unavailable' })
+        : rpc.repo.openEditor.mutate({ path: worktreePath }),
+    )
   }
 
   function openGitHub() {
@@ -184,10 +190,11 @@ export function useBranchActions(repo: RepoState, branch: BranchInfo) {
   const checkedOutInAnotherWorktree = !!branch.worktreePath && !isCurrent
   const canRemoveWorktree = checkedOutInAnotherWorktree && !branch.worktreeIsPrimary
   const isProtected = PROTECTED_BRANCHES.has(branch.name)
-  const isRegularBranch = !isCurrent && !branch.worktreePath && !isProtected
+  const isRegularBranch = repo.kind !== 'remote' && !isCurrent && !branch.worktreePath && !isProtected
   const changedStatus = branch.worktreePath ? repo.data.status.find((wt) => wt.path === branch.worktreePath) : null
-  const canCopyPatch = !!branch.worktreePath && (changedStatus?.entries.length ?? 0) > 0
+  const canCopyPatch = repo.kind !== 'remote' && !!branch.worktreePath && (changedStatus?.entries.length ?? 0) > 0
   const removeConfirmProtected = removeConfirm ? PROTECTED_BRANCHES.has(removeConfirm.branch) : false
+  const remoteReady = repo.kind === 'remote' && !!repo.remoteTarget
 
   const dialogs = (
     <>
@@ -343,12 +350,15 @@ export function useBranchActions(repo: RepoState, branch: BranchInfo) {
     capabilities: {
       isCurrent,
       checkedOutInAnotherWorktree,
-      canRemoveWorktree,
+      canCheckout: repo.kind !== 'remote' && !isCurrent && !checkedOutInAnotherWorktree,
+      canRemoveWorktree: repo.kind === 'remote' ? remoteReady && canRemoveWorktree : canRemoveWorktree,
       isRegularBranch,
       canCopyPatch,
-      canPull: !!branch.tracking,
-      canOpenTerminal: !!branch.worktreePath,
-      canOpenEditor: !!branch.worktreePath,
+      canPull: repo.kind !== 'remote' && !!branch.tracking,
+      canPush: repo.kind !== 'remote',
+      canOpenTerminal: repo.kind !== 'remote' && !!branch.worktreePath,
+      canOpenEditor: repo.kind === 'remote' ? remoteReady && !!branch.worktreePath : !!branch.worktreePath,
+      canOpenGitHub: repo.kind !== 'remote',
     },
     actions: {
       copyPatch,

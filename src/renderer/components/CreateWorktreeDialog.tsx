@@ -25,7 +25,13 @@ import { Button } from '#/renderer/components/ui/button.tsx'
 import type { RepoState } from '#/renderer/stores/repos/types.ts'
 import { resourceBusy } from '#/renderer/stores/repos/resources.ts'
 import { useT } from '#/renderer/stores/i18n.ts'
-import { defaultWorktreePath, tildify, untildify } from '#/renderer/lib/paths.ts'
+import {
+  defaultRemoteWorktreePath,
+  defaultWorktreePath,
+  isRemoteAbsolutePath,
+  tildify,
+  untildify,
+} from '#/renderer/lib/paths.ts'
 import { validateBranchName } from '#/shared/refnames.ts'
 
 export interface CreateWorktreeRequest {
@@ -63,8 +69,11 @@ export function CreateWorktreeDialog({ open, repo, onClose, onCreate }: Props) {
   }, [open])
 
   const branchTrimmed = branch.trim()
-  const pathTrimmed = untildify(worktreePath.trim())
-  const defaultPath = defaultWorktreePath(repo.id, branchTrimmed)
+  const pathTrimmed = repo.kind === 'remote' ? worktreePath.trim() : untildify(worktreePath.trim())
+  const defaultPath =
+    repo.kind === 'remote' && repo.remoteTarget
+      ? defaultRemoteWorktreePath(repo.remoteTarget.remotePath, branchTrimmed)
+      : defaultWorktreePath(repo.id, branchTrimmed)
   const branchValidation = branchTrimmed ? validateBranchName(branchTrimmed) : { ok: true }
   const branchExists = branchTrimmed ? repo.data.branches.some((b) => b.name === branchTrimmed) : false
   const branchError = branchTrimmed
@@ -78,10 +87,11 @@ export function CreateWorktreeDialog({ open, repo, onClose, onCreate }: Props) {
   // provided, else the auto-derived sibling default. Shown as a
   // greyed-out preview so users know what they'll get without typing.
   const effectivePath = pathTrimmed || defaultPath
-  const displayDefaultPath = tildify(defaultPath)
-  const displayEffectivePath = tildify(effectivePath)
+  const displayDefaultPath = repo.kind === 'remote' ? defaultPath : tildify(defaultPath)
+  const displayEffectivePath = repo.kind === 'remote' ? effectivePath : tildify(effectivePath)
   const branchActionBusy = resourceBusy(repo.resources.branchAction)
-  const canSubmit = branchTrimmed.length > 0 && !branchError && effectivePath.length > 0 && base.length > 0
+  const pathValid = repo.kind === 'remote' ? isRemoteAbsolutePath(effectivePath) : effectivePath.length > 0
+  const canSubmit = branchTrimmed.length > 0 && !branchError && pathValid && base.length > 0
 
   function handleSubmit() {
     if (!canSubmit || branchActionBusy) return

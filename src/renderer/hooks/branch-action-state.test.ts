@@ -1,11 +1,13 @@
 import { describe, expect, test } from 'vitest'
 import {
   branchActionItemIdFromOperation,
+  branchActionsAvailable,
   isBranchActionBlocked,
   repoBranchActionsAvailable,
 } from '#/renderer/hooks/branch-action-state.ts'
 import { emptyRepo } from '#/renderer/stores/repos/helpers.ts'
 import { startBranchActionResource } from '#/renderer/stores/repos/resources.ts'
+import { createBranch } from '#/renderer/stores/repos/test-utils.ts'
 
 describe('isBranchActionBlocked', () => {
   test('returns false while branch actions are idle', () => {
@@ -29,7 +31,7 @@ describe('isBranchActionBlocked', () => {
 })
 
 describe('repoBranchActionsAvailable', () => {
-  test('keeps local branch actions available and hides them for remote repos', () => {
+  test('keeps local branch actions available and enables remote repos with targets', () => {
     const local = emptyRepo('/tmp/gbl-branch-action-local', 'repo')
     const remote = emptyRepo('ssh://deploy@prod:22/srv/goblin', 'prod:goblin', {
       kind: 'remote',
@@ -43,9 +45,31 @@ describe('repoBranchActionsAvailable', () => {
         displayName: 'prod:goblin',
       },
     })
+    const remoteMissingTarget = emptyRepo('ssh://deploy@prod:22/srv/missing', 'prod:missing', { kind: 'remote' })
 
     expect(repoBranchActionsAvailable(local)).toBe(true)
-    expect(repoBranchActionsAvailable(remote)).toBe(false)
+    expect(repoBranchActionsAvailable(remote)).toBe(true)
+    expect(repoBranchActionsAvailable(remoteMissingTarget)).toBe(false)
+  })
+
+  test('uses branch-level availability for remote worktree rows', () => {
+    const remote = emptyRepo('ssh://deploy@prod:22/srv/goblin', 'prod:goblin', {
+      kind: 'remote',
+      remoteTarget: {
+        id: 'ssh://deploy@prod:22/srv/goblin',
+        alias: 'prod',
+        host: 'prod',
+        user: 'deploy',
+        port: 22,
+        remotePath: '/srv/goblin',
+        displayName: 'prod:goblin',
+      },
+    })
+
+    expect(branchActionsAvailable(remote, createBranch('feature/x'))).toBe(false)
+    expect(branchActionsAvailable(remote, createBranch('feature/x', { worktreePath: '/srv/goblin-feature-x' }))).toBe(
+      true,
+    )
   })
 })
 

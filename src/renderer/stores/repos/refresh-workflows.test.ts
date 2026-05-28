@@ -7,10 +7,19 @@ import {
 } from '#/renderer/stores/repos/refresh-workflows.ts'
 import type { ReposGet } from '#/renderer/stores/repos/types.ts'
 
-function callsGet() {
+function callsGet(options: { kind?: 'local' | 'remote'; token?: number } = {}) {
   const calls: string[] = []
+  const kind = options.kind ?? 'local'
+  const token = options.token ?? 1
   const get: ReposGet = () =>
     ({
+      repos: {
+        '/repo': {
+          kind,
+          instanceToken: token,
+          ui: { selectedBranch: 'main' },
+        },
+      },
       refreshSnapshot: (id: string, options?: { token?: number }) => {
         calls.push(`snapshot:${id}:${options?.token ?? ''}`)
         return Promise.resolve()
@@ -31,7 +40,7 @@ function callsGet() {
         calls.push(`prs:${id}:${branches?.join(',') ?? ''}:${options?.mode ?? ''}:${options?.token ?? ''}`)
         return Promise.resolve()
       },
-    }) as ReturnType<ReposGet>
+    }) as unknown as ReturnType<ReposGet>
   return { calls, get }
 }
 
@@ -45,7 +54,7 @@ describe('repo refresh workflows', () => {
   })
 
   test('runs tab-specific refresh work', () => {
-    const { calls, get } = callsGet()
+    const { calls, get } = callsGet({ token: 1 })
 
     runDetailTabChangedWorkflow(get, { id: '/repo', token: 1, tab: 'commits', selectedBranch: 'main' })
     runDetailTabChangedWorkflow(get, { id: '/repo', token: 1, tab: 'changes', selectedBranch: 'main' })
@@ -57,7 +66,7 @@ describe('repo refresh workflows', () => {
   })
 
   test('runs branch selection refresh work for visible detail data', () => {
-    const { calls, get } = callsGet()
+    const { calls, get } = callsGet({ token: 3 })
 
     runSelectedBranchChangedWorkflow(get, { id: '/repo', token: 3, branch: 'feature/a', tab: 'commits' })
 
@@ -65,7 +74,7 @@ describe('repo refresh workflows', () => {
   })
 
   test('skips branch selection log refresh outside the commits tab', () => {
-    const { calls, get } = callsGet()
+    const { calls, get } = callsGet({ token: 3 })
 
     runSelectedBranchChangedWorkflow(get, { id: '/repo', token: 3, branch: 'feature/a', tab: 'status' })
 
@@ -73,7 +82,7 @@ describe('repo refresh workflows', () => {
   })
 
   test('runs branch view mode refresh work only for changed visible resources', () => {
-    const { calls, get } = callsGet()
+    const { calls, get } = callsGet({ token: 4 })
 
     runBranchViewModeChangedWorkflow(get, {
       id: '/repo',
@@ -98,5 +107,21 @@ describe('repo refresh workflows', () => {
     })
 
     expect(calls).toEqual([])
+  })
+
+  test('skips pull request refresh work for remote repos', () => {
+    const { calls, get } = callsGet({ kind: 'remote', token: 5 })
+
+    runDetailTabChangedWorkflow(get, { id: '/repo', token: 5, tab: 'status', selectedBranch: 'main' })
+    runSelectedBranchChangedWorkflow(get, { id: '/repo', token: 5, branch: 'feature/a', tab: 'commits' })
+    runBranchViewModeChangedWorkflow(get, {
+      id: '/repo',
+      token: 5,
+      selectedForLog: 'feature/a',
+      selectedForPullRequest: 'feature/a',
+      shouldRefreshLog: true,
+    })
+
+    expect(calls).toEqual(['log:/repo:feature/a:5', 'log:/repo:feature/a:5'])
   })
 })

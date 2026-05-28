@@ -9,9 +9,10 @@
 // 4. Add i18n keys for the settings picker and dependencies overlay
 
 import type { EditorPref, ResolvedEditorApp } from '#/shared/rpc.ts'
-import { isVSCodeInstalled, openInVSCode } from '#/main/system/vscode.ts'
-import { isCursorInstalled, openInCursor } from '#/main/system/cursor.ts'
-import { isWindsurfInstalled, openInWindsurf } from '#/main/system/windsurf.ts'
+import type { RemoteRepoTarget } from '#/shared/remote-repo.ts'
+import { isVSCodeInstalled, openInVSCode, openRemoteInVSCode } from '#/main/system/vscode.ts'
+import { isCursorInstalled, openInCursor, openRemoteInCursor } from '#/main/system/cursor.ts'
+import { isWindsurfInstalled, openInWindsurf, openRemoteInWindsurf } from '#/main/system/windsurf.ts'
 
 export interface EditorBackend {
   /** Whether this editor is available on the current system.
@@ -21,13 +22,15 @@ export interface EditorBackend {
   isInstalled: () => boolean
   /** Open a directory in this editor. */
   open: (path: string) => Promise<{ ok: boolean; message: string }>
+  /** Open a remote SSH directory in this editor when supported. */
+  openRemote?: (target: RemoteRepoTarget, path: string) => Promise<{ ok: boolean; message: string }>
 }
 
 /** Concrete editor pref values (excludes 'auto'). */
 const backends: Record<ResolvedEditorApp, EditorBackend> = {
-  vscode: { isInstalled: isVSCodeInstalled, open: openInVSCode },
-  cursor: { isInstalled: isCursorInstalled, open: openInCursor },
-  windsurf: { isInstalled: isWindsurfInstalled, open: openInWindsurf },
+  vscode: { isInstalled: isVSCodeInstalled, open: openInVSCode, openRemote: openRemoteInVSCode },
+  cursor: { isInstalled: isCursorInstalled, open: openInCursor, openRemote: openRemoteInCursor },
+  windsurf: { isInstalled: isWindsurfInstalled, open: openInWindsurf, openRemote: openRemoteInWindsurf },
 }
 
 /** Auto-detection priority — first installed editor wins. */
@@ -53,6 +56,17 @@ export function openInPreferredEditor(
 ): Promise<{ ok: boolean; message: string }> | null {
   const resolved = resolveEditorApp(pref)
   return resolved ? backends[resolved].open(path) : null
+}
+
+export function openRemoteInPreferredEditor(
+  target: RemoteRepoTarget,
+  path: string,
+  pref: EditorPref,
+): Promise<{ ok: boolean; message: string }> | null {
+  const resolved = resolveEditorApp(pref)
+  if (!resolved) return null
+  const opener = backends[resolved].openRemote
+  return opener ? opener(target, path) : Promise.resolve({ ok: false, message: 'error.remote-editor-unavailable' })
 }
 
 export function getResolvedEditorApp(pref: EditorPref): ResolvedEditorApp | null {

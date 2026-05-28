@@ -13,7 +13,7 @@ import { cn } from '#/renderer/lib/cn.ts'
 import { repoWorkspaceBehavior } from '#/renderer/lib/workspace-layout.ts'
 import { terminalSessionGroupKey } from '#/renderer/components/terminal/terminal-session-utils.ts'
 import { useTerminalSessionContext } from '#/renderer/components/terminal/terminal-session-context.ts'
-import { repoBranchActionsAvailable } from '#/renderer/hooks/branch-action-state.ts'
+import { branchActionsAvailable } from '#/renderer/hooks/branch-action-state.ts'
 import type { SelectedBranchDetailPresentation } from '#/renderer/components/branch-detail/model.ts'
 
 interface Props {
@@ -36,8 +36,13 @@ export function BranchDetailToolbar({ repo, detail, detailId, contentId, collaps
   const terminalContext = useTerminalSessionContext()
   const behavior = repoWorkspaceBehavior(layout, collapsed, focusMode)
   const tabs = visibleDetailTabs(!!detail.branch?.worktreePath)
+  const terminalScope = detail.branch?.worktreePath
+    ? repo.kind === 'remote'
+      ? { kind: 'remote' as const, repoId: repo.id, worktreePath: detail.branch.worktreePath }
+      : { kind: 'local' as const, repoRoot: repo.id, worktreePath: detail.branch.worktreePath }
+    : null
   const terminalCount = detail.branch?.worktreePath
-    ? terminalContext.sessionSummaries(terminalSessionGroupKey(repo.id, detail.branch.worktreePath)).length
+    ? terminalContext.sessionSummaries(terminalSessionGroupKey(terminalScope!)).length
     : 0
 
   // No selected branch means there is no tab/action target; BranchDetailContent renders the empty state.
@@ -136,7 +141,7 @@ export function BranchDetailToolbar({ repo, detail, detailId, contentId, collaps
           )
         })}
       </div>
-      {repoBranchActionsAvailable(repo) && (
+      {branchActionsAvailable(repo, detail.branch) && (
         <BranchActionBar
           key={`${repo.id}:${detail.branch.name}`}
           repo={repo}

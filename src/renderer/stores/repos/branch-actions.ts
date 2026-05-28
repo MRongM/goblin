@@ -12,7 +12,7 @@ import {
   startBranchActionResource,
   startResource,
 } from '#/renderer/stores/repos/resources.ts'
-import { canStartRemoteFetch } from '#/renderer/stores/repos/sync-state.ts'
+import { canStartManualFetch, canStartRemoteFetch } from '#/renderer/stores/repos/sync-state.ts'
 import type {
   RepoBranchAction,
   RepoBranchActionKind,
@@ -24,6 +24,7 @@ import { runBranchActionRefreshWorkflow } from '#/renderer/stores/repos/refresh-
 import { rpc } from '#/renderer/rpc.ts'
 
 const NETWORK_BRANCH_ACTIONS = new Set<RepoBranchActionKind>(['pull', 'push'])
+const REMOTE_BRANCH_ACTIONS = new Set<RepoBranchActionKind>(['createWorktree', 'removeWorktree'])
 const BRANCH_ACTION_REASON_BY_KIND: Record<RepoBranchActionKind, RepoBranchActionReason> = {
   checkout: 'branch:checkout',
   pull: 'branch:pull',
@@ -78,22 +79,56 @@ function branchActionTarget(action: RepoBranchAction): RepoOperationTarget {
   }
 }
 
-function canStartBranchNetwork(repo: RepoState): boolean {
+function canStartBranchAction(repo: RepoState, action: RepoBranchAction): boolean {
+  if (repo.kind === 'remote') return REMOTE_BRANCH_ACTIONS.has(action.kind) && canStartManualFetch(repo)
   return canStartRemoteFetch(repo)
 }
 
-function runBranchActionRpc(action: RepoBranchAction, repoId: string, signal?: AbortSignal): Promise<ExecResult> {
+function runBranchActionRpc(action: RepoBranchAction, repo: RepoState, signal?: AbortSignal): Promise<ExecResult> {
+  if (repo.kind === 'remote') {
+    if (!repo.remoteTarget || !REMOTE_BRANCH_ACTIONS.has(action.kind)) {
+      return Promise.resolve({ ok: false, message: 'error.remote-unavailable' })
+    }
+    if (action.kind === 'createWorktree') {
+      return rpc.remote.createWorktree.mutate(
+        {
+          target: repo.remoteTarget,
+          worktreePath: action.worktreePath,
+          newBranch: action.newBranch,
+          baseBranch: action.baseBranch,
+        },
+        { signal },
+      )
+    }
+    if (action.kind === 'removeWorktree') {
+      return rpc.remote.removeWorktree.mutate(
+        {
+          target: repo.remoteTarget,
+          branch: action.branch,
+          worktreePath: action.worktreePath,
+          alsoDeleteBranch: action.alsoDeleteBranch,
+          forceDeleteBranch: action.forceDeleteBranch,
+        },
+        { signal },
+      )
+    }
+    return Promise.resolve({ ok: false, message: 'error.remote-unavailable' })
+  }
+
   switch (action.kind) {
     case 'checkout':
-      return rpc.repo.checkout.mutate({ cwd: repoId, branch: action.branch }, { signal })
+      return rpc.repo.checkout.mutate({ cwd: repo.id, branch: action.branch }, { signal })
     case 'pull':
-      return rpc.repo.pull.mutate({ cwd: repoId, branch: action.branch, worktreePath: action.worktreePath }, { signal })
+      return rpc.repo.pull.mutate(
+        { cwd: repo.id, branch: action.branch, worktreePath: action.worktreePath },
+        { signal },
+      )
     case 'push':
-      return rpc.repo.push.mutate({ cwd: repoId, branch: action.branch }, { signal })
+      return rpc.repo.push.mutate({ cwd: repo.id, branch: action.branch }, { signal })
     case 'createWorktree':
       return rpc.repo.createWorktree.mutate(
         {
-          cwd: repoId,
+          cwd: repo.id,
           worktreePath: action.worktreePath,
           newBranch: action.newBranch,
           baseBranch: action.baseBranch,
@@ -101,11 +136,11 @@ function runBranchActionRpc(action: RepoBranchAction, repoId: string, signal?: A
         { signal },
       )
     case 'deleteBranch':
-      return rpc.repo.deleteBranch.mutate({ cwd: repoId, branch: action.branch, force: action.force }, { signal })
+      return rpc.repo.deleteBranch.mutate({ cwd: repo.id, branch: action.branch, force: action.force }, { signal })
     case 'removeWorktree':
       return rpc.repo.removeWorktree.mutate(
         {
-          cwd: repoId,
+          cwd: repo.id,
           branch: action.branch,
           worktreePath: action.worktreePath,
           alsoDeleteBranch: action.alsoDeleteBranch,
@@ -129,12 +164,14 @@ export function createBranchActions(set: ReposSet, get: ReposGet) {
       if (!repoBefore) return null
       const token = options?.token ?? repoBefore.instanceToken
       if (repoBefore.instanceToken !== token) return null
-      if (repoBefore.kind === 'remote') return { ok: false, message: 'error.remote-unavailable' }
+      if (repoBefore.kind === 'remote' && !REMOTE_BRANCH_ACTIONS.has(action.kind)) {
+        return { ok: false, message: 'error.remote-unavailable' }
+      }
       if (resourceBusy(repoBefore.resources.branchAction) || repoOperationBusy(id, 'branchAction')) {
         return { ok: false, message: 'cancelled' }
       }
       const network = isNetworkBranchAction(action)
-      if (!canStartBranchNetwork(repoBefore)) {
+      if (!canStartBranchAction(repoBefore, action)) {
         const result = { ok: false, message: 'error.network-op-in-progress' }
         get().setLastResult(id, result, token)
         return result
@@ -155,7 +192,7 @@ export function createBranchActions(set: ReposSet, get: ReposGet) {
         busyResult: network
           ? { ok: false, message: 'error.network-op-in-progress' }
           : { ok: false, message: 'cancelled' },
-        task: (signal) => runBranchActionRpc(action, id, signal),
+        task: (signal) => runBranchActionRpc(action, repoBefore, signal),
         errorFromResult: (result) => (!result.ok && result.message !== 'cancelled' ? result.message : null),
         onResult: async (result) => {
           updateIfFresh(set, id, token, (r) => {

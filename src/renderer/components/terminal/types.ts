@@ -1,13 +1,29 @@
 import type { TerminalExitEvent, TerminalOutputEvent } from '#/shared/terminal.ts'
+import type { RemoteRepoTarget } from '#/shared/remote-repo.ts'
 
 export type TerminalPhase = 'opening' | 'open' | 'error'
 
-export interface TerminalDescriptor {
+export type TerminalDescriptor = LocalTerminalDescriptor | RemoteTerminalDescriptor
+
+export interface LocalTerminalDescriptor {
   key: string
   groupKey: string
   terminalId: string
   index: number
+  kind: 'local'
   repoRoot: string
+  branch: string
+  worktreePath: string
+}
+
+export interface RemoteTerminalDescriptor {
+  key: string
+  groupKey: string
+  terminalId: string
+  index: number
+  kind: 'remote'
+  repoId: string
+  target: RemoteRepoTarget
   branch: string
   worktreePath: string
 }
@@ -25,11 +41,9 @@ export interface TerminalSearchResult {
   found: boolean
 }
 
-export interface TerminalSessionBase {
-  repoRoot: string
-  branch: string
-  worktreePath: string
-}
+export type TerminalSessionBase =
+  | { kind?: 'local'; repoRoot: string; branch: string; worktreePath: string }
+  | { kind: 'remote'; repoId: string; target: RemoteRepoTarget; branch: string; worktreePath: string }
 
 export interface TerminalSessionSummary {
   key: string

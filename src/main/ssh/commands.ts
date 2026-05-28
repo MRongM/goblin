@@ -18,6 +18,15 @@ export type RemoteCommandKind =
   | { type: 'revParseTopLevel'; path: string }
   | { type: 'listDirectories'; path: string; limit?: number }
   | { type: 'gitSnapshot'; path: string }
+  | { type: 'gitFetch'; path: string }
+  | { type: 'gitWorktreeList'; path: string }
+  | { type: 'gitStatus'; path: string }
+  | { type: 'gitLog'; path: string; branch: string; count?: number; skip?: number }
+  | { type: 'gitWorktreeAdd'; path: string; worktreePath: string; newBranch: string; baseBranch: string }
+  | { type: 'gitWorktreeRemove'; path: string; worktreePath: string }
+  | { type: 'gitBranchDelete'; path: string; branch: string; force?: boolean }
+  | { type: 'gitUpstream'; path: string; branch: string }
+  | { type: 'gitIsAncestor'; path: string; ancestor: string; descendant: string }
 
 export interface RemoteCommandResult {
   ok: boolean
@@ -36,10 +45,13 @@ export interface RemoteCommandInvocation {
 export type RemoteCommandRunner = (
   command: RemoteCommandKind,
   target: RemoteRepoTarget,
-  options?: { signal?: AbortSignal },
+  options?: { signal?: AbortSignal; timeoutMs?: number },
 ) => Promise<RemoteCommandResult>
 
-export function buildRemoteCommandInvocation(target: RemoteRepoTarget, command: RemoteCommandKind): RemoteCommandInvocation {
+export function buildRemoteCommandInvocation(
+  target: RemoteRepoTarget,
+  command: RemoteCommandKind,
+): RemoteCommandInvocation {
   const script = scriptForCommand(command)
   const args = [
     '-T',
@@ -50,6 +62,20 @@ export function buildRemoteCommandInvocation(target: RemoteRepoTarget, command: 
     '-o',
     `ConnectTimeout=${SSH_CONNECT_TIMEOUT_SEC}`,
   ]
+  const destination = target.alias ?? `${target.user}@${target.host}`
+  if (target.identityFile) args.push('-i', expandIdentityFile(target.identityFile))
+  if (!target.alias) args.push('-p', String(target.port))
+  args.push('--', destination, `sh -lc ${shellQuote(script)}`)
+  return { command: 'ssh', args, script }
+}
+
+export function buildRemoteTerminalInvocation(
+  target: RemoteRepoTarget,
+  remotePath: string,
+  _size: { cols: number; rows: number },
+): RemoteCommandInvocation {
+  const script = `cd ${shellQuote(remotePath)} && exec "\${SHELL:-/bin/sh}" -l`
+  const args = ['-tt', '-o', 'StrictHostKeyChecking=yes', '-o', `ConnectTimeout=${SSH_CONNECT_TIMEOUT_SEC}`]
   const destination = target.alias ?? `${target.user}@${target.host}`
   if (target.identityFile) args.push('-i', expandIdentityFile(target.identityFile))
   if (!target.alias) args.push('-p', String(target.port))
@@ -124,6 +150,41 @@ function scriptForCommand(command: RemoteCommandKind): string {
         `git -C ${repo} for-each-ref --format=${shellQuote(branchFormat)} refs/heads/`,
       ].join('\n')
     }
+    case 'gitFetch':
+      return `git -C ${shellQuote(command.path)} fetch --all --prune`
+    case 'gitWorktreeList':
+      return `git -C ${shellQuote(command.path)} worktree list --porcelain`
+    case 'gitStatus':
+      return `git -C ${shellQuote(command.path)} status --porcelain -z`
+    case 'gitLog': {
+      const count = Math.max(1, Math.min(1000, Math.floor(command.count ?? 100)))
+      const skip = Math.max(0, Math.floor(command.skip ?? 0))
+      const format = ['%H', '%h', '%s', '%an', '%aI'].join(FIELD_SEP)
+      return [
+        `git -C ${shellQuote(command.path)} log`,
+        `--format=${shellQuote(format)}`,
+        `--max-count=${count}`,
+        `--skip=${skip}`,
+        '--',
+        shellQuote(command.branch),
+      ].join(' ')
+    }
+    case 'gitWorktreeAdd':
+      return `git -C ${shellQuote(command.path)} worktree add -b ${shellQuote(command.newBranch)} -- ${shellQuote(
+        command.worktreePath,
+      )} ${shellQuote(command.baseBranch)}`
+    case 'gitWorktreeRemove':
+      return `git -C ${shellQuote(command.path)} worktree remove -- ${shellQuote(command.worktreePath)}`
+    case 'gitBranchDelete':
+      return `git -C ${shellQuote(command.path)} branch ${command.force ? '-D' : '-d'} -- ${shellQuote(
+        command.branch,
+      )}`
+    case 'gitUpstream':
+      return `git -C ${shellQuote(command.path)} rev-parse --abbrev-ref ${shellQuote(`${command.branch}@{u}`)}`
+    case 'gitIsAncestor':
+      return `git -C ${shellQuote(command.path)} merge-base --is-ancestor -- ${shellQuote(
+        command.ancestor,
+      )} ${shellQuote(command.descendant)}`
   }
   const exhaustive: never = command
   return exhaustive

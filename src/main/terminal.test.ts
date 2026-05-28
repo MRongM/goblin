@@ -7,6 +7,15 @@ import { registerTrustedAppPath, registerTrustedWebContents } from '#/main/ipc/t
 import type { TerminalOpenInput, TerminalRestartInput } from '#/shared/terminal.ts'
 
 const ipcHandlers = new Map<string, (_event: unknown, input: any) => unknown>()
+const REMOTE_TARGET = {
+  id: 'ssh://deploy@prod:22/srv/goblin',
+  alias: null,
+  host: 'prod',
+  user: 'deploy',
+  port: 22,
+  remotePath: '/srv/goblin',
+  displayName: 'prod:goblin',
+}
 
 vi.mock('electron', () => ({
   ipcMain: {
@@ -99,6 +108,31 @@ describe('terminal IPC', () => {
     })
   })
 
+  test('opens a remote terminal session without local worktree probing', async () => {
+    const result = await invoke<TerminalOpenInput>('goblin:terminal-open', {
+      kind: 'remote',
+      target: REMOTE_TARGET,
+      branch: 'feature',
+      worktreePath: '/srv/goblin-feature',
+      terminalId: 'terminal-1',
+      cols: 80,
+      rows: 24,
+    })
+
+    expect(result).toMatchObject({ ok: true, sessionId: 'term_123456789012' })
+    expect(getWorktrees).not.toHaveBeenCalled()
+    expect(openTerminalSession).toHaveBeenCalledWith({
+      ownerWebContentsId: 1,
+      scope: 'ssh://deploy@prod:22/srv/goblin',
+      key: 'remote\0ssh://deploy@prod:22/srv/goblin\0/srv/goblin-feature\0terminal-1',
+      cwd: expect.any(String),
+      cols: 80,
+      rows: 24,
+      forceNew: false,
+      command: expect.objectContaining({ command: 'ssh' }),
+    })
+  })
+
   test('restarts a validated worktree terminal with replacement', async () => {
     await invoke<TerminalRestartInput>('goblin:terminal-restart', {
       repoRoot: '/repo',
@@ -132,6 +166,21 @@ describe('terminal IPC', () => {
 
     expect(result).toEqual({ ok: false, message: 'error.invalid-arguments' })
     expect(getWorktrees).not.toHaveBeenCalled()
+    expect(openTerminalSession).not.toHaveBeenCalled()
+  })
+
+  test('rejects invalid remote terminal worktree paths', async () => {
+    const result = await invoke<TerminalOpenInput>('goblin:terminal-open', {
+      kind: 'remote',
+      target: REMOTE_TARGET,
+      branch: 'feature',
+      worktreePath: 'relative',
+      terminalId: 'terminal-1',
+      cols: 80,
+      rows: 24,
+    })
+
+    expect(result).toEqual({ ok: false, message: 'error.invalid-arguments' })
     expect(openTerminalSession).not.toHaveBeenCalled()
   })
 
@@ -222,6 +271,16 @@ describe('terminal IPC', () => {
 
   test('returns true after pruning a valid repo terminal scope', () => {
     expect(invoke('goblin:terminal-prune-repo', { repoRoot: '/repo', worktreePaths: ['/repo-linked'] })).toBe(true)
+  })
+
+  test('prunes remote terminal sessions by remote scope', () => {
+    expect(
+      invoke('goblin:terminal-prune-repo', {
+        kind: 'remote',
+        repoId: REMOTE_TARGET.id,
+        worktreePaths: ['/srv/goblin-feature'],
+      }),
+    ).toBe(true)
   })
 })
 

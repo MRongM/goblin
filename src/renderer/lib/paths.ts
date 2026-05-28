@@ -40,6 +40,21 @@ export function defaultWorktreePath(repoId: string, branch: string): string {
   return parent ? joinPath(parent, `${name}-${slug}`) : `${name}-${slug}`
 }
 
+export function isRemoteAbsolutePath(value: string): boolean {
+  return value.startsWith('/') && !value.includes('\0')
+}
+
+export function defaultRemoteWorktreePath(remoteRepoPath: string, branch: string): string {
+  const normalizedRepoPath = remoteRepoPath.trim().replace(/\/+$/, '') || '/'
+  const slug = branch
+    .trim()
+    .replace(/[^A-Za-z0-9._-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+  if (!slug) return normalizedRepoPath
+  if (normalizedRepoPath === '/') return `/${slug}`
+  return `${normalizedRepoPath}-${slug}`
+}
+
 export function tildifyPath(path: string, home: string): string {
   if (!home) return path
   if (path === home) return '~'

@@ -15,7 +15,7 @@ import { visibleBranches } from '#/renderer/stores/repos/branch-view-mode.ts'
 import { BranchRow } from '#/renderer/components/branch-list/BranchRow.tsx'
 import { EmptyState } from '#/renderer/components/Layout.tsx'
 import { ScrollArea } from '#/renderer/components/ui/scroll-area.tsx'
-import { repoBranchActionsAvailable } from '#/renderer/hooks/branch-action-state.ts'
+import { branchActionsAvailable } from '#/renderer/hooks/branch-action-state.ts'
 
 interface Props {
   repoId: string
@@ -84,7 +84,6 @@ export function BranchList({ repoId, showActions = true, variant = 'list' }: Pro
       repo.data.branches.find((branch) => branch.name === selected))
     : null
   const renderedBranches = variant === 'selected-strip' ? (selectedBranch ? [selectedBranch] : []) : branches
-  const rowActionsVisible = showActions && repoBranchActionsAvailable(repo)
 
   if (renderedBranches.length === 0) {
     return <EmptyState title={t(repo.data.branches.length === 0 ? 'branches.empty' : 'branches.filter-empty')} />
@@ -104,7 +103,7 @@ export function BranchList({ repoId, showActions = true, variant = 'list' }: Pro
             onSelectBranch={handleSelectBranch}
             onOpenBranchStatus={handleOpenBranchStatus}
             selectedRef={selectedRef}
-            showActions={rowActionsVisible}
+            showActions={showActions && branchActionsAvailable(repo, branch)}
           />
         )
       })}

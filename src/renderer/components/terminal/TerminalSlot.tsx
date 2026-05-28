@@ -12,18 +12,16 @@ import { Button } from '#/renderer/components/ui/button.tsx'
 import { setTerminalFocused } from '#/renderer/terminal-focus.ts'
 import { useT } from '#/renderer/stores/i18n.ts'
 import { useReposStore } from '#/renderer/stores/repos/store.ts'
-import { terminalSessionGroupKey } from '#/renderer/components/terminal/terminal-session-utils.ts'
+import { terminalSessionGroupKey, terminalSessionScope } from '#/renderer/components/terminal/terminal-session-utils.ts'
 import { useTerminalSessionContext } from '#/renderer/components/terminal/terminal-session-context.ts'
 import { TerminalSwitcher } from '#/renderer/components/terminal/TerminalSwitcher.tsx'
 import type { TerminalSessionBase } from '#/renderer/components/terminal/types.ts'
 
 interface TerminalSlotProps {
-  repoRoot: string
-  branch: string
-  worktreePath: string
+  base: TerminalSessionBase
 }
 
-export function TerminalSlot({ repoRoot, branch, worktreePath }: TerminalSlotProps) {
+export function TerminalSlot({ base }: TerminalSlotProps) {
   const t = useT()
   const hostRef = useRef<HTMLDivElement | null>(null)
   const searchInputRef = useRef<HTMLInputElement | null>(null)
@@ -47,11 +45,9 @@ export function TerminalSlot({ repoRoot, branch, worktreePath }: TerminalSlotPro
     findPrevious,
     clearSearch,
   } = context
-  const groupKey = terminalSessionGroupKey(repoRoot, worktreePath)
-  const base = useMemo<TerminalSessionBase>(
-    () => ({ repoRoot, branch, worktreePath }),
-    [branch, repoRoot, worktreePath],
-  )
+  const groupKey = terminalSessionGroupKey(terminalSessionScope(base))
+  const repoId = base.kind === 'remote' ? base.repoId : base.repoRoot
+  const { worktreePath } = base
   const descriptor = useMemo(() => activeDescriptor(groupKey), [activeDescriptor, groupKey, version])
   const key = descriptor?.key ?? null
   const summaries = useMemo(() => sessionSummaries(groupKey), [groupKey, sessionSummaries, version])
@@ -91,9 +87,9 @@ export function TerminalSlot({ repoRoot, branch, worktreePath }: TerminalSlotPro
   const closeTerminalKey = useCallback(
     (terminalKey: string) => {
       const remaining = closeTerminal(terminalKey)
-      if (remaining.length === 0) useReposStore.getState().dismissExitedTerminalDetail(repoRoot, worktreePath)
+      if (remaining.length === 0) useReposStore.getState().dismissExitedTerminalDetail(repoId, worktreePath)
     },
-    [closeTerminal, repoRoot, worktreePath],
+    [closeTerminal, repoId, worktreePath],
   )
   const closeSearch = useCallback(() => {
     setSearchOpen(false)

@@ -1,5 +1,5 @@
 import type { RepoState } from '#/renderer/stores/repos/types.ts'
-import { canStartRemoteFetch } from '#/renderer/stores/repos/sync-state.ts'
+import { canStartManualFetch } from '#/renderer/stores/repos/sync-state.ts'
 import { resourceBusy } from '#/renderer/stores/repos/resources.ts'
 
 export type RepoSyncStage = 'cache' | 'branches' | 'status' | 'prs' | 'log' | 'remote'
@@ -55,7 +55,7 @@ export function getRepoSyncActivity(repo: RepoState): RepoSyncActivity | null {
 }
 
 export function isRepoSyncBlocked(repo: RepoState): boolean {
-  return !canStartRemoteFetch(repo)
+  return !canStartManualFetch(repo)
 }
 
 export function getRepoSyncPresentation(

@@ -57,11 +57,29 @@ export function RepoToolbarActions({ repo }: Props) {
   }
 
   const createTip = t('action.create-worktree-title')
+  const retryTip = t('action.retry-diagnostics')
 
-  if (repo.kind === 'remote') {
-    const retryTip = t('action.retry-diagnostics')
-    return (
-      <div className="flex items-center gap-1">
+  // Buttons carry their label inline so the adjacent refresh-like glyphs
+  // don't make the user guess which action they are invoking.
+  return (
+    <div className="flex items-center gap-1">
+      <RepoSyncControl repo={repo} />
+      <Tip label={createTip}>
+        <span className="inline-flex">
+          <Button
+            variant="ghost"
+            onClick={() => {
+              if (!branchActionBusy && (repo.kind !== 'remote' || repo.remoteTarget)) setCreateOpen(true)
+            }}
+            disabled={branchActionBusy || (repo.kind === 'remote' && !repo.remoteTarget)}
+            aria-label={createTip}
+          >
+            <FolderPlus />
+            {t('action.create-worktree')}
+          </Button>
+        </span>
+      </Tip>
+      {repo.kind === 'remote' && (
         <Tip label={retryTip}>
           <span className="inline-flex">
             <Button
@@ -77,30 +95,7 @@ export function RepoToolbarActions({ repo }: Props) {
             </Button>
           </span>
         </Tip>
-      </div>
-    )
-  }
-
-  // Buttons carry their label inline so the adjacent refresh-like glyphs
-  // don't make the user guess which action they are invoking.
-  return (
-    <div className="flex items-center gap-1">
-      <RepoSyncControl repo={repo} />
-      <Tip label={createTip}>
-        <span className="inline-flex">
-          <Button
-            variant="ghost"
-            onClick={() => {
-              if (!branchActionBusy) setCreateOpen(true)
-            }}
-            disabled={branchActionBusy}
-            aria-label={createTip}
-          >
-            <FolderPlus />
-            {t('action.create-worktree')}
-          </Button>
-        </span>
-      </Tip>
+      )}
       <CreateWorktreeDialog
         open={createOpen}
         repo={repo}

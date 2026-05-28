@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'vitest'
 import { emptyRepo } from '#/renderer/stores/repos/helpers.ts'
 import { finishResourceSuccess, startBranchActionResource, startResource } from '#/renderer/stores/repos/resources.ts'
 import { disposeRepoRuntime, markRepoOperationTargets, nextRepoOperationId } from '#/renderer/stores/repos/runtime.ts'
-import { canStartRemoteFetch, isRemoteFetchDue } from '#/renderer/stores/repos/sync-state.ts'
+import { canStartManualFetch, canStartRemoteFetch, isRemoteFetchDue } from '#/renderer/stores/repos/sync-state.ts'
 import type { RepoRuntimeOperationTarget } from '#/renderer/stores/repos/runtime.ts'
 import type { RepoState } from '#/renderer/stores/repos/types.ts'
 
@@ -54,6 +54,15 @@ describe('canStartRemoteFetch', () => {
       expect(canStartRemoteFetch(r)).toBe(false)
     },
   )
+
+  test('allows manual fetch checks for remote repos but keeps background remote fetch blocked', () => {
+    const remote = repo()
+    remote.kind = 'remote'
+
+    expect(canStartManualFetch(remote)).toBe(true)
+    expect(canStartRemoteFetch(remote)).toBe(false)
+    expect(isRemoteFetchDue(remote, 60_000, 100_000)).toBe(false)
+  })
 })
 
 describe('isRemoteFetchDue', () => {
