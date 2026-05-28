@@ -161,10 +161,9 @@ describe('remote ssh command runner', () => {
     })
 
     expect(status.script).toBe("git -C '/srv/goblin-linked' status --porcelain -z")
-    expect(log.script).toContain("git -C '/srv/goblin' log")
-    expect(log.script).toContain('--max-count=30')
-    expect(log.script).toContain('--skip=60')
-    expect(log.script).toContain("'feature/x'")
+    expect(log.script).toBe(
+      "git -C '/srv/goblin' log --format='%H\u001f%h\u001f%s\u001f%an\u001f%aI' --max-count=30 --skip=60 'feature/x' --",
+    )
   })
 
   test('builds remote branch action commands with quoted refs and paths', async () => {

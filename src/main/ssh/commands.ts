@@ -175,8 +175,8 @@ function scriptForCommand(command: RemoteCommandKind): string {
         `--format=${shellQuote(format)}`,
         `--max-count=${count}`,
         `--skip=${skip}`,
-        '--',
         shellQuote(command.branch),
+        '--',
       ].join(' ')
     }
     case 'gitCheckout':
