@@ -353,11 +353,11 @@ export const zh: Record<DictKey, string> = {
   'action.menu': '操作',
   'action.refresh': '刷新',
   'action.refresh-title': 'git branch · git status · git log',
-  'action.refresh-remote': '刷新远端数据',
+  'action.refresh-remote': '刷新',
   'action.refresh-remote-title': '通过 SSH 刷新分支、状态和当前提交记录',
 
   // ---- Remote ports -----------------------------------------------------
-  'remote-ports.button': '端口',
+  'remote-ports.button': '端口转发',
   'remote-ports.title': '远端端口',
   'remote-ports.summary': '{running} 个运行 / {total} 个已保存',
   'remote-ports.scan': '扫描远端端口',
