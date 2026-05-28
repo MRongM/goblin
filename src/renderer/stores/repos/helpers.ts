@@ -1,6 +1,7 @@
 import { produce, type Draft } from 'immer'
 import { emptyRepoResources } from '#/renderer/stores/repos/resources.ts'
 import type { RepoEvent, RepoState, ReposSet, ReposStore } from '#/renderer/stores/repos/types.ts'
+import type { RemoteRepoTarget, RepoKind } from '#/shared/remote-repo.ts'
 
 let nextInstanceToken = 1
 let nextEventId = 1
@@ -12,10 +13,18 @@ export const inFlightFetchById = new Map<string, Promise<void>>()
 type RepoMutator = (repo: Draft<RepoState>) => void
 type ReposPatch = Pick<ReposStore, 'repos'>
 
-export function emptyRepo(id: string, name: string): RepoState {
+export function emptyRepo(
+  id: string,
+  name: string,
+  options: { kind?: RepoKind; remoteTarget?: RemoteRepoTarget | null } = {},
+): RepoState {
+  const kind = options.kind ?? 'local'
   return {
     id,
     name,
+    kind,
+    remoteTarget: kind === 'remote' ? (options.remoteTarget ?? null) : null,
+    diagnostics: null,
     instanceToken: nextInstanceToken++,
     data: {
       branches: [],

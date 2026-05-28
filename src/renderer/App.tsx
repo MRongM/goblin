@@ -47,6 +47,7 @@ export function App() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsPage, setSettingsPage] = useState<SettingsPage>('general')
   const [cloneOpen, setCloneOpen] = useState(false)
+  const [remoteOpen, setRemoteOpen] = useState(false)
   const workspaceBehavior = repoWorkspaceBehavior(workspaceLayout, detailCollapsed)
   const openSettings = useCallback((page: SettingsPage = 'general') => {
     setSettingsPage(page)
@@ -64,7 +65,7 @@ export function App() {
   // keyboard shortcuts and the file-drop dashed border. useKeyboard
   // additionally OR's in commit-detail, which is per-repo state read
   // from the store inside the hook itself.
-  const modalOpen = settingsOpen || cloneOpen
+  const modalOpen = settingsOpen || cloneOpen || remoteOpen
   const repoDrop = useRepoDrop({ blocked: modalOpen })
 
   useAppBootstrap()
@@ -96,7 +97,12 @@ export function App() {
           onDrop={repoDrop.onDrop}
         >
           <Topbar onOpenSettings={openSettings} />
-          <RepoTabs cloneOpen={cloneOpen} onCloneOpenChange={setCloneOpen} />
+          <RepoTabs
+            cloneOpen={cloneOpen}
+            onCloneOpenChange={setCloneOpen}
+            remoteOpen={remoteOpen}
+            onRemoteOpenChange={setRemoteOpen}
+          />
           <main className="flex flex-1 min-h-0 min-w-0">
             <ErrorBoundary resetKey={activeId}>
               {activeId ? (

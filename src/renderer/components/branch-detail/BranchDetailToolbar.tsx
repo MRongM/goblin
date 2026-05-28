@@ -13,6 +13,7 @@ import { cn } from '#/renderer/lib/cn.ts'
 import { repoWorkspaceBehavior } from '#/renderer/lib/workspace-layout.ts'
 import { terminalSessionGroupKey } from '#/renderer/components/terminal/terminal-session-utils.ts'
 import { useTerminalSessionContext } from '#/renderer/components/terminal/terminal-session-context.ts'
+import { repoBranchActionsAvailable } from '#/renderer/hooks/branch-action-state.ts'
 import type { SelectedBranchDetailPresentation } from '#/renderer/components/branch-detail/model.ts'
 
 interface Props {
@@ -135,12 +136,14 @@ export function BranchDetailToolbar({ repo, detail, detailId, contentId, collaps
           )
         })}
       </div>
-      <BranchActionBar
-        key={`${repo.id}:${detail.branch.name}`}
-        repo={repo}
-        branch={detail.branch}
-        variant={behavior.detailActionVariant}
-      />
+      {repoBranchActionsAvailable(repo) && (
+        <BranchActionBar
+          key={`${repo.id}:${detail.branch.name}`}
+          repo={repo}
+          branch={detail.branch}
+          variant={behavior.detailActionVariant}
+        />
+      )}
     </Toolbar>
   )
 }

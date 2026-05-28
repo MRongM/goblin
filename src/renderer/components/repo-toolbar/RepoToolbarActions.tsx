@@ -9,7 +9,7 @@
 // those need a branch context to be meaningful.
 
 import { useEffect, useState } from 'react'
-import { FolderPlus } from 'lucide-react'
+import { FolderPlus, RefreshCw } from 'lucide-react'
 import { useReposStore } from '#/renderer/stores/repos/store.ts'
 import type { RepoState } from '#/renderer/stores/repos/types.ts'
 import { useT } from '#/renderer/stores/i18n.ts'
@@ -26,8 +26,10 @@ interface Props {
 export function RepoToolbarActions({ repo }: Props) {
   const t = useT()
   const runBranchAction = useReposStore((s) => s.runBranchAction)
+  const refreshRemoteDiagnostics = useReposStore((s) => s.refreshRemoteDiagnostics)
   const [createOpen, setCreateOpen] = useState(false)
   const branchActionBusy = resourceBusy(repo.resources.branchAction)
+  const diagnosticsBusy = resourceBusy(repo.resources.diagnostics)
 
   // RepoView reuses the same React instance across repo switches
   // (no `key={activeId}` on the parent), so RepoToolbarActions keeps
@@ -55,6 +57,29 @@ export function RepoToolbarActions({ repo }: Props) {
   }
 
   const createTip = t('action.create-worktree-title')
+
+  if (repo.kind === 'remote') {
+    const retryTip = t('action.retry-diagnostics')
+    return (
+      <div className="flex items-center gap-1">
+        <Tip label={retryTip}>
+          <span className="inline-flex">
+            <Button
+              variant="ghost"
+              onClick={() => {
+                if (!diagnosticsBusy) void refreshRemoteDiagnostics(repo.id, { token: repo.instanceToken })
+              }}
+              disabled={diagnosticsBusy}
+              aria-label={retryTip}
+            >
+              <RefreshCw />
+              {t('action.retry')}
+            </Button>
+          </span>
+        </Tip>
+      </div>
+    )
+  }
 
   // Buttons carry their label inline so the adjacent refresh-like glyphs
   // don't make the user guess which action they are invoking.

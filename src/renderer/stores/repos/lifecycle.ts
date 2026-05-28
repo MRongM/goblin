@@ -1,10 +1,12 @@
 import pLimit from 'p-limit'
 import { lastPathSegment } from '#/renderer/lib/paths.ts'
-import { emptyRepo, inFlightFetchById } from '#/renderer/stores/repos/helpers.ts'
+import { emptyRepo, inFlightFetchById, updateIfFresh } from '#/renderer/stores/repos/helpers.ts'
 import { hydrateCachedRepo } from '#/renderer/stores/repos/persistence.ts'
 import { disposeRepoRuntime } from '#/renderer/stores/repos/runtime.ts'
 import { runInitialRepoLoad } from '#/renderer/stores/repos/refresh-workflows.ts'
+import { cancelResource, finishResourceError, finishResourceSuccess, startResource } from '#/renderer/stores/repos/resources.ts'
 import type { MissingRepo, OpenRepoResult, ReposGet, ReposSet, ReposStore } from '#/renderer/stores/repos/types.ts'
+import { normalizeRemoteTarget, type RemoteRepoTarget, type RepoSessionEntry } from '#/shared/remote-repo.ts'
 import { rpc } from '#/renderer/rpc.ts'
 
 interface ResolvedRepo {
@@ -71,6 +73,22 @@ function addResolvedRepo(
   }
 }
 
+function addRemoteRepo(
+  s: Pick<ReposStore, 'repos' | 'order'>,
+  target: RemoteRepoTarget,
+  rankById?: ReadonlyMap<string, number>,
+): Pick<ReposStore, 'repos' | 'order'> & { changed: boolean } {
+  if (s.repos[target.id]) return { repos: s.repos, order: s.order, changed: false }
+  return {
+    repos: {
+      ...s.repos,
+      [target.id]: emptyRepo(target.id, target.displayName, { kind: 'remote', remoteTarget: target }),
+    },
+    order: orderedInsert(s.order, target.id, rankById),
+    changed: true,
+  }
+}
+
 function activeAfterHydrateStep(
   s: Pick<ReposStore, 'activeId'>,
   repos: Record<string, unknown>,
@@ -87,6 +105,13 @@ function refreshInitialRepoState(get: ReposGet, refresh: InitialRepoRefresh) {
   const repo = get().repos[refresh.id]
   if (!repo || repo.instanceToken !== refresh.token) return
   runInitialRepoLoad(get, refresh)
+}
+
+function normalizeHydrateEntry(value: RepoSessionEntry | string): RepoSessionEntry | null {
+  if (typeof value === 'string') return { kind: 'local', id: value }
+  if (value.kind === 'local') return value
+  const target = normalizeRemoteTarget(value.target)
+  return target && value.id === target.id ? { kind: 'remote', id: target.id, target } : null
 }
 
 export function createLifecycleActions(set: ReposSet, get: ReposGet) {
@@ -124,6 +149,26 @@ export function createLifecycleActions(set: ReposSet, get: ReposGet) {
       return { ok: true, id }
     },
 
+    async openRemoteRepo(targetInput: RemoteRepoTarget, options?: { activate?: boolean }): Promise<OpenRepoResult> {
+      const target = normalizeRemoteTarget(targetInput)
+      if (!target || targetInput.id !== target.id) return { ok: false, message: 'error.invalid-arguments' }
+      const activate = options?.activate !== false
+      set((s) => {
+        const { repos, order, changed } = addRemoteRepo(s, target)
+        if (!changed) {
+          if (!activate || s.activeId === target.id) return s
+          return { activeId: target.id }
+        }
+        return activate ? { repos, order, activeId: target.id } : { repos, order }
+      })
+      const repo = get().repos[target.id]
+      if (repo) {
+        void get().refreshRemoteDiagnostics(repo.id, { token: repo.instanceToken })
+        void get().refreshSnapshot(repo.id, { token: repo.instanceToken })
+      }
+      return { ok: true, id: target.id }
+    },
+
     closeRepo(id: string) {
       // Drop any in-flight fetch tracking so a new openRepo of the same
       // path doesn't think a fetch is already running.
@@ -152,7 +197,7 @@ export function createLifecycleActions(set: ReposSet, get: ReposGet) {
       })
     },
 
-    async hydrateSession(openRepos: string[], activeRepo: string | null) {
+    async hydrateSession(openRepos: Array<RepoSessionEntry | string>, activeRepo: string | null) {
       // Probe in parallel; entries that are no longer git repos (folder
       // moved/deleted, external drive not mounted) get reported via
       // `missingFromSession` so the user sees a "couldn't reopen N repos"
@@ -162,8 +207,27 @@ export function createLifecycleActions(set: ReposSet, get: ReposGet) {
       let managedActiveId: string | null = null
       const limitProbe = pLimit(SESSION_PROBE_CONCURRENCY)
       await Promise.all(
-        openRepos.map((p, index) =>
+        openRepos.map((rawEntry, index) =>
           limitProbe(async () => {
+            const entry = normalizeHydrateEntry(rawEntry)
+            if (!entry) return
+            if (entry.kind === 'remote') {
+              if (!rankById.has(entry.id)) rankById.set(entry.id, index)
+              set((s) => {
+                const { repos, order } = addRemoteRepo(s, entry.target, rankById)
+                const activeId = activeAfterHydrateStep(s, repos, order, activeRepo, managedActiveId)
+                if (s.activeId === null || s.activeId === managedActiveId) managedActiveId = activeId
+                if (repos === s.repos && order === s.order && activeId === s.activeId) return s
+                return { repos, order, activeId }
+              })
+              const repo = get().repos[entry.id]
+              if (repo) {
+                void get().refreshRemoteDiagnostics(repo.id, { token: repo.instanceToken })
+                void get().refreshSnapshot(repo.id, { token: repo.instanceToken })
+              }
+              return
+            }
+            const p = entry.id
             const probe = await resolveRepoPath(p, (err) => {
               console.warn(`[session] probe failed for ${p}:`, err)
             })
@@ -205,6 +269,34 @@ export function createLifecycleActions(set: ReposSet, get: ReposGet) {
 
     dismissMissing() {
       set({ missingFromSession: [] })
+    },
+
+    async refreshRemoteDiagnostics(id: string, options?: { token?: number }) {
+      const repoBefore = get().repos[id]
+      if (!repoBefore || repoBefore.kind !== 'remote' || !repoBefore.remoteTarget) return
+      const token = options?.token ?? repoBefore.instanceToken
+      if (repoBefore.instanceToken !== token) return
+      updateIfFresh(set, id, token, (r) => {
+        startResource(r.resources.diagnostics, { hasData: r.diagnostics !== null })
+      })
+      try {
+        const diagnostics = await rpc.remote.testRepository.query({ target: repoBefore.remoteTarget })
+        updateIfFresh(set, id, token, (r) => {
+          r.diagnostics = diagnostics
+          if (diagnostics.category === 'cancelled') {
+            cancelResource(r.resources.diagnostics)
+          } else if (diagnostics.ok) {
+            finishResourceSuccess(r.resources.diagnostics)
+          } else {
+            finishResourceError(r.resources.diagnostics, diagnostics.category ?? diagnostics.message ?? 'unknown')
+          }
+        })
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        updateIfFresh(set, id, token, (r) => {
+          finishResourceError(r.resources.diagnostics, message)
+        })
+      }
     },
   }
 }

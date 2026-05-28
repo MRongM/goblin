@@ -1,5 +1,9 @@
 import { describe, expect, test } from 'vitest'
-import { branchActionItemIdFromOperation, isBranchActionBlocked } from '#/renderer/hooks/branch-action-state.ts'
+import {
+  branchActionItemIdFromOperation,
+  isBranchActionBlocked,
+  repoBranchActionsAvailable,
+} from '#/renderer/hooks/branch-action-state.ts'
 import { emptyRepo } from '#/renderer/stores/repos/helpers.ts'
 import { startBranchActionResource } from '#/renderer/stores/repos/resources.ts'
 
@@ -21,6 +25,27 @@ describe('isBranchActionBlocked', () => {
     const repo = emptyRepo('/tmp/gbl-branch-action-queued', 'repo')
 
     expect(isBranchActionBlocked(repo)).toBe(false)
+  })
+})
+
+describe('repoBranchActionsAvailable', () => {
+  test('keeps local branch actions available and hides them for remote repos', () => {
+    const local = emptyRepo('/tmp/gbl-branch-action-local', 'repo')
+    const remote = emptyRepo('ssh://deploy@prod:22/srv/goblin', 'prod:goblin', {
+      kind: 'remote',
+      remoteTarget: {
+        id: 'ssh://deploy@prod:22/srv/goblin',
+        alias: 'prod',
+        host: 'prod',
+        user: 'deploy',
+        port: 22,
+        remotePath: '/srv/goblin',
+        displayName: 'prod:goblin',
+      },
+    })
+
+    expect(repoBranchActionsAvailable(local)).toBe(true)
+    expect(repoBranchActionsAvailable(remote)).toBe(false)
   })
 })
 

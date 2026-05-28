@@ -3,6 +3,7 @@ import { normalizeRepoCache, persistRepoCache } from '#/renderer/stores/repos/pe
 import { createBranch, resetReposStore, seedRepoState } from '#/renderer/stores/repos/test-utils.ts'
 import { useReposStore } from '#/renderer/stores/repos/store.ts'
 import type { CachedRepoState } from '#/renderer/stores/repos/types.ts'
+import type { RemoteRepoTarget } from '#/shared/remote-repo.ts'
 
 function cachedRepo(savedAt: number): CachedRepoState {
   return {
@@ -23,6 +24,16 @@ function cachedRepo(savedAt: number): CachedRepoState {
 }
 
 beforeEach(resetReposStore)
+
+const REMOTE_TARGET: RemoteRepoTarget = {
+  id: 'ssh://deploy@prod:22/srv/goblin',
+  alias: 'prod',
+  host: 'prod',
+  user: 'deploy',
+  port: 22,
+  remotePath: '/srv/goblin',
+  displayName: 'prod:goblin',
+}
 
 describe('normalizeRepoCache', () => {
   test('keeps only the newest 50 valid cache entries', () => {
@@ -76,5 +87,33 @@ describe('persistRepoCache', () => {
     persistRepoCache(useReposStore.setState, staleRepo, 1)
 
     expect(useReposStore.getState().repoCache['/repo']).toBeUndefined()
+  })
+
+  test('does not persist remote repo diagnostics or secret-like transient data', () => {
+    const repo = seedRepoState({
+      id: REMOTE_TARGET.id,
+      name: REMOTE_TARGET.displayName,
+      branches: [createBranch('main')],
+      currentBranch: 'main',
+      statusLoaded: true,
+    })
+    const remoteRepo = {
+      ...repo,
+      kind: 'remote' as const,
+      remoteTarget: REMOTE_TARGET,
+      diagnostics: {
+        target: REMOTE_TARGET,
+        ok: false,
+        category: 'auth failed' as const,
+        message: 'auth failed',
+        details: 'Permission denied with sensitive stderr',
+        stages: [],
+      },
+    }
+
+    persistRepoCache(useReposStore.setState, remoteRepo, remoteRepo.instanceToken)
+
+    expect(useReposStore.getState().repoCache[REMOTE_TARGET.id]).toBeUndefined()
+    expect(JSON.stringify(useReposStore.getState().repoCache)).not.toMatch(/Permission denied|stderr|password|secret/)
   })
 })

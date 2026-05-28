@@ -6,6 +6,8 @@ import { Toolbar } from '#/renderer/components/Layout.tsx'
 import { useReposStore } from '#/renderer/stores/repos/store.ts'
 import type { RepoState } from '#/renderer/stores/repos/types.ts'
 import { tildify } from '#/renderer/lib/paths.ts'
+import { Badge } from '#/renderer/components/ui/badge.tsx'
+import { remoteTargetSubtitle } from '#/shared/remote-repo.ts'
 
 interface Props {
   repoId: string
@@ -19,6 +21,10 @@ function repoToolbarEqual(a: RepoState | undefined, b: RepoState | undefined): b
       !!b &&
       a.id === b.id &&
       a.name === b.name &&
+      a.kind === b.kind &&
+      a.remoteTarget === b.remoteTarget &&
+      a.diagnostics?.category === b.diagnostics?.category &&
+      a.diagnostics?.ok === b.diagnostics?.ok &&
       a.instanceToken === b.instanceToken &&
       a.data.branches === b.data.branches &&
       a.data.currentBranch === b.data.currentBranch &&
@@ -28,6 +34,7 @@ function repoToolbarEqual(a: RepoState | undefined, b: RepoState | undefined): b
       a.resources.snapshot === b.resources.snapshot &&
       a.resources.status === b.resources.status &&
       a.resources.fetch === b.resources.fetch &&
+      a.resources.diagnostics === b.resources.diagnostics &&
       a.resources.logsByBranch === b.resources.logsByBranch &&
       a.resources.pullRequests === b.resources.pullRequests &&
       a.resources.branchAction === b.resources.branchAction &&
@@ -47,6 +54,8 @@ export function RepoToolbar({ repoId }: Props) {
   const setBranchViewMode = useReposStore((s) => s.setBranchViewMode)
   const setWorkspaceLayout = useReposStore((s) => s.setWorkspaceLayout)
   if (!repo) return null
+  const subtitle = repo.remoteTarget ? remoteTargetSubtitle(repo.remoteTarget) : tildify(repo.id)
+  const diagnosticCategory = repo.kind === 'remote' && repo.diagnostics?.ok === false ? repo.diagnostics.category : null
 
   return (
     <Toolbar variant="repo" className="gap-3">
@@ -54,15 +63,20 @@ export function RepoToolbar({ repoId }: Props) {
         <div className="min-w-0 max-w-48 shrink truncate text-sm font-semibold text-foreground" title={repo.name}>
           {repo.name}
         </div>
-        <div className="min-w-0 truncate text-xs text-muted-foreground" title={repo.id}>
-          {tildify(repo.id)}
+        <div className="min-w-0 truncate text-xs text-muted-foreground" title={subtitle}>
+          {subtitle}
         </div>
+        {diagnosticCategory && (
+          <Badge variant="warning" size="xs" title={repo.diagnostics?.message ?? diagnosticCategory}>
+            {diagnosticCategory}
+          </Badge>
+        )}
       </div>
       <div className="flex shrink-0 items-center gap-2.5">
         <RepoToolbarActions repo={repo} />
         <BranchViewModeControl
           value={repo.ui.branchViewMode}
-          disabled={repo.data.branches.length === 0}
+          disabled={repo.kind === 'remote' || repo.data.branches.length === 0}
           onChange={(viewMode) => setBranchViewMode(repo.id, viewMode)}
         />
         <WorkspaceLayoutControl value={workspaceLayout} onChange={setWorkspaceLayout} />

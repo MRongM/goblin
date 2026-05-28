@@ -1,6 +1,11 @@
+import type { RemoteDiagnosticCategory, RepoKind } from '#/shared/remote-repo.ts'
+
 export interface RepoTabSummary {
   id: string
   name: string
+  kind: RepoKind
+  targetLabel: string | null
+  diagnosticCategory?: RemoteDiagnosticCategory
 }
 
 export interface RepoTabStripLabels {
@@ -15,6 +20,7 @@ export interface RepoTabStripLabels {
   openLocalShortcut: string | null
   clone: string
   cloneShortcut: string | null
+  addRemote: string
   missingTitle: string
   missingDismiss: string
 }

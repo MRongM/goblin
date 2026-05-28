@@ -129,6 +129,7 @@ export function createBranchActions(set: ReposSet, get: ReposGet) {
       if (!repoBefore) return null
       const token = options?.token ?? repoBefore.instanceToken
       if (repoBefore.instanceToken !== token) return null
+      if (repoBefore.kind === 'remote') return { ok: false, message: 'error.remote-unavailable' }
       if (resourceBusy(repoBefore.resources.branchAction) || repoOperationBusy(id, 'branchAction')) {
         return { ok: false, message: 'cancelled' }
       }

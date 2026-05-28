@@ -1,6 +1,7 @@
 import type { StoreApi } from 'zustand'
 import type { BranchInfo, ExecResult, LogEntry, PullRequestFetchMode, WorktreeStatus } from '#/renderer/types.ts'
 import type { CommitDetail } from '#/shared/rpc.ts'
+import type { RemoteDiagnosticsResult, RemoteRepoTarget, RepoKind, RepoSessionEntry } from '#/shared/remote-repo.ts'
 import type { WorkspaceDetailPaneSizes, WorkspaceLayout } from '#/shared/workspace-layout.ts'
 import type { RepoBranchAction, RunBranchActionOptions } from '#/renderer/stores/repos/branch-action-types.ts'
 import type { RepoResourcesState } from '#/renderer/stores/repos/resources.ts'
@@ -69,9 +70,12 @@ export interface CachedRepoState {
 }
 
 export interface RepoState {
-  /** Absolute repo root — also the unique id. */
+  /** Absolute repo root for local repos; normalized ssh:// id for remote repos. */
   id: string
   name: string
+  kind: RepoKind
+  remoteTarget: RemoteRepoTarget | null
+  diagnostics: RemoteDiagnosticsResult | null
   /** Bumped on every fresh open so async writers can detect close-and-reopen. */
   instanceToken: number
   data: RepoDataState
@@ -113,6 +117,7 @@ export interface ReposStore {
    *  (the toplevel git root) on success so callers can drive a final
    *  `setActive` without re-reading the store. */
   openRepo: (path: string, options?: { activate?: boolean }) => Promise<OpenRepoResult>
+  openRemoteRepo: (target: RemoteRepoTarget, options?: { activate?: boolean }) => Promise<OpenRepoResult>
   closeRepo: (id: string) => void
   setActive: (id: string) => void
   /** Reorder the tab strip so `fromId` lands at `toId`'s position, using
@@ -153,6 +158,7 @@ export interface ReposStore {
   ) => Promise<void>
   refreshStatus: (id: string, options?: { token?: number }) => Promise<void>
   refreshAll: (id: string, options?: { token?: number }) => Promise<void>
+  refreshRemoteDiagnostics: (id: string, options?: { token?: number }) => Promise<void>
   syncAndRefresh: (id: string, options?: { token?: number }) => Promise<void>
   backgroundFetch: (id: string) => Promise<void>
   runBranchAction: (
@@ -166,7 +172,7 @@ export interface ReposStore {
 
   setLastResult: (id: string, result: { ok: boolean; message: string }, token: number) => void
   clearEvents: (id: string, eventIds: number[]) => void
-  hydrateSession: (openRepos: string[], activeRepo: string | null) => Promise<void>
+  hydrateSession: (openRepos: Array<RepoSessionEntry | string>, activeRepo: string | null) => Promise<void>
   /** Drop the "missing" indicator for paths that failed to restore — the
    *  user has acknowledged them. */
   dismissMissing: () => void

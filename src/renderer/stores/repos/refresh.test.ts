@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest'
-import { replaceRepo } from '#/renderer/stores/repos/helpers.ts'
+import { emptyRepo, replaceRepo } from '#/renderer/stores/repos/helpers.ts'
 import { useReposStore } from '#/renderer/stores/repos/store.ts'
 import { markRepoOperationTargets, repoOperation } from '#/renderer/stores/repos/runtime.ts'
 import { INITIAL_LOG_COUNT, LOG_PAGE_SIZE } from '#/renderer/stores/repos/refresh.ts'
@@ -7,10 +7,21 @@ import { branch, REPO_ID, resetRefreshTest, rpcHandlers, seedRepo } from '#/rend
 import { canStartRemoteFetch } from '#/renderer/stores/repos/sync-state.ts'
 import type { LogEntry, WorktreeStatus } from '#/renderer/types.ts'
 import type { TerminalPruneRepoInput } from '#/shared/terminal.ts'
+import type { RemoteRepoTarget } from '#/shared/remote-repo.ts'
 
 beforeEach(resetRefreshTest)
 
 type TestRepo = NonNullable<ReturnType<typeof useReposStore.getState>['repos'][string]>
+
+const REMOTE_TARGET: RemoteRepoTarget = {
+  id: 'ssh://deploy@prod:22/srv/goblin',
+  alias: 'prod',
+  host: 'prod',
+  user: 'deploy',
+  port: 22,
+  remotePath: '/srv/goblin',
+  displayName: 'prod:goblin',
+}
 
 function updateRepoForTest(mutator: (repo: TestRepo) => void) {
   useReposStore.setState((s) => {
@@ -18,6 +29,21 @@ function updateRepoForTest(mutator: (repo: TestRepo) => void) {
     if (!repo) return s
     return { repos: { ...s.repos, [REPO_ID]: replaceRepo(repo, mutator) } }
   })
+}
+
+function seedRemoteRepo(): number {
+  const repo = emptyRepo(REMOTE_TARGET.id, REMOTE_TARGET.displayName, {
+    kind: 'remote',
+    remoteTarget: REMOTE_TARGET,
+  })
+  useReposStore.setState({
+    repos: { [REMOTE_TARGET.id]: repo },
+    repoCache: {},
+    order: [REMOTE_TARGET.id],
+    activeId: REMOTE_TARGET.id,
+    sessionReady: true,
+  })
+  return repo.instanceToken
 }
 
 function overrideTerminalBridge(overrides: Partial<Window['goblin']['terminal']>) {
@@ -36,6 +62,34 @@ function logEntry(index: number): LogEntry {
 }
 
 describe('remote fetch timestamps', () => {
+  test('refreshSnapshot skips remote repositories during Phase 1', async () => {
+    const token = seedRemoteRepo()
+    let snapshotCalls = 0
+    rpcHandlers['repo.snapshot'] = async () => {
+      snapshotCalls += 1
+      return { branches: [], current: '' }
+    }
+
+    await useReposStore.getState().refreshSnapshot(REMOTE_TARGET.id, { token })
+
+    expect(snapshotCalls).toBe(0)
+    expect(useReposStore.getState().repos[REMOTE_TARGET.id]?.resources.snapshot.phase).toBe('idle')
+  })
+
+  test('backgroundFetch skips remote repositories during Phase 1', async () => {
+    seedRemoteRepo()
+    let fetchCalls = 0
+    rpcHandlers['repo.fetch'] = async () => {
+      fetchCalls += 1
+      return { ok: true, message: 'ok' }
+    }
+
+    await useReposStore.getState().backgroundFetch(REMOTE_TARGET.id)
+
+    expect(fetchCalls).toBe(0)
+    expect(useReposStore.getState().repos[REMOTE_TARGET.id]?.resources.fetch.loadedAt).toBeNull()
+  })
+
   test('manual sync records the remote fetch settled time', async () => {
     const token = seedRepo([branch('feature/a')])
     const before = Date.now()
@@ -292,6 +346,22 @@ describe('remote fetch timestamps', () => {
     const repo = useReposStore.getState().repos[REPO_ID]
     expect(repo?.resources.branchAction.phase).toBe('idle')
     expect(repo?.resources.fetch.phase).toBe('idle')
+  })
+
+  test('branch actions are unavailable for remote repositories during Phase 1', async () => {
+    const token = seedRemoteRepo()
+    let checkoutCalls = 0
+    rpcHandlers['repo.checkout'] = async () => {
+      checkoutCalls += 1
+      return { ok: true, message: 'ok' }
+    }
+
+    const result = await useReposStore
+      .getState()
+      .runBranchAction(REMOTE_TARGET.id, { kind: 'checkout', branch: 'main' }, { token })
+
+    expect(result).toEqual({ ok: false, message: 'error.remote-unavailable' })
+    expect(checkoutCalls).toBe(0)
   })
 
   test('branch write actions run through branch operation state and refresh after completion', async () => {

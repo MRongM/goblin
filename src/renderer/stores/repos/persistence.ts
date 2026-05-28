@@ -84,6 +84,7 @@ const CachedRepoSchema = v.object({
 })
 
 export function hydrateCachedRepo(repo: RepoState, cached: CachedRepoState | undefined): RepoState {
+  if (repo.kind === 'remote') return repo
   if (!cached || isExpired(cached.savedAt)) return repo
   const selectedBranch = selectedBranchForBranchSet({
     branches: cached.data.branches,
@@ -143,6 +144,7 @@ export function normalizeRepoCache(value: unknown): Record<string, CachedRepoSta
 }
 
 function repoCacheEntry(repo: RepoState): CachedRepoState | null {
+  if (repo.kind === 'remote') return null
   if (repo.data.branches.length === 0 && !repo.data.statusLoaded) return null
   return {
     savedAt: Date.now(),

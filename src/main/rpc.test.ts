@@ -172,6 +172,35 @@ vi.mock('#/main/external-url.ts', () => ({
   openHttpsExternal: vi.fn(),
 }))
 
+vi.mock('#/main/ssh/config.ts', () => ({
+  listSshConfigHosts: vi.fn(() => []),
+  resolveRemoteTarget: vi.fn((input) => ({
+    target: {
+      id: `ssh://${input.user ?? 'deploy'}@${input.host ?? input.alias}:22${input.remotePath}`,
+      alias: input.mode === 'config' ? input.alias : null,
+      host: input.host ?? input.alias,
+      user: input.user ?? 'deploy',
+      port: input.port ?? 22,
+      remotePath: input.remotePath,
+      identityFile: input.identityFile,
+      displayName: `${input.host ?? input.alias}:repo`,
+    },
+  })),
+}))
+
+vi.mock('#/main/ssh/diagnostics.ts', () => ({
+  testRemoteRepository: vi.fn((target) => ({ target, ok: true, stages: [] })),
+}))
+
+vi.mock('#/main/ssh/git.ts', () => ({
+  getRemoteSnapshot: vi.fn(() => ({ branches: [], current: '' })),
+}))
+
+vi.mock('#/main/ssh/path-picker.ts', () => ({
+  getRemoteHome: vi.fn(() => '/home/deploy'),
+  listRemoteDirectory: vi.fn(() => ({ path: '/home/deploy', entries: [], truncated: false })),
+}))
+
 const trustedSender = { id: 1 }
 const trustedEvent = {
   sender: trustedSender,
@@ -297,5 +326,41 @@ describe('main repo rpc cancellation', () => {
 
     expect(aborted).toBe(true)
     await expect(snapshot).resolves.toEqual({ ok: true, data: null })
+  })
+
+  test('rejects invalid remote manual ports at the router boundary', async () => {
+    for (const port of [0, 65536, Number.NaN]) {
+      const result = await invokeRpc('remote.resolveTarget', {
+        mode: 'manual',
+        host: 'prod',
+        user: 'deploy',
+        port,
+        remotePath: '/srv/goblin',
+      })
+
+      expect(result.ok).toBe(false)
+      if (!result.ok) expect(result.error.code).toBe('BAD_REQUEST')
+    }
+  })
+
+  test('accepts optional remote identity file at the router boundary', async () => {
+    const result = await invokeRpc('remote.resolveTarget', {
+      mode: 'manual',
+      host: 'prod',
+      user: 'deploy',
+      port: 22,
+      remotePath: '/srv/goblin',
+      identityFile: '~/.ssh/prod_ed25519',
+    })
+
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.data).toMatchObject({ target: { identityFile: '~/.ssh/prod_ed25519' } })
+  })
+
+  test('does not expose a raw remote command RPC procedure', async () => {
+    const result = await invokeRpc('remote.command', { command: 'uname -a' })
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error).toMatchObject({ name: 'TRPCError', code: 'NOT_FOUND' })
   })
 })

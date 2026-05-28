@@ -1,7 +1,8 @@
-import { FolderGit2, X } from 'lucide-react'
+import { FolderGit2, Server, X } from 'lucide-react'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { cn } from '#/renderer/lib/cn.ts'
+import { Badge } from '#/renderer/components/ui/badge.tsx'
 import type { RepoTabSummary } from '#/renderer/components/repo-tabs/types.ts'
 
 interface RepoTabProps {
@@ -34,6 +35,8 @@ export function RepoTab({
     transform: CSS.Transform.toString(chromeLikeTransform),
     transition,
   }
+  const title = repo.targetLabel ? `${repo.name} - ${repo.targetLabel}` : repo.name
+  const RepoIcon = repo.kind === 'remote' ? Server : FolderGit2
 
   return (
     <div
@@ -50,7 +53,7 @@ export function RepoTab({
           : 'border-transparent text-foreground/65 hover:bg-accent/70 hover:text-foreground',
         isDragging && 'z-10 cursor-grabbing bg-card text-foreground',
       )}
-      title={repo.name}
+      title={title}
     >
       {showSeparator && (
         <span className="pointer-events-none absolute right-0 top-1/2 h-4 -translate-y-1/2 border-r border-separator" />
@@ -64,7 +67,7 @@ export function RepoTab({
         role="tab"
         tabIndex={isActive ? 0 : -1}
         aria-selected={isActive}
-        aria-label={repo.name}
+        aria-label={title}
         onClick={() => onActivate(repo.id)}
         onKeyDown={(e) => {
           if (!isDragging && (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'Home' || e.key === 'End')) {
@@ -82,10 +85,15 @@ export function RepoTab({
           }
         }}
         className="flex h-full min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-sm border-0 bg-transparent p-0 text-left text-inherit outline-none"
-        title={repo.name}
+        title={title}
       >
-        <FolderGit2 size={13} className={cn('shrink-0', isActive ? 'text-foreground' : 'text-foreground/55')} />
+        <RepoIcon size={13} className={cn('shrink-0', isActive ? 'text-foreground' : 'text-foreground/55')} />
         <span className="truncate font-medium">{repo.name}</span>
+        {repo.kind === 'remote' && (
+          <Badge variant="secondary" size="xs" className="hidden shrink-0 text-[9px] min-[190px]:inline-flex">
+            remote
+          </Badge>
+        )}
       </button>
       <button
         type="button"

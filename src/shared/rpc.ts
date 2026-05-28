@@ -12,6 +12,15 @@ import { WORKSPACE_LAYOUTS } from '#/shared/workspace-layout.ts'
 import { COLOR_THEMES } from '#/shared/color-theme.ts'
 import type { WorkspaceDetailPaneSizes, WorkspaceLayout } from '#/shared/workspace-layout.ts'
 import type { ColorTheme } from '#/shared/color-theme.ts'
+import type {
+  RemoteConnectionInput,
+  RemoteDiagnosticsResult,
+  RemoteDirectoryListing,
+  RemoteRepoTarget,
+  RepoSessionEntry,
+  ResolvedRemoteTarget,
+  SshConfigHost,
+} from '#/shared/remote-repo.ts'
 
 export type { WorkspaceLayout } from '#/shared/workspace-layout.ts'
 
@@ -31,8 +40,8 @@ export interface ThemeState {
 }
 
 export interface SessionState {
-  /** Repo paths that were open, in tab order. */
-  openRepos: string[]
+  /** Repo entries that were open, in tab order. */
+  openRepos: RepoSessionEntry[]
   /** The active tab — null when no repos were open. */
   activeRepo: string | null
   detailCollapsed: boolean
@@ -219,6 +228,14 @@ export interface AppRpcHandlers {
     openTerminal: (input: { path: string }) => Promise<ExecResult>
     openEditor: (input: { path: string }) => Promise<ExecResult>
   }
+  remote: {
+    listSshHosts: () => Promise<SshConfigHost[]>
+    resolveTarget: (input: RemoteConnectionInput) => Promise<ResolvedRemoteTarget>
+    testRepository: (input: { target: RemoteRepoTarget }) => Promise<RemoteDiagnosticsResult>
+    snapshot: (input: { target: RemoteRepoTarget }) => Promise<RepoSnapshot | null>
+    home: (input: { target: RemoteRepoTarget }) => Promise<string>
+    listDirectory: (input: { target: RemoteRepoTarget; path: string }) => Promise<RemoteDirectoryListing>
+  }
   theme: {
     get: () => ThemeState
     setPref: (input: { pref: ThemePref }) => Promise<ThemeState>
@@ -246,9 +263,40 @@ const p = t.procedure
 
 const EmptyInput = v.optional(v.void())
 const FiniteNumber = v.pipe(v.number(), v.finite())
+const PortNumber = v.pipe(FiniteNumber, v.integer(), v.minValue(1), v.maxValue(65535))
 const CwdInput = v.object({ cwd: v.string() })
 const PathInput = v.object({ path: v.string() })
 const BranchInput = v.object({ cwd: v.string(), branch: v.string() })
+const RemoteTargetSchema = v.object({
+  id: v.string(),
+  alias: v.nullable(v.string()),
+  host: v.string(),
+  user: v.string(),
+  port: PortNumber,
+  remotePath: v.string(),
+  identityFile: v.optional(v.string()),
+  displayName: v.string(),
+})
+const RepoSessionEntrySchema = v.union([
+  v.object({ kind: v.literal('local'), id: v.string() }),
+  v.object({ kind: v.literal('remote'), id: v.string(), target: RemoteTargetSchema }),
+])
+const RemoteConnectionInputSchema = v.union([
+  v.object({
+    mode: v.literal('config'),
+    alias: v.string(),
+    remotePath: v.string(),
+    identityFile: v.optional(v.string()),
+  }),
+  v.object({
+    mode: v.literal('manual'),
+    host: v.string(),
+    user: v.string(),
+    port: v.optional(PortNumber),
+    remotePath: v.string(),
+    identityFile: v.optional(v.string()),
+  }),
+])
 
 export function createAppRouter(handlers: AppRpcHandlers) {
   return t.router({
@@ -335,6 +383,18 @@ export function createAppRouter(handlers: AppRpcHandlers) {
       openTerminal: p.input(PathInput).mutation(({ input }) => handlers.repo.openTerminal(input)),
       openEditor: p.input(PathInput).mutation(({ input }) => handlers.repo.openEditor(input)),
     }),
+    remote: t.router({
+      listSshHosts: p.input(EmptyInput).query(() => handlers.remote.listSshHosts()),
+      resolveTarget: p.input(RemoteConnectionInputSchema).query(({ input }) => handlers.remote.resolveTarget(input)),
+      testRepository: p
+        .input(v.object({ target: RemoteTargetSchema }))
+        .query(({ input }) => handlers.remote.testRepository(input)),
+      snapshot: p.input(v.object({ target: RemoteTargetSchema })).query(({ input }) => handlers.remote.snapshot(input)),
+      home: p.input(v.object({ target: RemoteTargetSchema })).query(({ input }) => handlers.remote.home(input)),
+      listDirectory: p
+        .input(v.object({ target: RemoteTargetSchema, path: v.string() }))
+        .query(({ input }) => handlers.remote.listDirectory(input)),
+    }),
     theme: t.router({
       get: p.input(EmptyInput).query(() => handlers.theme.get()),
       setPref: p
@@ -365,7 +425,7 @@ export function createAppRouter(handlers: AppRpcHandlers) {
         .input(
           v.object({
             session: v.object({
-              openRepos: v.array(v.string()),
+              openRepos: v.array(RepoSessionEntrySchema),
               activeRepo: v.nullable(v.string()),
               detailCollapsed: v.boolean(),
               detailFocusMode: v.boolean(),

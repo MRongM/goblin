@@ -9,8 +9,19 @@ import {
   REPO_B,
   resetLifecycleTest,
 } from '#/renderer/stores/repos/lifecycle-test-utils.ts'
+import type { RemoteRepoTarget } from '#/shared/remote-repo.ts'
 
 beforeEach(resetLifecycleTest)
+
+const REMOTE_TARGET: RemoteRepoTarget = {
+  id: 'ssh://deploy@prod:22/srv/goblin',
+  alias: 'prod',
+  host: 'prod',
+  user: 'deploy',
+  port: 22,
+  remotePath: '/srv/goblin',
+  displayName: 'prod:goblin',
+}
 
 describe('repo session hydration', () => {
   test('hydrateSession restores tabs through the same initial local refresh path without recent-repo side effects', async () => {
@@ -171,5 +182,28 @@ describe('repo session hydration', () => {
     await work
 
     expect(useReposStore.getState().order).toEqual(repos)
+  })
+
+  test('hydrateSession restores mixed local and remote entries without probing remote ids locally', async () => {
+    const calls = installGoblin({
+      'remote.testRepository': async () => ({ target: REMOTE_TARGET, ok: true, stages: [] }),
+    })
+
+    await useReposStore.getState().hydrateSession(
+      [
+        { kind: 'local', id: REPO_A },
+        { kind: 'remote', id: REMOTE_TARGET.id, target: REMOTE_TARGET },
+      ],
+      REMOTE_TARGET.id,
+    )
+
+    expect(useReposStore.getState().order).toEqual([REPO_A, REMOTE_TARGET.id])
+    expect(useReposStore.getState().activeId).toBe(REMOTE_TARGET.id)
+    expect(useReposStore.getState().repos[REMOTE_TARGET.id]).toMatchObject({
+      kind: 'remote',
+      remoteTarget: REMOTE_TARGET,
+    })
+    expect(calls.snapshot).toEqual([REPO_A])
+    expect(calls.status).toEqual([REPO_A])
   })
 })

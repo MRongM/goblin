@@ -69,6 +69,7 @@ import {
   normalizeDetailPaneSizes,
   normalizeWorkspaceLayout,
 } from '#/shared/workspace-layout.ts'
+import { normalizeRemoteTarget, type RepoSessionEntry } from '#/shared/remote-repo.ts'
 import { isGlobalShortcutRegistered, replaceGlobalShortcut, syncGlobalShortcuts } from '#/main/shortcuts.ts'
 import { buildAppMenu, setMenuWorkspaceLayout } from '#/main/menu.ts'
 import { applyLangPref, getCurrentLang, getDictionary } from '#/main/i18n/index.ts'
@@ -79,6 +80,10 @@ import { closeWorktreeSession } from '#/main/terminal.ts'
 import { openHttpExternal, openHttpsExternal } from '#/main/external-url.ts'
 import { isTrustedIpcEvent } from '#/main/ipc/trusted-webcontents.ts'
 import { WINDOW_BACKGROUND_BY_COLOR_THEME } from '#/shared/theme-tokens.ts'
+import { listSshConfigHosts, resolveRemoteTarget as resolveSshRemoteTarget } from '#/main/ssh/config.ts'
+import { testRemoteRepository } from '#/main/ssh/diagnostics.ts'
+import { getRemoteSnapshot } from '#/main/ssh/git.ts'
+import { getRemoteHome, listRemoteDirectory } from '#/main/ssh/path-picker.ts'
 
 const PROJECT_GITHUB_URL = 'https://github.com/nano-props/goblin'
 const PATCH_TIMEOUT_MS = 90_000
@@ -426,6 +431,38 @@ function createRpcHandlers(): AppRpcHandlers {
       openEditor: async ({ path: p }) => {
         if (!isValidAbsolutePath(p)) return { ok: false, message: 'error.invalid-path' }
         return openInPreferredEditor(p, getEditorApp()) ?? { ok: false, message: 'error.editor-not-installed' }
+      },
+    },
+    remote: {
+      listSshHosts: async () => listSshConfigHosts(),
+      resolveTarget: async (input) => resolveSshRemoteTarget(input, currentRpcSignal()),
+      testRepository: async ({ target }) => {
+        const normalized = normalizeRemoteTarget(target)
+        if (!normalized || normalized.id !== target.id) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: 'Invalid remote repository target' })
+        }
+        return testRemoteRepository(normalized, { signal: currentRpcSignal() })
+      },
+      snapshot: async ({ target }) => {
+        const normalized = normalizeRemoteTarget(target)
+        if (!normalized || normalized.id !== target.id) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: 'Invalid remote repository target' })
+        }
+        return getRemoteSnapshot(normalized, { signal: currentRpcSignal() })
+      },
+      home: async ({ target }) => {
+        const normalized = normalizeRemoteTarget(target)
+        if (!normalized || normalized.id !== target.id) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: 'Invalid remote repository target' })
+        }
+        return getRemoteHome(normalized, { signal: currentRpcSignal() })
+      },
+      listDirectory: async ({ target, path: remotePath }) => {
+        const normalized = normalizeRemoteTarget(target)
+        if (!normalized || normalized.id !== target.id) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: 'Invalid remote repository target' })
+        }
+        return listRemoteDirectory(normalized, remotePath, { signal: currentRpcSignal() })
       },
     },
     theme: {
@@ -820,15 +857,17 @@ function isValidCloneOperationId(value: unknown): value is string {
 
 async function saveSession(session: SessionState): Promise<void> {
   if (!session || !Array.isArray(session.openRepos)) return
-  const openRepos = session.openRepos.map(toSafeSessionPath).filter((p): p is string => p !== null)
-  const activeRepo = toSafeSessionPath(session.activeRepo)
+  const openRepos = session.openRepos
+    .map(toSafeSessionEntry)
+    .filter((entry): entry is RepoSessionEntry => entry !== null)
+  const activeRepo = normalizeActiveSessionRepo(session.activeRepo, openRepos)
   const workspaceLayout = normalizeWorkspaceLayout(session.workspaceLayout)
   const detailCollapsed =
     typeof session.detailCollapsed === 'boolean' ? session.detailCollapsed : DEFAULT_SESSION_DETAIL_COLLAPSED
   const detailFocusMode = workspaceLayout === 'top-bottom' && session.detailFocusMode === true
   await setSession({
     openRepos,
-    activeRepo: activeRepo && openRepos.includes(activeRepo) ? activeRepo : null,
+    activeRepo,
     detailCollapsed: effectiveDetailCollapsed(workspaceLayout, detailCollapsed),
     detailFocusMode,
     workspaceLayout,
@@ -838,6 +877,28 @@ async function saveSession(session: SessionState): Promise<void> {
   // layout; the live native menu snapshot is only an optimization for
   // immediate radio/check enabled state.
   setMenuWorkspaceLayout(workspaceLayout)
+}
+
+function toSafeSessionEntry(value: unknown): RepoSessionEntry | null {
+  const localPath = toSafeSessionPath(value)
+  if (localPath) return { kind: 'local', id: localPath }
+  if (!value || typeof value !== 'object') return null
+  const entry = value as { kind?: unknown; id?: unknown; target?: unknown }
+  if (entry.kind === 'local') {
+    const id = toSafeSessionPath(entry.id)
+    return id ? { kind: 'local', id } : null
+  }
+  if (entry.kind !== 'remote' || typeof entry.id !== 'string') return null
+  const target = normalizeRemoteTarget(entry.target && typeof entry.target === 'object' ? entry.target : {})
+  if (!target || entry.id !== target.id) return null
+  return { kind: 'remote', id: target.id, target }
+}
+
+function normalizeActiveSessionRepo(value: unknown, openRepos: RepoSessionEntry[]): string | null {
+  if (typeof value !== 'string') return null
+  const localPath = toSafeSessionPath(value)
+  const activeId = localPath ?? value
+  return openRepos.some((entry) => entry.id === activeId) ? activeId : null
 }
 
 function toSafeSessionPath(p: unknown): string | null {

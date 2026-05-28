@@ -14,6 +14,7 @@ export function createCommitActions(set: ReposSet, get: ReposGet) {
     async openCommit(id: string, hash: string) {
       const repoBefore = get().repos[id]
       if (!repoBefore) return
+      if (repoBefore.kind === 'remote') return
       const token = repoBefore.instanceToken
       set((s) => {
         const repo = s.repos[id]

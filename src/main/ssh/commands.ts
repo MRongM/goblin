@@ -1,0 +1,140 @@
+import os from 'node:os'
+import path from 'node:path'
+import { execa, ExecaError } from 'execa'
+import { FIELD_SEP } from '#/main/git/parsers.ts'
+import type { RemoteRepoTarget } from '#/shared/remote-repo.ts'
+
+const SSH_COMMAND_TIMEOUT_MS = 15_000
+const SSH_CONNECT_TIMEOUT_SEC = 10
+export const REMOTE_SNAPSHOT_CURRENT_MARKER = '__GOBLIN_REMOTE_CURRENT__'
+export const REMOTE_SNAPSHOT_DEFAULT_MARKER = '__GOBLIN_REMOTE_DEFAULT__'
+export const REMOTE_SNAPSHOT_BRANCHES_MARKER = '__GOBLIN_REMOTE_BRANCHES__'
+
+export type RemoteCommandKind =
+  | { type: 'printHome' }
+  | { type: 'checkShell' }
+  | { type: 'checkGit' }
+  | { type: 'testDirectory'; path: string }
+  | { type: 'revParseTopLevel'; path: string }
+  | { type: 'listDirectories'; path: string; limit?: number }
+  | { type: 'gitSnapshot'; path: string }
+
+export interface RemoteCommandResult {
+  ok: boolean
+  stdout: string
+  stderr: string
+  message?: string
+  timedOut?: boolean
+}
+
+export interface RemoteCommandInvocation {
+  command: 'ssh'
+  args: string[]
+  script: string
+}
+
+export type RemoteCommandRunner = (
+  command: RemoteCommandKind,
+  target: RemoteRepoTarget,
+  options?: { signal?: AbortSignal },
+) => Promise<RemoteCommandResult>
+
+export function buildRemoteCommandInvocation(target: RemoteRepoTarget, command: RemoteCommandKind): RemoteCommandInvocation {
+  const script = scriptForCommand(command)
+  const args = [
+    '-T',
+    '-o',
+    'RequestTTY=no',
+    '-o',
+    'StrictHostKeyChecking=yes',
+    '-o',
+    `ConnectTimeout=${SSH_CONNECT_TIMEOUT_SEC}`,
+  ]
+  const destination = target.alias ?? `${target.user}@${target.host}`
+  if (target.identityFile) args.push('-i', expandIdentityFile(target.identityFile))
+  if (!target.alias) args.push('-p', String(target.port))
+  args.push('--', destination, `sh -lc ${shellQuote(script)}`)
+  return { command: 'ssh', args, script }
+}
+
+export async function runRemoteCommand(
+  target: RemoteRepoTarget,
+  command: RemoteCommandKind,
+  options?: { signal?: AbortSignal; timeoutMs?: number },
+): Promise<RemoteCommandResult> {
+  if (options?.signal?.aborted) return { ok: false, stdout: '', stderr: '', message: 'cancelled' }
+  const invocation = buildRemoteCommandInvocation(target, command)
+  try {
+    const { stdout, stderr } = await execa(invocation.command, invocation.args, {
+      timeout: options?.timeoutMs ?? SSH_COMMAND_TIMEOUT_MS,
+      cancelSignal: options?.signal,
+      forceKillAfterDelay: 500,
+      maxBuffer: 2 * 1024 * 1024,
+    })
+    return { ok: true, stdout: stdout.trimEnd(), stderr: stderr.trimEnd() }
+  } catch (err) {
+    const e = err as { stdout?: unknown; stderr?: unknown; timedOut?: boolean; isCanceled?: boolean; message?: string }
+    const stdout = typeof e.stdout === 'string' ? e.stdout.trimEnd() : ''
+    const stderr = typeof e.stderr === 'string' ? e.stderr.trimEnd() : ''
+    if (options?.signal?.aborted || e.isCanceled === true) {
+      return { ok: false, stdout, stderr, message: 'cancelled' }
+    }
+    if (err instanceof ExecaError && e.timedOut) {
+      return { ok: false, stdout, stderr, message: 'timeout', timedOut: true }
+    }
+    return { ok: false, stdout, stderr, message: stderr || e.message || 'unknown' }
+  }
+}
+
+function scriptForCommand(command: RemoteCommandKind): string {
+  switch (command.type) {
+    case 'printHome':
+      return `printf '%s\\n' "$HOME"`
+    case 'checkShell':
+      return `printf '%s\\n' ok`
+    case 'checkGit':
+      return 'command -v git'
+    case 'testDirectory':
+      return `test -d ${shellQuote(command.path)}`
+    case 'revParseTopLevel':
+      return `git -C ${shellQuote(command.path)} rev-parse --show-toplevel`
+    case 'listDirectories': {
+      const limit = Math.max(1, Math.min(201, Math.floor(command.limit ?? 201)))
+      return `find ${shellQuote(
+        command.path,
+      )} -mindepth 1 -maxdepth 1 -type d -print 2>/dev/null | LC_ALL=C sort | head -n ${limit}`
+    }
+    case 'gitSnapshot': {
+      const repo = shellQuote(command.path)
+      const branchFormat = [
+        '%(refname:short)',
+        '%(objectname:short)',
+        '%(subject)',
+        '%(authordate:iso-strict)',
+        '%(authorname)',
+        '%(upstream:short)',
+        '%(upstream:track)',
+      ].join(FIELD_SEP)
+      return [
+        `printf '%s\\n' ${shellQuote(REMOTE_SNAPSHOT_CURRENT_MARKER)}`,
+        `git -C ${repo} symbolic-ref --short HEAD 2>/dev/null || true`,
+        `printf '%s\\n' ${shellQuote(REMOTE_SNAPSHOT_DEFAULT_MARKER)}`,
+        `git -C ${repo} symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##'`,
+        `printf '%s\\n' ${shellQuote(REMOTE_SNAPSHOT_BRANCHES_MARKER)}`,
+        `git -C ${repo} for-each-ref --format=${shellQuote(branchFormat)} refs/heads/`,
+      ].join('\n')
+    }
+  }
+  const exhaustive: never = command
+  return exhaustive
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`
+}
+
+function expandIdentityFile(value: string): string {
+  if (value === '~') return os.homedir()
+  if (value.startsWith('~/')) return path.join(os.homedir(), value.slice(2))
+  return value
+}

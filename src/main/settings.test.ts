@@ -1,5 +1,5 @@
 import { afterEach, expect, test, vi } from 'vitest'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -117,4 +117,104 @@ test('persists session detail focus mode', async () => {
     session: { detailFocusMode: boolean }
   }
   expect(saved.session.detailFocusMode).toBe(true)
+})
+
+test('normalizes legacy local session paths and typed remote entries', async () => {
+  tmp = mkdtempSync(path.join(os.tmpdir(), 'gbl-settings-test-'))
+  vi.doMock('electron', () => ({ app: { getPath: () => tmp! } }))
+  writeFileSync(
+    path.join(tmp, 'settings.json'),
+    JSON.stringify({
+      session: {
+        openRepos: [
+          '/tmp/local-repo',
+          {
+            kind: 'remote',
+            id: 'ssh://deploy@prod:22/srv/goblin',
+            target: {
+              id: 'ssh://deploy@prod:22/srv/goblin',
+              alias: 'prod',
+              host: 'prod',
+              user: 'deploy',
+              port: 22,
+              remotePath: '/srv/goblin',
+              identityFile: '~/.ssh/prod_ed25519',
+              displayName: 'prod:goblin',
+              password: 'secret',
+              passphrase: 'secret',
+              privateKey: 'secret',
+              stderr: 'sensitive stderr',
+              terminalOutput: 'sensitive output',
+            },
+          },
+        ],
+        activeRepo: 'ssh://deploy@prod:22/srv/goblin',
+        detailCollapsed: false,
+        detailFocusMode: false,
+        workspaceLayout: 'branches',
+        detailPaneSizes: { 'top-bottom': 50, 'left-right': 60 },
+      },
+    }),
+  )
+  const settings = await import('#/main/settings.ts')
+
+  const loaded = await settings.loadSettings()
+
+  expect(loaded.session.openRepos).toEqual([
+    { kind: 'local', id: '/tmp/local-repo' },
+    {
+      kind: 'remote',
+      id: 'ssh://deploy@prod:22/srv/goblin',
+      target: {
+        id: 'ssh://deploy@prod:22/srv/goblin',
+        alias: 'prod',
+        host: 'prod',
+        user: 'deploy',
+        port: 22,
+        remotePath: '/srv/goblin',
+        identityFile: '~/.ssh/prod_ed25519',
+        displayName: 'prod:goblin',
+      },
+    },
+  ])
+  expect(JSON.stringify(loaded.session)).not.toMatch(/password|passphrase|privateKey|stderr|terminalOutput|secret/)
+  expect(loaded.session.activeRepo).toBe('ssh://deploy@prod:22/srv/goblin')
+})
+
+test('drops malformed remote session entries and clears stale active repo', async () => {
+  tmp = mkdtempSync(path.join(os.tmpdir(), 'gbl-settings-test-'))
+  vi.doMock('electron', () => ({ app: { getPath: () => tmp! } }))
+  writeFileSync(
+    path.join(tmp, 'settings.json'),
+    JSON.stringify({
+      session: {
+        openRepos: [
+          {
+            kind: 'remote',
+            id: 'ssh://deploy@prod:22/srv/other',
+            target: {
+              id: 'ssh://deploy@prod:22/srv/goblin',
+              alias: null,
+              host: 'prod',
+              user: 'deploy',
+              port: 22,
+              remotePath: '/srv/goblin',
+              displayName: 'prod:goblin',
+            },
+          },
+        ],
+        activeRepo: 'ssh://deploy@prod:22/srv/other',
+        detailCollapsed: false,
+        detailFocusMode: false,
+        workspaceLayout: 'branches',
+        detailPaneSizes: { 'top-bottom': 50, 'left-right': 60 },
+      },
+    }),
+  )
+  const settings = await import('#/main/settings.ts')
+
+  const loaded = await settings.loadSettings()
+
+  expect(loaded.session.openRepos).toEqual([])
+  expect(loaded.session.activeRepo).toBeNull()
 })

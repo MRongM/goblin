@@ -12,6 +12,7 @@ export function installGoblin(overrides: Record<string, (input: any) => unknown>
   const calls = {
     recent: [] as string[],
     snapshot: [] as string[],
+    remoteSnapshot: [] as string[],
     status: [] as string[],
   }
   const handlers: Record<string, (input: any) => unknown> = {
@@ -21,6 +22,10 @@ export function installGoblin(overrides: Record<string, (input: any) => unknown>
     },
     'repo.snapshot': ({ cwd }: { cwd: string }) => {
       calls.snapshot.push(cwd)
+      return { branches: [], current: '' }
+    },
+    'remote.snapshot': ({ target }: { target: { id: string } }) => {
+      calls.remoteSnapshot.push(target.id)
       return { branches: [], current: '' }
     },
     'repo.pullRequests': async () => [],

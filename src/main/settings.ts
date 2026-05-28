@@ -26,6 +26,7 @@ import {
 import { DEFAULT_COLOR_THEME, isColorTheme } from '#/shared/color-theme.ts'
 import type { EditorPref, LangPref, SessionState, TerminalPref, ThemePref } from '#/shared/rpc.ts'
 import type { ColorTheme } from '#/shared/color-theme.ts'
+import { normalizeRemoteTarget, type RepoSessionEntry } from '#/shared/remote-repo.ts'
 
 export interface WindowBounds {
   x?: number
@@ -108,10 +109,9 @@ function normalizeSession(session: unknown): SessionState {
   if (!session || typeof session !== 'object') return { ...DEFAULTS.session }
   const value = session as Partial<SessionState>
   const openRepos = Array.isArray(value.openRepos)
-    ? value.openRepos.map(toSafeSessionPath).filter((p): p is string => p !== null)
+    ? value.openRepos.map(normalizeSessionEntry).filter((entry): entry is RepoSessionEntry => entry !== null)
     : []
-  const activePath = toSafeSessionPath(value.activeRepo)
-  const activeRepo = activePath && openRepos.includes(activePath) ? activePath : null
+  const activeRepo = normalizeActiveRepo(value.activeRepo, openRepos)
   const workspaceLayout = normalizeWorkspaceLayout(value.workspaceLayout)
   const detailCollapsed =
     typeof value.detailCollapsed === 'boolean' ? value.detailCollapsed : DEFAULTS.session.detailCollapsed
@@ -127,6 +127,28 @@ function normalizeSession(session: unknown): SessionState {
     workspaceLayout,
     detailPaneSizes: normalizeDetailPaneSizes(value.detailPaneSizes),
   }
+}
+
+function normalizeSessionEntry(value: unknown): RepoSessionEntry | null {
+  const legacyLocalPath = toSafeSessionPath(value)
+  if (legacyLocalPath) return { kind: 'local', id: legacyLocalPath }
+  if (!value || typeof value !== 'object') return null
+  const entry = value as { kind?: unknown; id?: unknown; target?: unknown }
+  if (entry.kind === 'local') {
+    const id = toSafeSessionPath(entry.id)
+    return id ? { kind: 'local', id } : null
+  }
+  if (entry.kind !== 'remote' || typeof entry.id !== 'string') return null
+  const target = normalizeRemoteTarget(entry.target && typeof entry.target === 'object' ? entry.target : {})
+  if (!target || entry.id !== target.id) return null
+  return { kind: 'remote', id: target.id, target }
+}
+
+function normalizeActiveRepo(activeRepo: unknown, openRepos: RepoSessionEntry[]): string | null {
+  if (typeof activeRepo !== 'string') return null
+  const activeLocalPath = toSafeSessionPath(activeRepo)
+  const activeId = activeLocalPath ?? activeRepo
+  return openRepos.some((entry) => entry.id === activeId) ? activeId : null
 }
 
 function normalizeRecentRepos(recentRepos: unknown): string[] {

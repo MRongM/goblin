@@ -43,6 +43,10 @@ function emptyBranchLog(): BranchLogState {
   return { entries: [], selectedHash: null, hasMore: false }
 }
 
+function localRepoAvailable(repo: { kind: string } | undefined): boolean {
+  return !!repo && repo.kind !== 'remote'
+}
+
 function logPage(entries: LogEntry[], pageSize: number): { entries: LogEntry[]; hasMore: boolean } {
   return { entries: entries.slice(0, pageSize), hasMore: entries.length > pageSize }
 }
@@ -97,6 +101,7 @@ export function createRefreshActions(set: ReposSet, get: ReposGet) {
   ): Promise<ExecResult | null> {
     const repoBefore = get().repos[id]
     if (!repoBefore) return null
+    if (!localRepoAvailable(repoBefore)) return null
     const token = options?.token ?? repoBefore.instanceToken
     if (repoBefore.instanceToken !== token) return null
     if (!canStartRemoteFetch(repoBefore)) return { ok: false, message: 'error.network-op-in-progress' }
@@ -150,6 +155,7 @@ export function createRefreshActions(set: ReposSet, get: ReposGet) {
   ): Promise<void> {
     const repoBefore = get().repos[id]
     if (!repoBefore) return
+    if (!localRepoAvailable(repoBefore)) return
     const token = options?.token ?? repoBefore.instanceToken
     if (repoBefore.instanceToken !== token) return
     const branch = branchArg ?? branchForVisibleLog(repoBefore)
@@ -207,6 +213,13 @@ export function createRefreshActions(set: ReposSet, get: ReposGet) {
       if (!repoBefore) return
       const token = options?.token ?? repoBefore.instanceToken
       if (repoBefore.instanceToken !== token) return
+      const snapshotTask =
+        repoBefore.kind === 'remote'
+          ? repoBefore.remoteTarget
+            ? (signal: AbortSignal) => rpc.remote.snapshot.query({ target: repoBefore.remoteTarget! }, { signal })
+            : null
+          : (signal: AbortSignal) => rpc.repo.snapshot.query({ cwd: id }, { signal })
+      if (!snapshotTask) return
       updateIfFresh(set, id, token, (r) => {
         startResource(r.resources.snapshot, { hasData: r.data.branches.length > 0 })
       })
@@ -218,7 +231,7 @@ export function createRefreshActions(set: ReposSet, get: ReposGet) {
         operationKey: 'snapshot',
         priority: 50,
         targets: [{ key: 'snapshot', reason: 'snapshot' }],
-        task: (signal) => rpc.repo.snapshot.query({ cwd: id }, { signal }),
+        task: snapshotTask,
         errorFromResult: (snap) => (snap ? null : 'error.failed-read-repo'),
         onResult: (snap, ctx) => {
           if (!snap) {
@@ -311,6 +324,7 @@ export function createRefreshActions(set: ReposSet, get: ReposGet) {
     ) {
       const repoBefore = get().repos[id]
       if (!repoBefore) return
+      if (!localRepoAvailable(repoBefore)) return
       const token = options?.token ?? repoBefore.instanceToken
       if (repoBefore.instanceToken !== token) return
       const mode = options?.mode ?? 'full'
@@ -412,6 +426,7 @@ export function createRefreshActions(set: ReposSet, get: ReposGet) {
     async refreshStatus(id: string, options?: { token?: number }) {
       const repoBefore = get().repos[id]
       if (!repoBefore) return
+      if (!localRepoAvailable(repoBefore)) return
       const token = options?.token ?? repoBefore.instanceToken
       if (repoBefore.instanceToken !== token) return
       await runLatestResourceOperation({
@@ -441,6 +456,7 @@ export function createRefreshActions(set: ReposSet, get: ReposGet) {
     async refreshAll(id: string, options?: { token?: number }) {
       const repoBefore = get().repos[id]
       if (!repoBefore) return
+      if (!localRepoAvailable(repoBefore)) return
       const token = options?.token ?? repoBefore.instanceToken
       if (repoBefore.instanceToken !== token) return
       await runRefreshAllWorkflow(get, { id, token })
@@ -449,6 +465,7 @@ export function createRefreshActions(set: ReposSet, get: ReposGet) {
     async syncAndRefresh(id: string, options?: { token?: number }) {
       const repoBefore = get().repos[id]
       if (!repoBefore) return
+      if (!localRepoAvailable(repoBefore)) return
       const token = options?.token ?? repoBefore.instanceToken
       if (repoBefore.instanceToken !== token) return
       if (!canStartRemoteFetch(repoBefore)) return
@@ -477,6 +494,7 @@ export function createRefreshActions(set: ReposSet, get: ReposGet) {
 
       const repoBefore = get().repos[id]
       if (!repoBefore) return
+      if (!localRepoAvailable(repoBefore)) return
       if (!canStartRemoteFetch(repoBefore)) return
       const token = repoBefore.instanceToken
 

@@ -9,8 +9,19 @@ import {
   REPO_B,
   resetLifecycleTest,
 } from '#/renderer/stores/repos/lifecycle-test-utils.ts'
+import type { RemoteRepoTarget } from '#/shared/remote-repo.ts'
 
 beforeEach(resetLifecycleTest)
+
+const REMOTE_TARGET: RemoteRepoTarget = {
+  id: 'ssh://deploy@prod:22/srv/goblin',
+  alias: 'prod',
+  host: 'prod',
+  user: 'deploy',
+  port: 22,
+  remotePath: '/srv/goblin',
+  displayName: 'prod:goblin',
+}
 
 describe('repo lifecycle', () => {
   test('openRepo opens the resolved repo, records it as recent, and starts initial local refresh', async () => {
@@ -75,5 +86,52 @@ describe('repo lifecycle', () => {
     await flushRpc()
 
     expect(useReposStore.getState().repos[REPO_A]?.data.currentBranch).toBe('fresh')
+  })
+
+  test('openRemoteRepo adds, focuses, and loads a remote repo without local probe or recent side effects', async () => {
+    const remoteSnapshots: string[] = []
+    const calls = installGoblin({
+      probe: () => {
+        throw new Error('remote repo should not use local probe')
+      },
+      'remote.testRepository': async () => ({ target: REMOTE_TARGET, ok: true, stages: [] }),
+      'remote.snapshot': async ({ target }: { target: RemoteRepoTarget }) => {
+        remoteSnapshots.push(target.id)
+        return {
+          branches: [branch('main', { isCurrent: true, lastCommitHash: 'abc1234' })],
+          current: 'main',
+        }
+      },
+    })
+
+    const result = await useReposStore.getState().openRemoteRepo(REMOTE_TARGET)
+    await flushRpc()
+
+    expect(result).toEqual({ ok: true, id: REMOTE_TARGET.id })
+    expect(useReposStore.getState().order).toEqual([REMOTE_TARGET.id])
+    expect(useReposStore.getState().activeId).toBe(REMOTE_TARGET.id)
+    expect(useReposStore.getState().repos[REMOTE_TARGET.id]).toMatchObject({
+      id: REMOTE_TARGET.id,
+      name: 'prod:goblin',
+      kind: 'remote',
+      remoteTarget: REMOTE_TARGET,
+    })
+    expect(calls.recent).toEqual([])
+    expect(calls.snapshot).toEqual([])
+    expect(remoteSnapshots).toEqual([REMOTE_TARGET.id])
+    expect(calls.status).toEqual([])
+    expect(useReposStore.getState().repos[REMOTE_TARGET.id]?.data.currentBranch).toBe('main')
+    expect(useReposStore.getState().repos[REMOTE_TARGET.id]?.data.branches.map((item) => item.name)).toEqual(['main'])
+  })
+
+  test('openRemoteRepo activates an existing remote repo without duplicating tab order', async () => {
+    installGoblin({ 'remote.testRepository': async () => ({ target: REMOTE_TARGET, ok: true, stages: [] }) })
+
+    await useReposStore.getState().openRemoteRepo(REMOTE_TARGET)
+    await useReposStore.getState().openRepo(REPO_A)
+    await useReposStore.getState().openRemoteRepo(REMOTE_TARGET)
+
+    expect(useReposStore.getState().order).toEqual([REMOTE_TARGET.id, REPO_A])
+    expect(useReposStore.getState().activeId).toBe(REMOTE_TARGET.id)
   })
 })

@@ -17,6 +17,10 @@ export function isBranchActionBlocked(repo: RepoState): boolean {
   return resourceBusy(repo.resources.branchAction)
 }
 
+export function repoBranchActionsAvailable(repo: RepoState): boolean {
+  return repo.kind !== 'remote'
+}
+
 export function branchActionItemIdFromKind(kind: RepoBranchActionKind | null): BranchActionItemId | null {
   switch (kind) {
     case 'checkout':

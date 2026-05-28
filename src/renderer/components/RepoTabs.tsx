@@ -15,9 +15,11 @@ import { useReposStore } from '#/renderer/stores/repos/store.ts'
 import { useT } from '#/renderer/stores/i18n.ts'
 import { useSettingsStore } from '#/renderer/stores/settings.ts'
 import { RepoTabStrip } from '#/renderer/components/repo-tabs/RepoTabStrip.tsx'
+import { AddRemoteRepositoryDialog } from '#/renderer/components/AddRemoteRepositoryDialog.tsx'
 import { CloneRepositoryDialog, type CloneRepositoryRequest } from '#/renderer/components/CloneRepositoryDialog.tsx'
 import type { RepoTabSummary } from '#/renderer/components/repo-tabs/types.ts'
 import type { CloneRepoResult } from '#/shared/rpc.ts'
+import { remoteTargetSubtitle, type RemoteRepoTarget } from '#/shared/remote-repo.ts'
 import { rpc } from '#/renderer/rpc.ts'
 
 /** Equality fn for the summaries array. Zustand's `useShallow` does
@@ -31,7 +33,15 @@ function summariesEqual(a: RepoTabSummary[], b: RepoTabSummary[]): boolean {
   for (let i = 0; i < a.length; i++) {
     const x = a[i]!
     const y = b[i]!
-    if (x.id !== y.id || x.name !== y.name) return false
+    if (
+      x.id !== y.id ||
+      x.name !== y.name ||
+      x.kind !== y.kind ||
+      x.targetLabel !== y.targetLabel ||
+      x.diagnosticCategory !== y.diagnosticCategory
+    ) {
+      return false
+    }
   }
   return true
 }
@@ -39,9 +49,11 @@ function summariesEqual(a: RepoTabSummary[], b: RepoTabSummary[]): boolean {
 interface RepoTabsProps {
   cloneOpen: boolean
   onCloneOpenChange: (open: boolean) => void
+  remoteOpen: boolean
+  onRemoteOpenChange: (open: boolean) => void
 }
 
-export function RepoTabs({ cloneOpen, onCloneOpenChange }: RepoTabsProps) {
+export function RepoTabs({ cloneOpen, onCloneOpenChange, remoteOpen, onRemoteOpenChange }: RepoTabsProps) {
   const t = useT()
   const shortcutsDisabled = useSettingsStore((s) => s.shortcutsDisabled)
   // Build the summary array inside the selector but compare with our
@@ -57,7 +69,15 @@ export function RepoTabs({ cloneOpen, onCloneOpenChange }: RepoTabsProps) {
       s.order
         .map<RepoTabSummary | null>((id) => {
           const r = s.repos[id]
-          return r ? { id: r.id, name: r.name } : null
+          if (!r) return null
+          return {
+            id: r.id,
+            name: r.name,
+            kind: r.kind,
+            targetLabel: r.remoteTarget ? remoteTargetSubtitle(r.remoteTarget) : null,
+            diagnosticCategory:
+              r.kind === 'remote' && r.diagnostics?.ok === false ? r.diagnostics.category : undefined,
+          }
         })
         .filter((x): x is RepoTabSummary => x !== null),
     summariesEqual,
@@ -66,6 +86,7 @@ export function RepoTabs({ cloneOpen, onCloneOpenChange }: RepoTabsProps) {
   const setActive = useReposStore((s) => s.setActive)
   const closeRepo = useReposStore((s) => s.closeRepo)
   const openRepo = useReposStore((s) => s.openRepo)
+  const openRemoteRepo = useReposStore((s) => s.openRemoteRepo)
   const reorderRepos = useReposStore((s) => s.reorderRepos)
   const missing = useReposStore(useShallow((s) => s.missingFromSession))
   const dismissMissing = useReposStore((s) => s.dismissMissing)
@@ -95,6 +116,17 @@ export function RepoTabs({ cloneOpen, onCloneOpenChange }: RepoTabsProps) {
     return result
   }
 
+  async function handleAddRemote(target: RemoteRepoTarget) {
+    const result = await openRemoteRepo(target)
+    if (!result.ok) {
+      toast.error(t('drop.open-failed'), {
+        description: t(result.message),
+      })
+      return
+    }
+    toast.success(t('repo-tabs.remote-opened'), { description: remoteTargetSubtitle(target) })
+  }
+
   return (
     <>
       <RepoTabStrip
@@ -113,6 +145,7 @@ export function RepoTabs({ cloneOpen, onCloneOpenChange }: RepoTabsProps) {
           openLocalShortcut: shortcutsDisabled ? null : '⌘O',
           clone: t('repo-tabs.clone'),
           cloneShortcut: shortcutsDisabled ? null : '⌘⇧O',
+          addRemote: t('repo-tabs.add-remote'),
           missingTitle: t('repo-tabs.missing-title', { n: missing.length }),
           missingDismiss: t('repo-tabs.missing-dismiss'),
         }}
@@ -121,9 +154,15 @@ export function RepoTabs({ cloneOpen, onCloneOpenChange }: RepoTabsProps) {
         onReorder={reorderRepos}
         onOpenLocal={handleOpenLocal}
         onClone={() => onCloneOpenChange(true)}
+        onAddRemote={() => onRemoteOpenChange(true)}
         onDismissMissing={dismissMissing}
       />
       <CloneRepositoryDialog open={cloneOpen} onClose={() => onCloneOpenChange(false)} onClone={handleClone} />
+      <AddRemoteRepositoryDialog
+        open={remoteOpen}
+        onClose={() => onRemoteOpenChange(false)}
+        onAddRemote={handleAddRemote}
+      />
     </>
   )
 }

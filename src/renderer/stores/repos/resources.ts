@@ -23,6 +23,7 @@ export interface RepoResourcesState {
   snapshot: RepoResourceState
   status: RepoResourceState
   fetch: RepoResourceState
+  diagnostics: RepoResourceState
   branchAction: RepoBranchActionResourceState
   pullRequests: RepoPullRequestResourceState
   pullRequestsByBranch: Record<string, RepoPullRequestResourceState>
@@ -61,6 +62,7 @@ export function emptyRepoResources(): RepoResourcesState {
     snapshot: idleResource(),
     status: idleResource(),
     fetch: idleResource(),
+    diagnostics: idleResource(),
     branchAction: idleBranchActionResource(),
     pullRequests: idlePullRequestResource(),
     pullRequestsByBranch: {},
