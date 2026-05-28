@@ -3,7 +3,7 @@ import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { cn } from '#/renderer/lib/cn.ts'
 import { Badge } from '#/renderer/components/ui/badge.tsx'
-import type { RepoTabSummary } from '#/renderer/components/repo-tabs/types.ts'
+import type { RepoTabConnectionStatus, RepoTabSummary } from '#/renderer/components/repo-tabs/types.ts'
 
 interface RepoTabProps {
   repo: RepoTabSummary
@@ -14,6 +14,19 @@ interface RepoTabProps {
   onClose: (id: string) => void
   onKeyboardNavigate: (id: string, direction: 'prev' | 'next' | 'first' | 'last') => void
   closeLabel: string
+}
+
+function remoteHealthDotClass(status: RepoTabConnectionStatus | undefined): string {
+  switch (status) {
+    case 'online':
+      return 'border-success-border bg-success'
+    case 'offline':
+      return 'border-danger-border bg-danger'
+    case 'checking':
+      return 'animate-pulse border-warning-border bg-warning'
+    default:
+      return 'border-border bg-muted-foreground/40'
+  }
 }
 
 export function RepoTab({
@@ -37,6 +50,8 @@ export function RepoTab({
   }
   const title = repo.targetLabel ? `${repo.name} - ${repo.targetLabel}` : repo.name
   const RepoIcon = repo.kind === 'remote' ? Server : FolderGit2
+  const remoteStatus = repo.kind === 'remote' ? (repo.diagnosticStatus ?? 'unknown') : undefined
+  const remoteStatusTitle = repo.diagnosticMessage ?? repo.diagnosticCategory
 
   return (
     <div
@@ -88,6 +103,14 @@ export function RepoTab({
         title={title}
       >
         <RepoIcon size={13} className={cn('shrink-0', isActive ? 'text-foreground' : 'text-foreground/55')} />
+        {remoteStatus && (
+          <span
+            aria-hidden="true"
+            data-remote-status={remoteStatus}
+            title={remoteStatusTitle ?? undefined}
+            className={cn('size-2 shrink-0 rounded-full border', remoteHealthDotClass(remoteStatus))}
+          />
+        )}
         <span className="truncate font-medium">{repo.name}</span>
         {repo.kind === 'remote' && (
           <Badge variant="secondary" size="xs" className="hidden shrink-0 text-[9px] min-[190px]:inline-flex">

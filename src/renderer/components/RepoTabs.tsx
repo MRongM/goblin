@@ -17,7 +17,9 @@ import { useSettingsStore } from '#/renderer/stores/settings.ts'
 import { RepoTabStrip } from '#/renderer/components/repo-tabs/RepoTabStrip.tsx'
 import { AddRemoteRepositoryDialog } from '#/renderer/components/AddRemoteRepositoryDialog.tsx'
 import { CloneRepositoryDialog, type CloneRepositoryRequest } from '#/renderer/components/CloneRepositoryDialog.tsx'
-import type { RepoTabSummary } from '#/renderer/components/repo-tabs/types.ts'
+import type { RepoTabConnectionStatus, RepoTabSummary } from '#/renderer/components/repo-tabs/types.ts'
+import { resourceBusy } from '#/renderer/stores/repos/resources.ts'
+import type { RepoState } from '#/renderer/stores/repos/types.ts'
 import type { CloneRepoResult } from '#/shared/rpc.ts'
 import { remoteTargetSubtitle, type RemoteRepoTarget } from '#/shared/remote-repo.ts'
 import { rpc } from '#/renderer/rpc.ts'
@@ -38,12 +40,22 @@ function summariesEqual(a: RepoTabSummary[], b: RepoTabSummary[]): boolean {
       x.name !== y.name ||
       x.kind !== y.kind ||
       x.targetLabel !== y.targetLabel ||
-      x.diagnosticCategory !== y.diagnosticCategory
+      x.diagnosticStatus !== y.diagnosticStatus ||
+      x.diagnosticCategory !== y.diagnosticCategory ||
+      x.diagnosticMessage !== y.diagnosticMessage
     ) {
       return false
     }
   }
   return true
+}
+
+function remoteConnectionStatus(repo: RepoState): RepoTabConnectionStatus | undefined {
+  if (repo.kind !== 'remote') return undefined
+  if (resourceBusy(repo.resources.diagnostics)) return 'checking'
+  if (repo.diagnostics?.ok === true) return 'online'
+  if (repo.diagnostics?.ok === false) return 'offline'
+  return 'unknown'
 }
 
 interface RepoTabsProps {
@@ -75,8 +87,10 @@ export function RepoTabs({ cloneOpen, onCloneOpenChange, remoteOpen, onRemoteOpe
             name: r.name,
             kind: r.kind,
             targetLabel: r.remoteTarget ? remoteTargetSubtitle(r.remoteTarget) : null,
-            diagnosticCategory:
-              r.kind === 'remote' && r.diagnostics?.ok === false ? r.diagnostics.category : undefined,
+            diagnosticStatus: remoteConnectionStatus(r),
+            diagnosticCategory: r.kind === 'remote' && r.diagnostics?.ok === false ? r.diagnostics.category : undefined,
+            diagnosticMessage:
+              r.kind === 'remote' && r.diagnostics?.ok === false ? (r.diagnostics.message ?? null) : null,
           }
         })
         .filter((x): x is RepoTabSummary => x !== null),
