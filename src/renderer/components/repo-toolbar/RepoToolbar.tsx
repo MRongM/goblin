@@ -41,7 +41,8 @@ function repoToolbarEqual(a: RepoState | undefined, b: RepoState | undefined): b
       a.cache.source === b.cache.source &&
       a.cache.savedAt === b.cache.savedAt &&
       a.remote.fetchFailed === b.remote.fetchFailed &&
-      a.remote.fetchError === b.remote.fetchError)
+      a.remote.fetchError === b.remote.fetchError &&
+      a.remotePorts === b.remotePorts)
   )
 }
 
