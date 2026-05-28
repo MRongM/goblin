@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import os from 'node:os'
 import path from 'node:path'
-import type { RemoteCommandKind } from '#/main/ssh/commands.ts'
 import type { RemoteRepoTarget } from '#/shared/remote-repo.ts'
 
 const execaMock = vi.hoisted(() => vi.fn())
@@ -30,13 +29,6 @@ const ALIAS_TARGET: RemoteRepoTarget = {
   ...MANUAL_TARGET,
   alias: 'prod',
 }
-
-// @ts-expect-error Phase 2 remote commands are read-only; fetch belongs to remote operations.
-const _phase2RejectsFetchCommand: RemoteCommandKind = { type: 'gitFetch', path: '/srv/goblin' }
-// @ts-expect-error Phase 2 remote commands are read-only; worktree creation belongs to remote operations.
-const _phase2RejectsWorktreeAddCommand: RemoteCommandKind = { type: 'gitWorktreeAdd', path: '/srv/goblin' }
-void _phase2RejectsFetchCommand
-void _phase2RejectsWorktreeAddCommand
 
 describe('remote ssh command runner', () => {
   test('builds non-interactive ssh argv for manual targets', async () => {
@@ -173,6 +165,95 @@ describe('remote ssh command runner', () => {
     expect(log.script).toContain('--max-count=30')
     expect(log.script).toContain('--skip=60')
     expect(log.script).toContain("'feature/x'")
+  })
+
+  test('builds remote branch action commands with quoted refs and paths', async () => {
+    const { buildRemoteCommandInvocation } = await import('#/main/ssh/commands.ts')
+
+    const checkout = buildRemoteCommandInvocation(MANUAL_TARGET, {
+      type: 'gitCheckout',
+      path: "/srv/team's app",
+      branch: 'feature/x',
+    })
+    const push = buildRemoteCommandInvocation(MANUAL_TARGET, {
+      type: 'gitPush',
+      path: '/srv/goblin',
+      branch: "feature/quote's",
+    })
+    const currentPull = buildRemoteCommandInvocation(MANUAL_TARGET, {
+      type: 'gitPullCurrent',
+      path: '/srv/goblin-feature-x',
+    })
+    const fetchBranch = buildRemoteCommandInvocation(MANUAL_TARGET, {
+      type: 'gitFetchBranch',
+      path: '/srv/goblin',
+      remote: 'origin',
+      remoteBranch: 'feature/x',
+      branch: 'feature/x',
+    })
+
+    expect(checkout.script).toBe("git -C '/srv/team'\\''s app' switch -- 'feature/x'")
+    expect(push.script).toBe("git -C '/srv/goblin' push -u origin 'feature/quote'\\''s'")
+    expect(currentPull.script).toBe("git -C '/srv/goblin-feature-x' pull --ff-only")
+    expect(fetchBranch.script).toBe("git -C '/srv/goblin' fetch -- 'origin' 'feature/x:feature/x'")
+  })
+
+  test('builds remote destructive guard commands with quoted args', async () => {
+    const { buildRemoteCommandInvocation } = await import('#/main/ssh/commands.ts')
+
+    const remove = buildRemoteCommandInvocation(MANUAL_TARGET, {
+      type: 'gitWorktreeRemove',
+      path: '/srv/goblin',
+      worktreePath: "/srv/goblin-feature's",
+    })
+    const safeDelete = buildRemoteCommandInvocation(MANUAL_TARGET, {
+      type: 'gitBranchDelete',
+      path: '/srv/goblin',
+      branch: 'feature/delete',
+      force: false,
+    })
+    const forceDelete = buildRemoteCommandInvocation(MANUAL_TARGET, {
+      type: 'gitBranchDelete',
+      path: '/srv/goblin',
+      branch: 'feature/delete',
+      force: true,
+    })
+    const upstream = buildRemoteCommandInvocation(MANUAL_TARGET, {
+      type: 'gitUpstream',
+      path: '/srv/goblin',
+      branch: "feature/quote's",
+    })
+    const ancestor = buildRemoteCommandInvocation(MANUAL_TARGET, {
+      type: 'gitIsAncestor',
+      path: '/srv/goblin',
+      ancestor: "feature/quote's",
+      descendant: 'origin/main',
+    })
+
+    expect(remove.script).toBe("git -C '/srv/goblin' worktree remove -- '/srv/goblin-feature'\\''s'")
+    expect(safeDelete.script).toBe("git -C '/srv/goblin' branch -d -- 'feature/delete'")
+    expect(forceDelete.script).toBe("git -C '/srv/goblin' branch -D -- 'feature/delete'")
+    expect(upstream.script).toBe("git -C '/srv/goblin' rev-parse --abbrev-ref 'feature/quote'\\''s@{u}'")
+    expect(ancestor.script).toBe(
+      "git -C '/srv/goblin' merge-base --is-ancestor -- 'feature/quote'\\''s' 'origin/main'",
+    )
+  })
+
+  test('builds remote origin and patch commands without raw command input', async () => {
+    const { buildRemoteCommandInvocation } = await import('#/main/ssh/commands.ts')
+
+    const origin = buildRemoteCommandInvocation(MANUAL_TARGET, {
+      type: 'gitRemoteGetUrl',
+      path: '/srv/goblin',
+    })
+    const patch = buildRemoteCommandInvocation(MANUAL_TARGET, {
+      type: 'gitPatch',
+      path: '/srv/goblin-feature-x',
+    })
+
+    expect(origin.script).toBe("git -C '/srv/goblin' remote get-url origin")
+    expect(patch.script).toContain("git -C '/srv/goblin-feature-x' diff HEAD --binary")
+    expect(patch.script).toContain("git -C '/srv/goblin-feature-x' status --porcelain -z -uall")
   })
 
 })

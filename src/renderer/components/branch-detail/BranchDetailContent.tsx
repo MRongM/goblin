@@ -14,6 +14,7 @@ import { TerminalSlot } from '#/renderer/components/terminal/TerminalSlot.tsx'
 import type { SelectedBranchDetailPresentation } from '#/renderer/components/branch-detail/model.ts'
 import { isShortcutBlockingLayerOpen } from '#/renderer/lib/layers.ts'
 import { detailTabForWorktree } from '#/renderer/lib/detail-tabs.ts'
+import type { TerminalSessionBase } from '#/renderer/components/terminal/types.ts'
 
 interface Props {
   repo: RepoState
@@ -36,12 +37,12 @@ export function BranchDetailContent({ repo, detail, detailId, contentId, layout 
   const t = useT()
   const setDetailTab = useReposStore((s) => s.setDetailTab)
   const { branch } = detail
-  const canOpenTerminal = repo.kind !== 'remote' && !!branch?.worktreePath
+  const canOpenTerminal = !!branchTerminalBase(repo, branch)
   useEffect(() => {
     if (!branch) return
-    const nextTab = detailTabForWorktree(repo.ui.detailTab, repo.kind !== 'remote' && !!branch.worktreePath)
+    const nextTab = detailTabForWorktree(repo.ui.detailTab, !!branchTerminalBase(repo, branch))
     if (nextTab !== repo.ui.detailTab) setDetailTab(repo.id, nextTab)
-  }, [branch, repo.id, repo.kind, repo.ui.detailTab, setDetailTab])
+  }, [branch, repo.id, repo.kind, repo.remoteTarget, repo.ui.detailTab, setDetailTab])
   if (!branch)
     return <EmptyState title={t(repo.data.branches.length === 0 ? 'branches.empty' : 'branches.filter-empty')} />
 
@@ -305,13 +306,28 @@ function BranchTerminalTab({
   repo: RepoState
   branch: BranchDetailBranch
 }) {
-  if (repo.kind === 'remote' || !branch.worktreePath) return null
-  const base = { kind: 'local' as const, repoRoot: repo.id, branch: branch.name, worktreePath: branch.worktreePath }
+  const base = branchTerminalBase(repo, branch)
+  if (!base) return null
   return (
     <BranchTabPanel detailId={detailId} tabId="terminal">
       <TerminalSlot base={base} />
     </BranchTabPanel>
   )
+}
+
+function branchTerminalBase(repo: RepoState, branch: BranchDetailBranch | null | undefined): TerminalSessionBase | null {
+  if (!branch?.worktreePath) return null
+  if (repo.kind === 'remote') {
+    if (!repo.remoteTarget) return null
+    return {
+      kind: 'remote',
+      repoId: repo.id,
+      target: repo.remoteTarget,
+      branch: branch.name,
+      worktreePath: branch.worktreePath,
+    }
+  }
+  return { kind: 'local', repoRoot: repo.id, branch: branch.name, worktreePath: branch.worktreePath }
 }
 
 function OpeningCommitDetail({ repoId }: { repoId: string }) {

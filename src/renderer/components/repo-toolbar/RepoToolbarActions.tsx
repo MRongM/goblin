@@ -16,6 +16,7 @@ import { useT } from '#/renderer/stores/i18n.ts'
 import { Tip } from '#/renderer/components/Tip.tsx'
 import { Button } from '#/renderer/components/ui/button.tsx'
 import { CreateWorktreeDialog, type CreateWorktreeRequest } from '#/renderer/components/CreateWorktreeDialog.tsx'
+import { RemotePortsPopover } from '#/renderer/components/repo-toolbar/RemotePortsPopover.tsx'
 import { RepoSyncControl } from '#/renderer/components/repo-sync/RepoSyncControl.tsx'
 import { resourceBusy } from '#/renderer/stores/repos/resources.ts'
 
@@ -68,6 +69,7 @@ export function RepoToolbarActions({ repo }: Props) {
   if (repo.kind === 'remote') {
     return (
       <div className="flex items-center gap-1">
+        <RemotePortsPopover repo={repo} />
         <Tip label={remoteRefreshTip}>
           <span className="inline-flex">
             <Button
@@ -80,6 +82,21 @@ export function RepoToolbarActions({ repo }: Props) {
             >
               <RefreshCw className={remoteRefreshBusy ? 'animate-spin' : undefined} />
               {t('action.refresh-remote')}
+            </Button>
+          </span>
+        </Tip>
+        <Tip label={createTip}>
+          <span className="inline-flex">
+            <Button
+              variant="ghost"
+              onClick={() => {
+                if (!branchActionBusy) setCreateOpen(true)
+              }}
+              disabled={branchActionBusy}
+              aria-label={createTip}
+            >
+              <FolderPlus />
+              {t('action.create-worktree')}
             </Button>
           </span>
         </Tip>
@@ -98,6 +115,12 @@ export function RepoToolbarActions({ repo }: Props) {
             </Button>
           </span>
         </Tip>
+        <CreateWorktreeDialog
+          open={createOpen}
+          repo={repo}
+          onClose={() => setCreateOpen(false)}
+          onCreate={handleCreateWorktree}
+        />
       </div>
     )
   }

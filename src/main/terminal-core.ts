@@ -1,4 +1,4 @@
-import { BrowserWindow, app } from 'electron'
+import { BrowserWindow } from 'electron'
 import crypto from 'node:crypto'
 import path from 'node:path'
 import * as pty from 'node-pty'
@@ -17,6 +17,8 @@ import {
 const MAX_SESSION_BUFFER_CHARS = 16 * 1024 * 1024
 const MAX_TERMINAL_WRITE_CHARS = 1024 * 1024
 const SESSION_ID_RE = /^[A-Za-z0-9_-]{16,64}$/
+const TERMINAL_SHUTDOWN_TIMEOUT_MS = 2000
+const TERMINAL_SHUTDOWN_FORCE_KILL_MS = 500
 
 export interface TerminalCommandSpec {
   command: string
@@ -180,9 +182,7 @@ export function closeOwnedTerminalSession(ownerWebContentsId: number, sessionId:
 export function closeTerminalSession(sessionId: string): void {
   const session = sessionsById.get(sessionId)
   if (!session) return
-  sessionsById.delete(sessionId)
-  const ownerKey = sessionOwnerKey(session.ownerWebContentsId, session.key)
-  if (sessionIdByOwnerKey.get(ownerKey) === sessionId) sessionIdByOwnerKey.delete(ownerKey)
+  detachTerminalSession(session)
   disposeSessionListeners(session)
   if (session.pty) {
     try {
@@ -224,17 +224,16 @@ export function closeAllTerminalSessions(): void {
   for (const sessionId of Array.from(sessionsById.keys())) closeTerminalSession(sessionId)
 }
 
+export async function shutdownTerminalSessions(timeoutMs = TERMINAL_SHUTDOWN_TIMEOUT_MS): Promise<void> {
+  await Promise.all(Array.from(sessionsById.values()).map((session) => shutdownTerminalSession(session, timeoutMs)))
+}
+
 export function isValidTerminalSessionId(value: unknown): value is string {
   return typeof value === 'string' && SESSION_ID_RE.test(value)
 }
 
 export function isValidTerminalWriteData(value: unknown): value is string {
   return typeof value === 'string' && value.length <= MAX_TERMINAL_WRITE_CHARS
-}
-
-export function wireTerminalSessionCleanup(): void {
-  app.on('will-quit', closeAllTerminalSessions)
-  app.on('before-quit', closeAllTerminalSessions)
 }
 
 function appendSessionData(session: TerminalSession, data: string): number {
@@ -265,6 +264,60 @@ function disposeSessionListeners(session: TerminalSession): void {
       console.warn('[terminal] failed to dispose PTY listener', err)
     }
   }
+}
+
+function detachTerminalSession(session: TerminalSession): void {
+  sessionsById.delete(session.id)
+  const ownerKey = sessionOwnerKey(session.ownerWebContentsId, session.key)
+  if (sessionIdByOwnerKey.get(ownerKey) === session.id) sessionIdByOwnerKey.delete(ownerKey)
+}
+
+function shutdownTerminalSession(session: TerminalSession, timeoutMs: number): Promise<void> {
+  const term = session.pty
+  detachTerminalSession(session)
+  disposeSessionListeners(session)
+  session.pty = null
+  if (!term) return Promise.resolve()
+
+  return new Promise((resolve) => {
+    let settled = false
+    let exitDisposable: { dispose: () => void } | null = null
+    let afterExit: NodeJS.Immediate | null = null
+    const forceKillDelay = Math.min(TERMINAL_SHUTDOWN_FORCE_KILL_MS, Math.max(0, timeoutMs))
+    const forceKill = setTimeout(() => {
+      try {
+        term.kill(process.platform === 'win32' ? undefined : 'SIGKILL')
+      } catch (err) {
+        console.warn('[terminal] failed to force kill PTY during shutdown', err)
+      }
+    }, forceKillDelay)
+    const timeout = setTimeout(() => finish(), Math.max(0, timeoutMs))
+
+    const finish = (): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(forceKill)
+      clearTimeout(timeout)
+      if (afterExit) clearImmediate(afterExit)
+      try {
+        exitDisposable?.dispose()
+      } catch (err) {
+        console.warn('[terminal] failed to dispose shutdown PTY listener', err)
+      }
+      resolve()
+    }
+
+    exitDisposable = term.onExit(() => {
+      afterExit = setImmediate(finish)
+    })
+
+    try {
+      term.kill()
+    } catch (err) {
+      console.warn('[terminal] failed to kill PTY during shutdown', err)
+      finish()
+    }
+  })
 }
 
 function resizeSessionPty(session: TerminalSession, cols: number, rows: number): boolean {

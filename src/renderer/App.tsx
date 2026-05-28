@@ -34,6 +34,7 @@ import { useRepoDrop } from '#/renderer/hooks/useRepoDrop.ts'
 import { useAppBootstrap } from '#/renderer/hooks/useAppBootstrap.ts'
 import { useBackgroundFetch } from '#/renderer/hooks/useBackgroundFetch.ts'
 import { useMenuActions } from '#/renderer/hooks/useMenuActions.ts'
+import { useRemotePortSessionEvents } from '#/renderer/hooks/useRemotePortSessionEvents.ts'
 import { useSessionPersistence } from '#/renderer/hooks/useSessionPersistence.ts'
 import { useSettingsWriteErrorToast } from '#/renderer/hooks/useSettingsWriteErrorToast.ts'
 import { repoWorkspaceBehavior } from '#/renderer/lib/workspace-layout.ts'
@@ -73,6 +74,7 @@ export function App() {
   useSettingsWriteErrorToast()
   useBackgroundFetch()
   useMenuActions({ openSettings, openCloneRepo, showHelp, isOverlayOpen: () => modalOpen })
+  useRemotePortSessionEvents()
 
   useKeyboard({
     onShowHelp: showHelp,

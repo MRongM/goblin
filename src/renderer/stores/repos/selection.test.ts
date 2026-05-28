@@ -399,7 +399,7 @@ describe('setDetailTab', () => {
     expect(useReposStore.getState().repos[REPO_ID]?.ui.detailTab).toBe('status')
   })
 
-  test('falls back to status for remote branches even when worktree metadata exists', () => {
+  test('opens terminal for remote branches with worktree metadata', () => {
     seedRepo({ selectedBranch: 'feature/worktree', detailTab: 'commits' })
     updateRepoForTest((repo) => {
       repo.kind = 'remote'
@@ -408,7 +408,7 @@ describe('setDetailTab', () => {
 
     useReposStore.getState().setDetailTab(REPO_ID, 'terminal')
 
-    expect(useReposStore.getState().repos[REPO_ID]?.ui.detailTab).toBe('status')
+    expect(useReposStore.getState().repos[REPO_ID]?.ui.detailTab).toBe('terminal')
   })
 
   test('does not persist terminal as a cached detail tab', () => {

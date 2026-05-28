@@ -57,6 +57,7 @@ export function resetReposStore(): void {
   useReposStore.setState({
     repos: {},
     repoCache: {},
+    remotePortConfigsByRepo: {},
     order: [],
     activeId: null,
     sessionReady: false,
@@ -130,6 +131,7 @@ export function seedRepoState(options: {
   useReposStore.setState({
     repos: { [options.id]: repo },
     repoCache: {},
+    remotePortConfigsByRepo: {},
     order: [options.id],
     activeId: options.id,
     sessionReady: true,

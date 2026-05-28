@@ -168,3 +168,141 @@ describe('remote git snapshot', () => {
     )
   })
 })
+
+describe('remote git branch actions', () => {
+  test('checks out a branch in the provided remote worktree path', async () => {
+    const { checkoutRemoteBranch } = await import('#/main/ssh/git.ts')
+    const run = vi.fn(async () => ({ ok: true, stdout: '', stderr: '' }))
+
+    await expect(checkoutRemoteBranch(TARGET, 'feature/x', '/srv/goblin-feature-x', { run })).resolves.toEqual({
+      ok: true,
+      message: 'ok',
+    })
+
+    expect(run).toHaveBeenCalledWith(
+      { type: 'gitCheckout', path: '/srv/goblin-feature-x', branch: 'feature/x' },
+      TARGET,
+      { signal: undefined, timeoutMs: 180_000 },
+    )
+  })
+
+  test('pushes a branch from the remote repository path', async () => {
+    const { pushRemoteBranch } = await import('#/main/ssh/git.ts')
+    const run = vi.fn(async () => ({ ok: true, stdout: 'pushed', stderr: '' }))
+
+    await expect(pushRemoteBranch(TARGET, 'feature/x', { run })).resolves.toEqual({
+      ok: true,
+      message: 'pushed',
+    })
+
+    expect(run).toHaveBeenCalledWith(
+      { type: 'gitPush', path: '/srv/goblin', branch: 'feature/x' },
+      TARGET,
+      { signal: undefined, timeoutMs: 180_000 },
+    )
+  })
+
+  test('pulls a branch in its worktree path with fast-forward only', async () => {
+    const { pullRemoteBranch } = await import('#/main/ssh/git.ts')
+    const run = vi.fn(async () => ({ ok: true, stdout: 'pulled', stderr: '' }))
+
+    await expect(pullRemoteBranch(TARGET, 'feature/x', '/srv/goblin-feature-x', { run })).resolves.toEqual({
+      ok: true,
+      message: 'pulled',
+    })
+
+    expect(run).toHaveBeenCalledWith(
+      { type: 'gitPullCurrent', path: '/srv/goblin-feature-x' },
+      TARGET,
+      { signal: undefined, timeoutMs: 180_000 },
+    )
+  })
+
+  test('removes a clean non-primary remote worktree without deleting the branch', async () => {
+    const { removeRemoteWorktree } = await import('#/main/ssh/git.ts')
+    const calls: string[] = []
+    const run = vi.fn(async (command) => {
+      calls.push(command.type)
+      if (command.type === 'gitWorktreeList') {
+        return {
+          ok: true,
+          stderr: '',
+          stdout: [
+            'worktree /srv/goblin',
+            'HEAD abc1234',
+            'branch refs/heads/main',
+            '',
+            'worktree /srv/goblin-feature-x',
+            'HEAD def5678',
+            'branch refs/heads/feature/x',
+          ].join('\n'),
+        }
+      }
+      return { ok: true, stderr: '', stdout: '' }
+    })
+
+    await expect(
+      removeRemoteWorktree(TARGET, {
+        branch: 'feature/x',
+        worktreePath: '/srv/goblin-feature-x',
+        alsoDeleteBranch: false,
+        forceDeleteBranch: false,
+        run,
+      }),
+    ).resolves.toEqual({ ok: true, message: 'ok' })
+
+    expect(calls).toEqual(['gitWorktreeList', 'gitStatus', 'gitWorktreeRemove'])
+  })
+
+  test('rejects dirty remote worktree removal', async () => {
+    const { removeRemoteWorktree } = await import('#/main/ssh/git.ts')
+    const run = vi.fn(async (command) => {
+      if (command.type === 'gitWorktreeList') {
+        return {
+          ok: true,
+          stderr: '',
+          stdout: [
+            'worktree /srv/goblin',
+            'HEAD abc1234',
+            'branch refs/heads/main',
+            '',
+            'worktree /srv/goblin-feature-x',
+            'HEAD def5678',
+            'branch refs/heads/feature/x',
+          ].join('\n'),
+        }
+      }
+      if (command.type === 'gitStatus') return { ok: true, stderr: '', stdout: ' M file.txt\0' }
+      return { ok: true, stderr: '', stdout: '' }
+    })
+
+    await expect(
+      removeRemoteWorktree(TARGET, {
+        branch: 'feature/x',
+        worktreePath: '/srv/goblin-feature-x',
+        alsoDeleteBranch: true,
+        forceDeleteBranch: false,
+        run,
+      }),
+    ).resolves.toEqual({ ok: false, message: 'error.cannot-remove-dirty-worktree' })
+  })
+
+  test('builds a remote GitHub pull request URL from origin', async () => {
+    const { getRemoteGitHubUrl } = await import('#/main/ssh/git.ts')
+    const run = vi.fn(async () => ({ ok: true, stderr: '', stdout: 'git@github.com:nano-props/goblin.git' }))
+
+    await expect(getRemoteGitHubUrl(TARGET, 'feature/x', { run })).resolves.toBe(
+      'https://github.com/nano-props/goblin/pull/new/feature/x',
+    )
+  })
+
+  test('rejects deleting a protected remote branch', async () => {
+    const { deleteRemoteBranch } = await import('#/main/ssh/git.ts')
+    const run = vi.fn(async () => ({ ok: true, stderr: '', stdout: '' }))
+
+    await expect(deleteRemoteBranch(TARGET, { branch: 'main', force: false, run })).resolves.toEqual({
+      ok: false,
+      message: 'error.cannot-delete-protected-branch',
+    })
+  })
+})

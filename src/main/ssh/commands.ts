@@ -18,9 +18,21 @@ export type RemoteCommandKind =
   | { type: 'revParseTopLevel'; path: string }
   | { type: 'listDirectories'; path: string; limit?: number }
   | { type: 'gitSnapshot'; path: string }
+  | { type: 'gitPatch'; path: string }
   | { type: 'gitWorktreeList'; path: string }
   | { type: 'gitStatus'; path: string }
   | { type: 'gitLog'; path: string; branch: string; count?: number; skip?: number }
+  | { type: 'gitCheckout'; path: string; branch: string }
+  | { type: 'gitPullCurrent'; path: string }
+  | { type: 'gitFetchBranch'; path: string; remote: string; remoteBranch: string; branch: string }
+  | { type: 'gitPush'; path: string; branch: string }
+  | { type: 'gitWorktreeAdd'; path: string; worktreePath: string; newBranch: string; baseBranch: string }
+  | { type: 'gitWorktreeRemove'; path: string; worktreePath: string }
+  | { type: 'gitBranchDelete'; path: string; branch: string; force?: boolean }
+  | { type: 'gitUpstream'; path: string; branch: string }
+  | { type: 'gitIsAncestor'; path: string; ancestor: string; descendant: string }
+  | { type: 'gitRemoteGetUrl'; path: string }
+  | { type: 'rawListeningPorts'; tool: 'ss' | 'lsof' | 'netstat' }
 
 export interface RemoteCommandResult {
   ok: boolean
@@ -144,6 +156,11 @@ function scriptForCommand(command: RemoteCommandKind): string {
         `git -C ${repo} for-each-ref --format=${shellQuote(branchFormat)} refs/heads/`,
       ].join('\n')
     }
+    case 'gitPatch':
+      return [
+        `git -C ${shellQuote(command.path)} diff HEAD --binary`,
+        `git -C ${shellQuote(command.path)} status --porcelain -z -uall`,
+      ].join('\n')
     case 'gitWorktreeList':
       return `git -C ${shellQuote(command.path)} worktree list --porcelain`
     case 'gitStatus':
@@ -161,6 +178,40 @@ function scriptForCommand(command: RemoteCommandKind): string {
         shellQuote(command.branch),
       ].join(' ')
     }
+    case 'gitCheckout':
+      return `git -C ${shellQuote(command.path)} switch -- ${shellQuote(command.branch)}`
+    case 'gitPullCurrent':
+      return `git -C ${shellQuote(command.path)} pull --ff-only`
+    case 'gitFetchBranch':
+      return `git -C ${shellQuote(command.path)} fetch -- ${shellQuote(command.remote)} ${shellQuote(
+        `${command.remoteBranch}:${command.branch}`,
+      )}`
+    case 'gitPush':
+      return `git -C ${shellQuote(command.path)} push -u origin ${shellQuote(command.branch)}`
+    case 'gitWorktreeAdd':
+      return `git -C ${shellQuote(command.path)} worktree add -b ${shellQuote(command.newBranch)} -- ${shellQuote(
+        command.worktreePath,
+      )} ${shellQuote(command.baseBranch)}`
+    case 'gitWorktreeRemove':
+      return `git -C ${shellQuote(command.path)} worktree remove -- ${shellQuote(command.worktreePath)}`
+    case 'gitBranchDelete':
+      return `git -C ${shellQuote(command.path)} branch ${command.force ? '-D' : '-d'} -- ${shellQuote(
+        command.branch,
+      )}`
+    case 'gitUpstream':
+      return `git -C ${shellQuote(command.path)} rev-parse --abbrev-ref ${shellQuote(`${command.branch}@{u}`)}`
+    case 'gitIsAncestor':
+      return `git -C ${shellQuote(command.path)} merge-base --is-ancestor -- ${shellQuote(
+        command.ancestor,
+      )} ${shellQuote(command.descendant)}`
+    case 'gitRemoteGetUrl':
+      return `git -C ${shellQuote(command.path)} remote get-url origin`
+    case 'rawListeningPorts':
+      return command.tool === 'ss'
+        ? 'ss -ltnp'
+        : command.tool === 'lsof'
+          ? 'lsof -iTCP -sTCP:LISTEN -P -n'
+          : 'netstat -ltnp'
   }
   const exhaustive: never = command
   return exhaustive

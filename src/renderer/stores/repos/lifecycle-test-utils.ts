@@ -34,6 +34,8 @@ export function installGoblin(overrides: Record<string, (input: any) => unknown>
       return []
     },
     'repo.abort': async () => undefined,
+    'remotePorts.list': () => [],
+    'remotePorts.cleanupRepo': () => undefined,
     'settings.addRecentRepo': ({ repoPath }: { repoPath: string }) => {
       calls.recent.push(repoPath)
       return calls.recent

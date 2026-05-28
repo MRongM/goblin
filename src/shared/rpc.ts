@@ -21,6 +21,11 @@ import type {
   ResolvedRemoteTarget,
   SshConfigHost,
 } from '#/shared/remote-repo.ts'
+import type {
+  RemotePortForwardConfig,
+  RemotePortForwardSession,
+  RemotePortScanResult,
+} from '#/shared/remote-ports.ts'
 
 export type { WorkspaceLayout } from '#/shared/workspace-layout.ts'
 
@@ -177,6 +182,7 @@ export type RpcEvent =
   | { type: 'settings-write-error'; message: string }
   | { type: 'menu-action'; action: MenuAction }
   | { type: 'i18n-changed'; payload: I18nPayload }
+  | { type: 'remote-port-session-changed'; session: RemotePortForwardSession }
 
 export interface AppRpcHandlers {
   app: {
@@ -236,8 +242,36 @@ export interface AppRpcHandlers {
     snapshot: (input: { target: RemoteRepoTarget }) => Promise<RepoSnapshot | null>
     status: (input: { target: RemoteRepoTarget }) => Promise<WorktreeStatus[]>
     log: (input: { target: RemoteRepoTarget; branch: string; count?: number; skip?: number }) => Promise<LogEntry[]>
+    patch: (input: { target: RemoteRepoTarget; worktreePath: string }) => Promise<ExecResult>
+    checkout: (input: { target: RemoteRepoTarget; branch: string; worktreePath?: string }) => Promise<ExecResult>
+    pull: (input: { target: RemoteRepoTarget; branch: string; worktreePath?: string }) => Promise<ExecResult>
+    push: (input: { target: RemoteRepoTarget; branch: string }) => Promise<ExecResult>
+    createWorktree: (input: {
+      target: RemoteRepoTarget
+      worktreePath: string
+      newBranch: string
+      baseBranch: string
+    }) => Promise<ExecResult>
+    removeWorktree: (input: {
+      target: RemoteRepoTarget
+      branch: string
+      worktreePath: string
+      alsoDeleteBranch: boolean
+      forceDeleteBranch?: boolean
+    }) => Promise<ExecResult>
+    deleteBranch: (input: { target: RemoteRepoTarget; branch: string; force?: boolean }) => Promise<ExecResult>
+    openTerminal: (input: { target: RemoteRepoTarget; path: string }) => Promise<ExecResult>
+    openEditor: (input: { target: RemoteRepoTarget; path: string }) => Promise<ExecResult>
+    openGitHub: (input: { target: RemoteRepoTarget; branch?: string }) => Promise<ExecResult>
     home: (input: { target: RemoteRepoTarget }) => Promise<string>
     listDirectory: (input: { target: RemoteRepoTarget; path: string }) => Promise<RemoteDirectoryListing>
+  }
+  remotePorts: {
+    start: (input: { target: RemoteRepoTarget; config: RemotePortForwardConfig }) => Promise<RemotePortForwardSession>
+    stop: (input: { target: RemoteRepoTarget; configId: string }) => Promise<RemotePortForwardSession | null>
+    list: (input: { target: RemoteRepoTarget }) => Promise<RemotePortForwardSession[]>
+    scan: (input: { target: RemoteRepoTarget }) => Promise<RemotePortScanResult>
+    cleanupRepo: (input: { target: RemoteRepoTarget }) => Promise<void>
   }
   theme: {
     get: () => ThemeState
@@ -270,15 +304,26 @@ const PortNumber = v.pipe(FiniteNumber, v.integer(), v.minValue(1), v.maxValue(6
 const CwdInput = v.object({ cwd: v.string() })
 const PathInput = v.object({ path: v.string() })
 const BranchInput = v.object({ cwd: v.string(), branch: v.string() })
+const RemoteAbsolutePath = v.pipe(
+  v.string(),
+  v.check((value) => value.startsWith('/') && !value.includes('\0'), 'Invalid remote path'),
+)
 const RemoteTargetSchema = v.object({
   id: v.string(),
   alias: v.nullable(v.string()),
   host: v.string(),
   user: v.string(),
   port: PortNumber,
-  remotePath: v.string(),
+  remotePath: RemoteAbsolutePath,
   identityFile: v.optional(v.string()),
   displayName: v.string(),
+})
+const RemoteBranchInput = v.object({ target: RemoteTargetSchema, branch: v.string() })
+const RemotePortForwardConfigSchema = v.object({
+  id: v.pipe(v.string(), v.minLength(1)),
+  remotePort: PortNumber,
+  requestedLocalPort: v.nullable(PortNumber),
+  label: v.nullable(v.string()),
 })
 const RepoSessionEntrySchema = v.union([
   v.object({ kind: v.literal('local'), id: v.string() }),
@@ -405,10 +450,66 @@ export function createAppRouter(handlers: AppRpcHandlers) {
           }),
         )
         .query(({ input }) => handlers.remote.log(input)),
+      patch: p
+        .input(v.object({ target: RemoteTargetSchema, worktreePath: RemoteAbsolutePath }))
+        .mutation(({ input }) => handlers.remote.patch(input)),
+      checkout: p
+        .input(v.object({ target: RemoteTargetSchema, branch: v.string(), worktreePath: v.optional(RemoteAbsolutePath) }))
+        .mutation(({ input }) => handlers.remote.checkout(input)),
+      pull: p
+        .input(v.object({ target: RemoteTargetSchema, branch: v.string(), worktreePath: v.optional(RemoteAbsolutePath) }))
+        .mutation(({ input }) => handlers.remote.pull(input)),
+      push: p.input(RemoteBranchInput).mutation(({ input }) => handlers.remote.push(input)),
+      createWorktree: p
+        .input(
+          v.object({
+            target: RemoteTargetSchema,
+            worktreePath: RemoteAbsolutePath,
+            newBranch: v.string(),
+            baseBranch: v.string(),
+          }),
+        )
+        .mutation(({ input }) => handlers.remote.createWorktree(input)),
+      removeWorktree: p
+        .input(
+          v.object({
+            target: RemoteTargetSchema,
+            branch: v.string(),
+            worktreePath: RemoteAbsolutePath,
+            alsoDeleteBranch: v.boolean(),
+            forceDeleteBranch: v.optional(v.boolean()),
+          }),
+        )
+        .mutation(({ input }) => handlers.remote.removeWorktree(input)),
+      deleteBranch: p
+        .input(v.object({ target: RemoteTargetSchema, branch: v.string(), force: v.optional(v.boolean()) }))
+        .mutation(({ input }) => handlers.remote.deleteBranch(input)),
+      openTerminal: p
+        .input(v.object({ target: RemoteTargetSchema, path: RemoteAbsolutePath }))
+        .mutation(({ input }) => handlers.remote.openTerminal(input)),
+      openEditor: p
+        .input(v.object({ target: RemoteTargetSchema, path: RemoteAbsolutePath }))
+        .mutation(({ input }) => handlers.remote.openEditor(input)),
+      openGitHub: p
+        .input(v.object({ target: RemoteTargetSchema, branch: v.optional(v.string()) }))
+        .mutation(({ input }) => handlers.remote.openGitHub(input)),
       home: p.input(v.object({ target: RemoteTargetSchema })).query(({ input }) => handlers.remote.home(input)),
       listDirectory: p
         .input(v.object({ target: RemoteTargetSchema, path: v.string() }))
         .query(({ input }) => handlers.remote.listDirectory(input)),
+    }),
+    remotePorts: t.router({
+      start: p
+        .input(v.object({ target: RemoteTargetSchema, config: RemotePortForwardConfigSchema }))
+        .mutation(({ input }) => handlers.remotePorts.start(input)),
+      stop: p
+        .input(v.object({ target: RemoteTargetSchema, configId: v.string() }))
+        .mutation(({ input }) => handlers.remotePorts.stop(input)),
+      list: p.input(v.object({ target: RemoteTargetSchema })).query(({ input }) => handlers.remotePorts.list(input)),
+      scan: p.input(v.object({ target: RemoteTargetSchema })).query(({ input }) => handlers.remotePorts.scan(input)),
+      cleanupRepo: p
+        .input(v.object({ target: RemoteTargetSchema }))
+        .mutation(({ input }) => handlers.remotePorts.cleanupRepo(input)),
     }),
     theme: t.router({
       get: p.input(EmptyInput).query(() => handlers.theme.get()),

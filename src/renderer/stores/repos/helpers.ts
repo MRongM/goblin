@@ -1,6 +1,12 @@
 import { produce, type Draft } from 'immer'
 import { emptyRepoResources } from '#/renderer/stores/repos/resources.ts'
-import type { RepoEvent, RepoState, ReposSet, ReposStore } from '#/renderer/stores/repos/types.ts'
+import type {
+  RepoEvent,
+  RepoRemotePortsState,
+  RepoState,
+  ReposSet,
+  ReposStore,
+} from '#/renderer/stores/repos/types.ts'
 import type { RemoteRepoTarget, RepoKind } from '#/shared/remote-repo.ts'
 
 let nextInstanceToken = 1
@@ -48,7 +54,22 @@ export function emptyRepo(
       fetchFailed: false,
       fetchError: null,
     },
+    remotePorts: emptyRemotePorts(),
     events: [],
+  }
+}
+
+export function emptyRemotePorts(): RepoRemotePortsState {
+  return {
+    configs: [],
+    sessions: {},
+    actionBusyByConfig: {},
+    scan: {
+      phase: 'idle',
+      ports: [],
+      message: null,
+      error: null,
+    },
   }
 }
 

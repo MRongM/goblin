@@ -165,7 +165,7 @@ export function useKeyboard({ onShowHelp, isOverlayOpen }: Options) {
             adjacentDetailTab(
               repo.ui.detailTab,
               e.key === 'ArrowRight' ? 1 : -1,
-              repo.kind !== 'remote' && !!selected?.worktreePath,
+              !!selected?.worktreePath && (repo.kind !== 'remote' || !!repo.remoteTarget),
             ),
           )
           break

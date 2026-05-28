@@ -134,4 +134,26 @@ describe('repo lifecycle', () => {
     expect(useReposStore.getState().order).toEqual([REMOTE_TARGET.id, REPO_A])
     expect(useReposStore.getState().activeId).toBe(REMOTE_TARGET.id)
   })
+
+  test('closeRepo cleans up remote port forwards for remote repos only', async () => {
+    const cleanupCalls: string[] = []
+    installGoblin({
+      'remote.testRepository': async () => ({ target: REMOTE_TARGET, ok: true, stages: [] }),
+      'remotePorts.cleanupRepo': ({ target }: { target: RemoteRepoTarget }) => {
+        cleanupCalls.push(target.id)
+      },
+    })
+
+    await useReposStore.getState().openRemoteRepo(REMOTE_TARGET)
+    useReposStore.getState().closeRepo(REMOTE_TARGET.id)
+    await flushRpc()
+
+    expect(cleanupCalls).toEqual([REMOTE_TARGET.id])
+
+    await useReposStore.getState().openRepo(REPO_A)
+    useReposStore.getState().closeRepo(REPO_A)
+    await flushRpc()
+
+    expect(cleanupCalls).toEqual([REMOTE_TARGET.id])
+  })
 })

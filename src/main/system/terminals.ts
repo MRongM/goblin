@@ -9,8 +9,9 @@
 // 4. Add i18n keys for the settings picker
 
 import type { ResolvedTerminalApp, TerminalPref } from '#/shared/rpc.ts'
-import { isGhosttyInstalled, openInGhostty } from '#/main/system/ghostty.ts'
-import { openInAppleTerminal } from '#/main/system/apple-terminal.ts'
+import type { RemoteRepoTarget } from '#/shared/remote-repo.ts'
+import { isGhosttyInstalled, openInGhostty, openRemoteInGhostty } from '#/main/system/ghostty.ts'
+import { openInAppleTerminal, openRemoteInAppleTerminal } from '#/main/system/apple-terminal.ts'
 
 export interface TerminalBackend {
   /** Whether this terminal is available on the current system.
@@ -20,12 +21,14 @@ export interface TerminalBackend {
   isInstalled: () => boolean
   /** Open a directory in this terminal. */
   open: (path: string) => Promise<{ ok: boolean; message: string }>
+  /** Open an SSH session in this terminal. */
+  openRemote?: (target: RemoteRepoTarget, path: string) => Promise<{ ok: boolean; message: string }>
 }
 
 /** Concrete terminal pref values (excludes 'auto'). */
 const backends: Record<ResolvedTerminalApp, TerminalBackend> = {
-  ghostty: { isInstalled: isGhosttyInstalled, open: openInGhostty },
-  terminal: { isInstalled: () => true, open: openInAppleTerminal },
+  ghostty: { isInstalled: isGhosttyInstalled, open: openInGhostty, openRemote: openRemoteInGhostty },
+  terminal: { isInstalled: () => true, open: openInAppleTerminal, openRemote: openRemoteInAppleTerminal },
 }
 
 /** Auto-detection priority — first installed backend wins. */
@@ -51,6 +54,17 @@ export function openInPreferredTerminal(path: string, pref: TerminalPref): Promi
   return resolved
     ? backends[resolved].open(path)
     : Promise.resolve({ ok: false, message: 'error.terminal-not-installed' })
+}
+
+export function openRemoteInPreferredTerminal(
+  target: RemoteRepoTarget,
+  path: string,
+  pref: TerminalPref,
+): Promise<{ ok: boolean; message: string }> {
+  const resolved = resolveTerminalApp(pref)
+  if (!resolved) return Promise.resolve({ ok: false, message: 'error.terminal-not-installed' })
+  const opener = backends[resolved].openRemote
+  return opener ? opener(target, path) : Promise.resolve({ ok: false, message: 'error.remote-terminal-unavailable' })
 }
 
 export function getResolvedTerminalApp(pref: TerminalPref): ResolvedTerminalApp | null {

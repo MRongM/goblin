@@ -206,4 +206,21 @@ describe('repo session hydration', () => {
     expect(calls.snapshot).toEqual([REPO_A])
     expect(calls.status).toEqual([REPO_A])
   })
+
+  test('hydrateSession restores persisted remote port configs into remote repos', async () => {
+    useReposStore.setState({
+      remotePortConfigsByRepo: {
+        [REMOTE_TARGET.id]: [{ id: 'cfg-1', remotePort: 3000, requestedLocalPort: null, label: 'dev server' }],
+      },
+    })
+    installGoblin({
+      'remote.testRepository': async () => ({ target: REMOTE_TARGET, ok: true, stages: [] }),
+    })
+
+    await useReposStore.getState().hydrateSession([{ kind: 'remote', id: REMOTE_TARGET.id, target: REMOTE_TARGET }], null)
+
+    expect(useReposStore.getState().repos[REMOTE_TARGET.id]?.remotePorts.configs).toEqual([
+      { id: 'cfg-1', remotePort: 3000, requestedLocalPort: null, label: 'dev server' },
+    ])
+  })
 })

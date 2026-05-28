@@ -74,15 +74,17 @@ function addResolvedRepo(
 }
 
 function addRemoteRepo(
-  s: Pick<ReposStore, 'repos' | 'order'>,
+  s: Pick<ReposStore, 'repos' | 'order' | 'remotePortConfigsByRepo'>,
   target: RemoteRepoTarget,
   rankById?: ReadonlyMap<string, number>,
 ): Pick<ReposStore, 'repos' | 'order'> & { changed: boolean } {
   if (s.repos[target.id]) return { repos: s.repos, order: s.order, changed: false }
+  const repo = emptyRepo(target.id, target.displayName, { kind: 'remote', remoteTarget: target })
+  repo.remotePorts.configs = s.remotePortConfigsByRepo[target.id] ?? []
   return {
     repos: {
       ...s.repos,
-      [target.id]: emptyRepo(target.id, target.displayName, { kind: 'remote', remoteTarget: target }),
+      [target.id]: repo,
     },
     order: orderedInsert(s.order, target.id, rankById),
     changed: true,
@@ -170,6 +172,7 @@ export function createLifecycleActions(set: ReposSet, get: ReposGet) {
     },
 
     closeRepo(id: string) {
+      const closing = get().repos[id]
       // Drop any in-flight fetch tracking so a new openRepo of the same
       // path doesn't think a fetch is already running.
       inFlightFetchById.delete(id)
@@ -181,6 +184,11 @@ export function createLifecycleActions(set: ReposSet, get: ReposGet) {
       void rpc.repo.abort.mutate({ cwd: id }).catch(() => {
         /* main may have nothing to abort — ignore */
       })
+      if (closing?.kind === 'remote' && closing.remoteTarget) {
+        void rpc.remotePorts.cleanupRepo.mutate({ target: closing.remoteTarget }).catch(() => {
+          /* remote port cleanup is best-effort on tab close */
+        })
+      }
       set((s) => {
         if (!s.repos[id]) return s
         const repos = { ...s.repos }

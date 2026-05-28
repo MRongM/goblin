@@ -12,7 +12,7 @@ import {
   startBranchActionResource,
   startResource,
 } from '#/renderer/stores/repos/resources.ts'
-import { canStartRemoteFetch } from '#/renderer/stores/repos/sync-state.ts'
+import { canStartManualFetch } from '#/renderer/stores/repos/sync-state.ts'
 import type {
   RepoBranchAction,
   RepoBranchActionKind,
@@ -79,13 +79,49 @@ function branchActionTarget(action: RepoBranchAction): RepoOperationTarget {
 }
 
 function canStartBranchAction(repo: RepoState, _action: RepoBranchAction): boolean {
-  if (repo.kind === 'remote') return false
-  return canStartRemoteFetch(repo)
+  return canStartManualFetch(repo)
 }
 
 function runBranchActionRpc(action: RepoBranchAction, repo: RepoState, signal?: AbortSignal): Promise<ExecResult> {
   if (repo.kind === 'remote') {
-    return Promise.resolve({ ok: false, message: 'error.remote-unavailable' })
+    if (!repo.remoteTarget) return Promise.resolve({ ok: false, message: 'error.remote-unavailable' })
+    switch (action.kind) {
+      case 'checkout':
+        return rpc.remote.checkout.mutate({ target: repo.remoteTarget, branch: action.branch }, { signal })
+      case 'pull':
+        return rpc.remote.pull.mutate(
+          { target: repo.remoteTarget, branch: action.branch, worktreePath: action.worktreePath },
+          { signal },
+        )
+      case 'push':
+        return rpc.remote.push.mutate({ target: repo.remoteTarget, branch: action.branch }, { signal })
+      case 'createWorktree':
+        return rpc.remote.createWorktree.mutate(
+          {
+            target: repo.remoteTarget,
+            worktreePath: action.worktreePath,
+            newBranch: action.newBranch,
+            baseBranch: action.baseBranch,
+          },
+          { signal },
+        )
+      case 'deleteBranch':
+        return rpc.remote.deleteBranch.mutate(
+          { target: repo.remoteTarget, branch: action.branch, force: action.force },
+          { signal },
+        )
+      case 'removeWorktree':
+        return rpc.remote.removeWorktree.mutate(
+          {
+            target: repo.remoteTarget,
+            branch: action.branch,
+            worktreePath: action.worktreePath,
+            alsoDeleteBranch: action.alsoDeleteBranch,
+            forceDeleteBranch: action.forceDeleteBranch,
+          },
+          { signal },
+        )
+    }
   }
 
   switch (action.kind) {
@@ -137,7 +173,6 @@ export function createBranchActions(set: ReposSet, get: ReposGet) {
       if (!repoBefore) return null
       const token = options?.token ?? repoBefore.instanceToken
       if (repoBefore.instanceToken !== token) return null
-      if (repoBefore.kind === 'remote') return { ok: false, message: 'error.remote-unavailable' }
       if (resourceBusy(repoBefore.resources.branchAction) || repoOperationBusy(id, 'branchAction')) {
         return { ok: false, message: 'cancelled' }
       }

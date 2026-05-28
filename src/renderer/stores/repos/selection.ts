@@ -30,7 +30,7 @@ import {
 
 function branchCanOpenTerminal(repo: RepoState, branchName: string | null): boolean {
   return (
-    repo.kind !== 'remote' &&
+    (repo.kind !== 'remote' || !!repo.remoteTarget) &&
     !!branchName &&
     repo.data.branches.some((branch) => branch.name === branchName && !!branch.worktreePath)
   )

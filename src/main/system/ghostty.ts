@@ -2,6 +2,8 @@ import { app } from 'electron'
 import { execa } from 'execa'
 import { existsSync, statSync } from 'node:fs'
 import path from 'node:path'
+import { buildRemoteTerminalInvocation } from '#/main/ssh/commands.ts'
+import type { RemoteRepoTarget } from '#/shared/remote-repo.ts'
 
 const GHOSTTY_BUNDLE_ID = 'com.mitchellh.ghostty'
 const APPLE_SCRIPT_TIMEOUT_MS = 5_000
@@ -23,6 +25,10 @@ function isUsableDirectory(p: string): boolean {
   } catch {
     return false
   }
+}
+
+function isUsableRemoteDirectory(p: string): boolean {
+  return p.length > 0 && p.length <= 4096 && p.startsWith('/') && !p.includes('\0')
 }
 
 /** Open `dir` as a new window if Ghostty is already running,
@@ -93,6 +99,30 @@ export async function openInGhostty(p: string): Promise<{ ok: boolean; message: 
     child.unref()
     await child
     return { ok: true, message: p }
+  } catch (err) {
+    return { ok: false, message: err instanceof Error ? err.message : String(err) }
+  }
+}
+
+export async function openRemoteInGhostty(
+  target: RemoteRepoTarget,
+  remotePath: string,
+): Promise<{ ok: boolean; message: string }> {
+  if (!isUsableRemoteDirectory(remotePath)) return { ok: false, message: 'error.invalid-path' }
+  if (!isGhosttyInstalled()) return { ok: false, message: 'error.ghostty-not-installed' }
+
+  const invocation = buildRemoteTerminalInvocation(target, remotePath, { cols: 80, rows: 24 })
+  try {
+    const child = execa('open', ['-na', 'Ghostty.app', '--args', '-e', invocation.command, ...invocation.args], {
+      detached: true,
+      stdio: 'ignore',
+      cleanup: false,
+      timeout: OPEN_TIMEOUT_MS,
+      forceKillAfterDelay: 500,
+    })
+    child.unref()
+    await child
+    return { ok: true, message: remotePath }
   } catch (err) {
     return { ok: false, message: err instanceof Error ? err.message : String(err) }
   }

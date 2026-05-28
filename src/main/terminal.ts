@@ -17,7 +17,6 @@ import {
   openTerminalSession,
   pruneTerminalScope,
   resizeTerminalSession,
-  wireTerminalSessionCleanup,
   writeTerminalSession,
 } from '#/main/terminal-core.ts'
 import { normalizeRemoteTarget } from '#/shared/remote-repo.ts'
@@ -83,8 +82,6 @@ export function wireTerminalIpc(): void {
     pruneRepoSessions(event.sender.id, input.repoRoot, input.worktreePaths)
     return true
   })
-
-  wireTerminalSessionCleanup()
 }
 
 async function openGoblinWorktreeTerminal(

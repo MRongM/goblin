@@ -6,7 +6,10 @@ import { buildAppMenu } from '#/main/menu.ts'
 import { assertDictionaryParity, resolveLang, setCurrentLang } from '#/main/i18n/index.ts'
 import { wireRpcIpc } from '#/main/rpc.ts'
 import { wireTerminalIpc } from '#/main/terminal.ts'
+import { shutdownTerminalSessions } from '#/main/terminal-core.ts'
+import { remotePortForwardManager } from '#/main/ssh/port-forward.ts'
 import { syncGlobalShortcuts, unregisterAppShortcuts } from '#/main/shortcuts.ts'
+import { wireAppShutdown } from '#/main/app-shutdown.ts'
 
 async function main(): Promise<void> {
   if (!app.requestSingleInstanceLock()) {
@@ -28,29 +31,15 @@ async function main(): Promise<void> {
     if (process.platform !== 'darwin') app.quit()
   })
 
-  app.on('will-quit', () => {
-    unregisterAppShortcuts()
-  })
-
   app.on('activate', () => {
     if (!getMainWindow()) void createMainWindow()
   })
 
-  // Drain debounced settings writes before exit so the last theme pick,
-  // window resize, or session change isn't lost. `isQuitting` guards
-  // the second pass — app.exit fires before-quit again, and without
-  // the guard we'd loop.
-  let isQuitting = false
-  app.on('before-quit', async (event) => {
-    if (isQuitting) return
-    event.preventDefault()
-    isQuitting = true
-    try {
-      const flushed = await flushSettings()
-      if (!flushed) console.error('[settings] final flush failed before quit')
-    } finally {
-      app.exit(0)
-    }
+  wireAppShutdown(app, {
+    flushSettings,
+    shutdownTerminalSessions,
+    cleanupPortForwards: () => remotePortForwardManager.cleanupAll(),
+    unregisterAppShortcuts,
   })
 
   await app.whenReady()

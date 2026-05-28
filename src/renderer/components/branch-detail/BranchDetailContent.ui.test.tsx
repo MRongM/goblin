@@ -12,6 +12,14 @@ vi.mock('#/renderer/stores/i18n.ts', () => ({
   useT: () => (key: string) => key,
 }))
 
+vi.mock('#/renderer/components/terminal/TerminalSlot.tsx', () => ({
+  TerminalSlot: ({ base }: { base: { kind?: string; branch: string; worktreePath: string } }) => (
+    <div data-testid="terminal-slot" data-kind={base.kind ?? 'local'} data-branch={base.branch}>
+      {base.worktreePath}
+    </div>
+  ),
+}))
+
 function remoteRepo() {
   const repo = emptyRepo('ssh://deploy@prod:22/srv/goblin', 'prod:goblin', {
     kind: 'remote',
@@ -119,5 +127,28 @@ describe('BranchDetailContent remote resource retries', () => {
 
     expect(refreshBranchLog).toHaveBeenCalledWith(repo.id, 'feature/x', { token: repo.instanceToken })
     expect(refreshRemoteDiagnostics).not.toHaveBeenCalled()
+  })
+
+  test('renders a remote terminal tab for a remote branch worktree', async () => {
+    const repo = remoteRepo()
+    repo.ui.detailTab = 'terminal'
+    useReposStore.setState({ repos: { [repo.id]: repo } })
+
+    await act(async () => {
+      root.render(
+        <BranchDetailContent
+          repo={repo}
+          detail={getSelectedBranchDetailPresentation(repo)}
+          detailId="detail"
+          contentId="content"
+          layout="top-bottom"
+        />,
+      )
+    })
+
+    const terminal = document.querySelector<HTMLElement>('[data-testid="terminal-slot"]')
+    expect(terminal?.dataset.kind).toBe('remote')
+    expect(terminal?.dataset.branch).toBe('feature/x')
+    expect(terminal?.textContent).toContain('/srv/goblin-feature-x')
   })
 })

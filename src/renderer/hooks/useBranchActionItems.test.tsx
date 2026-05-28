@@ -63,17 +63,36 @@ function remoteRepo() {
 }
 
 describe('useBranchActionItems remote visibility', () => {
-  test('shows no actions for remote linked worktrees', () => {
-    expect(visibleIds()).toEqual([])
+  test('shows remote worktree branch actions', () => {
+    const repo = remoteRepo()
+    repo.data.status = [
+      {
+        path: '/srv/goblin-feature-x',
+        branch: 'feature/x',
+        isMain: false,
+        entries: [{ x: ' ', y: 'M', path: 'file.txt' }],
+      },
+    ]
+
+    const ids = visibleIds(
+      repo,
+      createBranch('feature/x', {
+        tracking: 'origin/feature/x',
+        worktreePath: '/srv/goblin-feature-x',
+      }),
+    )
+
+    expect(ids).toEqual(
+      expect.arrayContaining(['copyPatch', 'pull', 'push', 'terminal', 'editor', 'github', 'removeWorktree']),
+    )
+    expect(ids).not.toContain('deleteBranch')
   })
 
-  test('shows no actions for the primary remote worktree', () => {
-    expect(
-      visibleIds(remoteRepo(), createBranch('main', { worktreePath: '/srv/goblin', worktreeIsPrimary: true })),
-    ).toEqual([])
-  })
+  test('shows remote plain branch actions', () => {
+    const ids = visibleIds(remoteRepo(), createBranch('feature/plain'))
 
-  test('shows no remote actions when there is no worktree path', () => {
-    expect(visibleIds(remoteRepo(), createBranch('feature/x'))).toEqual([])
+    expect(ids).toEqual(expect.arrayContaining(['checkout', 'push', 'github', 'deleteBranch']))
+    expect(ids).not.toContain('terminal')
+    expect(ids).not.toContain('removeWorktree')
   })
 })

@@ -7,6 +7,7 @@ import {
   openTerminalSession,
   pruneTerminalScope,
   resizeTerminalSession,
+  shutdownTerminalSessions,
   writeTerminalSession,
 } from '#/main/terminal-core.ts'
 import { spawn } from 'node-pty'
@@ -33,14 +34,18 @@ const MAX_SESSION_BUFFER_CHARS = 16 * 1024 * 1024
 
 vi.mock('node-pty', () => ({
   spawn: vi.fn(() => {
-    let onData: ((data: string) => void) | null = null
-    let onExit: (() => void) | null = null
+    const dataListeners = new Set<(data: string) => void>()
+    const exitListeners = new Set<() => void>()
     const pty: MockPty = {
       write: vi.fn(),
       resize: vi.fn(),
       kill: vi.fn(),
-      emitData: (data) => onData?.(data),
-      emitExit: () => onExit?.(),
+      emitData: (data) => {
+        for (const listener of Array.from(dataListeners)) listener(data)
+      },
+      emitExit: () => {
+        for (const listener of Array.from(exitListeners)) listener()
+      },
     }
     mockPtys.push(pty)
     return {
@@ -49,18 +54,18 @@ vi.mock('node-pty', () => ({
       resize: pty.resize,
       kill: pty.kill,
       onData: (cb: (data: string) => void) => {
-        onData = cb
+        dataListeners.add(cb)
         return {
           dispose: vi.fn(() => {
-            if (onData === cb) onData = null
+            dataListeners.delete(cb)
           }),
         }
       },
       onExit: (cb: () => void) => {
-        onExit = cb
+        exitListeners.add(cb)
         return {
           dispose: vi.fn(() => {
-            if (onExit === cb) onExit = null
+            exitListeners.delete(cb)
           }),
         }
       },
@@ -189,6 +194,34 @@ describe('terminal core sessions', () => {
     expect(mockPtys[0]!.resize).toHaveBeenCalledTimes(1)
     expect(mockPtys[0]!.resize).toHaveBeenCalledWith(81, 24)
     expect(mockPtys[0]!.kill).toHaveBeenCalledTimes(1)
+  })
+
+  test('shutdown waits for PTY exit callbacks before resolving', async () => {
+    const opened = openTerminalSession({
+      ownerWebContentsId: 1,
+      scope: '/repo',
+      key: '/repo\0/worktree',
+      cwd: '/worktree',
+      cols: 80,
+      rows: 24,
+    })
+    expect(opened.ok).toBe(true)
+    if (!opened.ok) return
+
+    let resolved = false
+    const shutdown = shutdownTerminalSessions().then(() => {
+      resolved = true
+    })
+
+    await Promise.resolve()
+    expect(mockPtys[0]!.kill).toHaveBeenCalledTimes(1)
+    expect(resolved).toBe(false)
+
+    mockPtys[0]!.emitExit()
+    await shutdown
+
+    expect(resolved).toBe(true)
+    expect(writeTerminalSession(1, opened.sessionId, 'after shutdown')).toBe(false)
   })
 
   test('prunes remote sessions by repository and worktree key', () => {

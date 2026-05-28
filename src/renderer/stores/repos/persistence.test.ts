@@ -1,9 +1,10 @@
-import { beforeEach, describe, expect, test } from 'vitest'
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { normalizeRepoCache, persistRepoCache } from '#/renderer/stores/repos/persistence.ts'
 import { createBranch, resetReposStore, seedRepoState } from '#/renderer/stores/repos/test-utils.ts'
 import { useReposStore } from '#/renderer/stores/repos/store.ts'
 import type { CachedRepoState } from '#/renderer/stores/repos/types.ts'
 import type { RemoteRepoTarget } from '#/shared/remote-repo.ts'
+import { normalizeRemotePortConfigMap } from '#/shared/remote-ports.ts'
 
 function cachedRepo(savedAt: number): CachedRepoState {
   return {
@@ -24,6 +25,10 @@ function cachedRepo(savedAt: number): CachedRepoState {
 }
 
 beforeEach(resetReposStore)
+
+afterEach(() => {
+  Reflect.deleteProperty(globalThis, 'localStorage')
+})
 
 const REMOTE_TARGET: RemoteRepoTarget = {
   id: 'ssh://deploy@prod:22/srv/goblin',
@@ -115,5 +120,60 @@ describe('persistRepoCache', () => {
 
     expect(useReposStore.getState().repoCache[REMOTE_TARGET.id]).toBeUndefined()
     expect(JSON.stringify(useReposStore.getState().repoCache)).not.toMatch(/Permission denied|stderr|password|secret/)
+  })
+})
+
+describe('repo store persistence', () => {
+  test('normalizes persisted remote port configs without persisting sessions', () => {
+    const normalized = normalizeRemotePortConfigMap({
+      [REMOTE_TARGET.id]: [{ id: 'cfg-1', remotePort: 3000, requestedLocalPort: null, label: 'dev' }],
+    })
+
+    expect(normalized).toEqual({
+      [REMOTE_TARGET.id]: [{ id: 'cfg-1', remotePort: 3000, requestedLocalPort: null, label: 'dev' }],
+    })
+    expect(JSON.stringify(normalized)).not.toMatch(/actualLocalPort|running|startedAt/)
+  })
+
+  test('rehydrates remote port forward configs from local storage', async () => {
+    const storage = new Map<string, string>()
+    Object.defineProperty(globalThis, 'localStorage', {
+      configurable: true,
+      value: {
+        getItem: vi.fn((key: string) => storage.get(key) ?? null),
+        setItem: vi.fn((key: string, value: string) => storage.set(key, value)),
+        removeItem: vi.fn((key: string) => storage.delete(key)),
+      },
+    })
+    storage.set(
+      'goblin.repo-store.v1',
+      JSON.stringify({
+        state: {
+          repoCache: {},
+          remotePortConfigsByRepo: {
+            [REMOTE_TARGET.id]: [
+              {
+                id: 'cfg-1',
+                remotePort: 3000,
+                requestedLocalPort: null,
+                label: 'dev server',
+              },
+            ],
+          },
+        },
+        version: 0,
+      }),
+    )
+
+    await useReposStore.persist.rehydrate()
+
+    expect(useReposStore.getState().remotePortConfigsByRepo[REMOTE_TARGET.id]).toEqual([
+      {
+        id: 'cfg-1',
+        remotePort: 3000,
+        requestedLocalPort: null,
+        label: 'dev server',
+      },
+    ])
   })
 })

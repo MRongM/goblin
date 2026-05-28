@@ -125,7 +125,7 @@ describe('runBranchAction', () => {
     expect(repoOperation(REPO_ID, 'branchAction').target).toBeNull()
   })
 
-  test('rejects remote create worktree as unsupported read-only UI state', async () => {
+  test('routes remote push through remote RPC and network resources', async () => {
     resetReposStore()
     const remote = emptyRepo(REMOTE_TARGET.id, REMOTE_TARGET.displayName, {
       kind: 'remote',
@@ -139,25 +139,22 @@ describe('runBranchAction', () => {
     })
     const calls: string[] = []
     installGoblinTestBridge({
-      'remote.createWorktree': async () => {
-        calls.push('create')
+      'remote.push': async ({ branch }: { branch: string }) => {
+        calls.push(branch)
         return { ok: true, message: 'ok' }
       },
-      'repo.abort': async () => false,
+      'remote.snapshot': async () => ({ branches: [], current: '' }),
+      'remote.status': async () => [],
     })
 
-    const result = await useReposStore.getState().runBranchAction(REMOTE_TARGET.id, {
-      kind: 'createWorktree',
-      worktreePath: '/srv/goblin-feature-x',
-      newBranch: 'feature/x',
-      baseBranch: 'main',
-    })
+    const result = await useReposStore.getState().runBranchAction(REMOTE_TARGET.id, { kind: 'push', branch: 'feature/x' })
 
-    expect(result).toEqual({ ok: false, message: 'error.remote-unavailable' })
-    expect(calls).toEqual([])
+    expect(result).toEqual({ ok: true, message: 'ok' })
+    expect(calls).toEqual(['feature/x'])
+    expect(useReposStore.getState().repos[REMOTE_TARGET.id]?.resources.fetch.phase).toBe('idle')
   })
 
-  test('rejects remote remove worktree as unsupported read-only UI state', async () => {
+  test('routes remote remove worktree through remote RPC', async () => {
     resetReposStore()
     const remote = emptyRepo(REMOTE_TARGET.id, REMOTE_TARGET.displayName, {
       kind: 'remote',
@@ -171,11 +168,12 @@ describe('runBranchAction', () => {
     })
     const calls: string[] = []
     installGoblinTestBridge({
-      'remote.removeWorktree': async () => {
-        calls.push('remove')
+      'remote.removeWorktree': async ({ worktreePath }: { worktreePath: string }) => {
+        calls.push(worktreePath)
         return { ok: true, message: 'ok' }
       },
-      'repo.abort': async () => false,
+      'remote.snapshot': async () => ({ branches: [], current: '' }),
+      'remote.status': async () => [],
     })
 
     const result = await useReposStore.getState().runBranchAction(REMOTE_TARGET.id, {
@@ -186,28 +184,7 @@ describe('runBranchAction', () => {
       forceDeleteBranch: false,
     })
 
-    expect(result).toEqual({ ok: false, message: 'error.remote-unavailable' })
-    expect(calls).toEqual([])
-  })
-
-  test('keeps unsupported remote branch actions unavailable', async () => {
-    resetReposStore()
-    const remote = emptyRepo(REMOTE_TARGET.id, REMOTE_TARGET.displayName, {
-      kind: 'remote',
-      remoteTarget: REMOTE_TARGET,
-    })
-    useReposStore.setState({
-      repos: { [REMOTE_TARGET.id]: remote },
-      order: [REMOTE_TARGET.id],
-      activeId: REMOTE_TARGET.id,
-      sessionReady: true,
-    })
-
-    const result = await useReposStore.getState().runBranchAction(REMOTE_TARGET.id, {
-      kind: 'push',
-      branch: 'feature/x',
-    })
-
-    expect(result).toEqual({ ok: false, message: 'error.remote-unavailable' })
+    expect(result).toEqual({ ok: true, message: 'ok' })
+    expect(calls).toEqual(['/srv/goblin-feature-x'])
   })
 })

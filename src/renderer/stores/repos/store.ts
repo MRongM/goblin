@@ -25,6 +25,7 @@ import { createBranchActions } from '#/renderer/stores/repos/branch-actions.ts'
 import { createCommitActions } from '#/renderer/stores/repos/commit.ts'
 import { createLifecycleActions } from '#/renderer/stores/repos/lifecycle.ts'
 import { createRefreshActions } from '#/renderer/stores/repos/refresh.ts'
+import { createRemotePortActions } from '#/renderer/stores/repos/remote-ports.ts'
 import { createSelectionActions } from '#/renderer/stores/repos/selection.ts'
 import { normalizeRepoCache } from '#/renderer/stores/repos/persistence.ts'
 import {
@@ -33,16 +34,18 @@ import {
   DEFAULT_WORKSPACE_LAYOUT,
 } from '#/shared/workspace-layout.ts'
 import type { CachedRepoState, ReposStore } from '#/renderer/stores/repos/types.ts'
+import { normalizeRemotePortConfigMap, type RemotePortForwardConfig } from '#/shared/remote-ports.ts'
 
 interface PersistedReposStore {
   repoCache: Record<string, CachedRepoState>
+  remotePortConfigsByRepo: Record<string, RemotePortForwardConfig[]>
 }
 
 interface RawPersistedReposStore {
   repoCache?: unknown
+  remotePortConfigsByRepo?: unknown
 }
 
-let lastStoredRepoCacheRef: Record<string, CachedRepoState> | undefined
 let lastStoredReposJson: string | undefined
 
 const repoStorage: PersistStorage<PersistedReposStore, void> = {
@@ -50,36 +53,30 @@ const repoStorage: PersistStorage<PersistedReposStore, void> = {
     try {
       const raw = getStorage()?.getItem(name)
       if (!raw) {
-        lastStoredRepoCacheRef = undefined
         lastStoredReposJson = undefined
         return null
       }
       const parsed = JSON.parse(raw) as StorageValue<RawPersistedReposStore>
       const repoCache = normalizeRepoCache(parsed.state?.repoCache)
-      const value = { state: { repoCache }, version: parsed.version }
-      lastStoredRepoCacheRef = repoCache
+      const remotePortConfigsByRepo = normalizeRemotePortConfigMap(parsed.state?.remotePortConfigsByRepo)
+      const value = { state: { repoCache, remotePortConfigsByRepo }, version: parsed.version }
       lastStoredReposJson = JSON.stringify(value)
       return value
     } catch (err) {
-      lastStoredRepoCacheRef = undefined
       lastStoredReposJson = undefined
       console.warn(`[repos] failed to read persisted store ${name}:`, err)
       return null
     }
   },
   setItem: (name, value) => {
-    const repoCache = value.state.repoCache
-    if (lastStoredReposJson !== undefined && repoCache === lastStoredRepoCacheRef) return
     const serialized = JSON.stringify(value)
     if (serialized === lastStoredReposJson) {
-      lastStoredRepoCacheRef = repoCache
       return
     }
     const storage = getStorage()
     if (!storage) return
     try {
       storage.setItem(name, serialized)
-      lastStoredRepoCacheRef = repoCache
       lastStoredReposJson = serialized
     } catch (err) {
       console.warn(`[repos] failed to persist store ${name}:`, err)
@@ -90,7 +87,6 @@ const repoStorage: PersistStorage<PersistedReposStore, void> = {
     if (!storage) return
     try {
       storage.removeItem(name)
-      lastStoredRepoCacheRef = undefined
       lastStoredReposJson = undefined
     } catch (err) {
       console.warn(`[repos] failed to remove persisted store ${name}:`, err)
@@ -103,6 +99,7 @@ export const useReposStore = create<ReposStore>()(
     (set, get) => ({
       repos: {},
       repoCache: {},
+      remotePortConfigsByRepo: {},
       order: [],
       activeId: null,
       sessionReady: false,
@@ -117,14 +114,21 @@ export const useReposStore = create<ReposStore>()(
       ...createRefreshActions(set, get),
       ...createBranchActions(set, get),
       ...createCommitActions(set, get),
+      ...createRemotePortActions(set, get),
     }),
     {
       name: 'goblin.repo-store.v1',
       storage: repoStorage,
-      partialize: (state): PersistedReposStore => ({ repoCache: state.repoCache }),
+      partialize: (state): PersistedReposStore => ({
+        repoCache: state.repoCache,
+        remotePortConfigsByRepo: state.remotePortConfigsByRepo,
+      }),
       merge: (persisted, current) => ({
         ...current,
         repoCache: normalizeRepoCache((persisted as RawPersistedReposStore | null)?.repoCache),
+        remotePortConfigsByRepo: normalizeRemotePortConfigMap(
+          (persisted as RawPersistedReposStore | null)?.remotePortConfigsByRepo,
+        ),
       }),
     },
   ),

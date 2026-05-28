@@ -81,7 +81,12 @@ export function useBranchActions(repo: RepoState, branch: BranchInfo) {
     if (!branch.worktreePath) return
     const worktreePath = branch.worktreePath
     return runUiAction('copyPatch', async () => {
-      const result = await rpc.repo.patch.mutate({ cwd: repo.id, worktreePath })
+      const result =
+        repo.kind === 'remote'
+          ? repo.remoteTarget
+            ? await rpc.remote.patch.mutate({ target: repo.remoteTarget, worktreePath })
+            : { ok: false, message: 'error.remote-unavailable' }
+          : await rpc.repo.patch.mutate({ cwd: repo.id, worktreePath })
       if (!result.ok) return { ok: false, message: result.message }
       if (!result.message) return { ok: false, message: 'status.copy-patch-empty' }
       try {
@@ -113,18 +118,35 @@ export function useBranchActions(repo: RepoState, branch: BranchInfo) {
   function openTerminal() {
     if (!branch.worktreePath) return
     const worktreePath = branch.worktreePath
-    return runUiAction('terminal', () => rpc.repo.openTerminal.mutate({ path: worktreePath }))
+    return runUiAction('terminal', () =>
+      repo.kind === 'remote'
+        ? repo.remoteTarget
+          ? rpc.remote.openTerminal.mutate({ target: repo.remoteTarget, path: worktreePath })
+          : Promise.resolve({ ok: false, message: 'error.remote-unavailable' })
+        : rpc.repo.openTerminal.mutate({ path: worktreePath }),
+    )
   }
 
   function openEditor() {
-    if (repo.kind === 'remote') return
     if (!branch.worktreePath) return
     const worktreePath = branch.worktreePath
-    return runUiAction('editor', () => rpc.repo.openEditor.mutate({ path: worktreePath }))
+    return runUiAction('editor', () =>
+      repo.kind === 'remote'
+        ? repo.remoteTarget
+          ? rpc.remote.openEditor.mutate({ target: repo.remoteTarget, path: worktreePath })
+          : Promise.resolve({ ok: false, message: 'error.remote-unavailable' })
+        : rpc.repo.openEditor.mutate({ path: worktreePath }),
+    )
   }
 
   function openGitHub() {
-    return runUiAction('github', () => rpc.repo.openGitHub.mutate({ cwd: repo.id, branch: branch.name }))
+    return runUiAction('github', () =>
+      repo.kind === 'remote'
+        ? repo.remoteTarget
+          ? rpc.remote.openGitHub.mutate({ target: repo.remoteTarget, branch: branch.name })
+          : Promise.resolve({ ok: false, message: 'error.remote-unavailable' })
+        : rpc.repo.openGitHub.mutate({ cwd: repo.id, branch: branch.name }),
+    )
   }
 
   function requestDeleteBranch() {
@@ -183,11 +205,11 @@ export function useBranchActions(repo: RepoState, branch: BranchInfo) {
 
   const isCurrent = branch.name === repo.data.currentBranch
   const checkedOutInAnotherWorktree = !!branch.worktreePath && !isCurrent
-  const canRemoveWorktree = repo.kind !== 'remote' && checkedOutInAnotherWorktree && !branch.worktreeIsPrimary
+  const canRemoveWorktree = checkedOutInAnotherWorktree && !branch.worktreeIsPrimary
   const isProtected = PROTECTED_BRANCHES.has(branch.name)
-  const isRegularBranch = repo.kind !== 'remote' && !isCurrent && !branch.worktreePath && !isProtected
+  const isRegularBranch = !isCurrent && !branch.worktreePath && !isProtected
   const changedStatus = branch.worktreePath ? repo.data.status.find((wt) => wt.path === branch.worktreePath) : null
-  const canCopyPatch = repo.kind !== 'remote' && !!branch.worktreePath && (changedStatus?.entries.length ?? 0) > 0
+  const canCopyPatch = !!branch.worktreePath && (changedStatus?.entries.length ?? 0) > 0
   const removeConfirmProtected = removeConfirm ? PROTECTED_BRANCHES.has(removeConfirm.branch) : false
   const dialogs = (
     <>
@@ -343,15 +365,15 @@ export function useBranchActions(repo: RepoState, branch: BranchInfo) {
     capabilities: {
       isCurrent,
       checkedOutInAnotherWorktree,
-      canCheckout: repo.kind !== 'remote' && !isCurrent && !checkedOutInAnotherWorktree,
+      canCheckout: !isCurrent && !checkedOutInAnotherWorktree,
       canRemoveWorktree,
       isRegularBranch,
       canCopyPatch,
-      canPull: repo.kind !== 'remote' && !!branch.tracking,
-      canPush: repo.kind !== 'remote',
-      canOpenTerminal: repo.kind !== 'remote' && !!branch.worktreePath,
-      canOpenEditor: repo.kind !== 'remote' && !!branch.worktreePath,
-      canOpenGitHub: repo.kind !== 'remote',
+      canPull: !!branch.tracking,
+      canPush: true,
+      canOpenTerminal: !!branch.worktreePath,
+      canOpenEditor: !!branch.worktreePath,
+      canOpenGitHub: true,
     },
     actions: {
       copyPatch,

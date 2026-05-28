@@ -438,20 +438,22 @@ describe('remote fetch timestamps', () => {
     expect(repo?.resources.fetch.phase).toBe('idle')
   })
 
-  test('branch actions are unavailable for remote repositories during Phase 1', async () => {
+  test('remote branch actions route through remote RPC procedures', async () => {
     const token = seedRemoteRepo()
     let checkoutCalls = 0
-    rpcHandlers['repo.checkout'] = async () => {
+    rpcHandlers['remote.checkout'] = async () => {
       checkoutCalls += 1
       return { ok: true, message: 'ok' }
     }
+    rpcHandlers['remote.snapshot'] = async () => ({ branches: [], current: '' })
+    rpcHandlers['remote.status'] = async () => []
 
     const result = await useReposStore
       .getState()
       .runBranchAction(REMOTE_TARGET.id, { kind: 'checkout', branch: 'main' }, { token })
 
-    expect(result).toEqual({ ok: false, message: 'error.remote-unavailable' })
-    expect(checkoutCalls).toBe(0)
+    expect(result).toEqual({ ok: true, message: 'ok' })
+    expect(checkoutCalls).toBe(1)
   })
 
   test('branch write actions run through branch operation state and refresh after completion', async () => {

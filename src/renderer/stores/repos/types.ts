@@ -2,6 +2,11 @@ import type { StoreApi } from 'zustand'
 import type { BranchInfo, ExecResult, LogEntry, PullRequestFetchMode, WorktreeStatus } from '#/renderer/types.ts'
 import type { CommitDetail } from '#/shared/rpc.ts'
 import type { RemoteDiagnosticsResult, RemoteRepoTarget, RepoKind, RepoSessionEntry } from '#/shared/remote-repo.ts'
+import type {
+  RemoteListeningPort,
+  RemotePortForwardConfig,
+  RemotePortForwardSession,
+} from '#/shared/remote-ports.ts'
 import type { WorkspaceDetailPaneSizes, WorkspaceLayout } from '#/shared/workspace-layout.ts'
 import type { RepoBranchAction, RunBranchActionOptions } from '#/renderer/stores/repos/branch-action-types.ts'
 import type { RepoResourcesState } from '#/renderer/stores/repos/resources.ts'
@@ -62,6 +67,18 @@ export interface RepoRemoteState {
   fetchError: string | null
 }
 
+export interface RepoRemotePortsState {
+  configs: RemotePortForwardConfig[]
+  sessions: Record<string, RemotePortForwardSession>
+  actionBusyByConfig: Record<string, boolean>
+  scan: {
+    phase: 'idle' | 'loading'
+    ports: RemoteListeningPort[]
+    message: string | null
+    error: string | null
+  }
+}
+
 export interface CachedRepoState {
   savedAt: number
   name: string
@@ -83,6 +100,7 @@ export interface RepoState {
   ui: RepoUiState
   cache: RepoCacheState
   remote: RepoRemoteState
+  remotePorts: RepoRemotePortsState
   events: RepoEvent[]
 }
 
@@ -94,6 +112,7 @@ export interface MissingRepo {
 export interface ReposStore {
   repos: Record<string, RepoState>
   repoCache: Record<string, CachedRepoState>
+  remotePortConfigsByRepo: Record<string, RemotePortForwardConfig[]>
   order: string[]
   activeId: string | null
   /** Hydration flag — true once boot session is restored, so we don't
@@ -166,6 +185,16 @@ export interface ReposStore {
     action: RepoBranchAction,
     options?: RunBranchActionOptions,
   ) => Promise<ExecResult | null>
+  addRemotePortForward: (
+    id: string,
+    input: { id?: string; remotePort: number; requestedLocalPort: number | null; label: string | null },
+  ) => RemotePortForwardConfig | null
+  removeRemotePortForward: (id: string, configId: string) => Promise<void>
+  startRemotePortForward: (id: string, configId: string) => Promise<void>
+  stopRemotePortForward: (id: string, configId: string) => Promise<void>
+  scanRemotePorts: (id: string) => Promise<void>
+  refreshRemotePortSessions: (id: string) => Promise<void>
+  applyRemotePortSessionChanged: (session: RemotePortForwardSession) => void
 
   openCommit: (id: string, hash: string) => Promise<void>
   closeCommit: (id: string) => void

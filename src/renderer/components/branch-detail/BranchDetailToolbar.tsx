@@ -35,11 +35,13 @@ export function BranchDetailToolbar({ repo, detail, detailId, contentId, collaps
   const shortcutsDisabled = useSettingsStore((s) => s.shortcutsDisabled)
   const terminalContext = useTerminalSessionContext()
   const behavior = repoWorkspaceBehavior(layout, collapsed, focusMode)
-  const canOpenTerminal = repo.kind !== 'remote' && !!detail.branch?.worktreePath
+  const canOpenTerminal = !!detail.branch?.worktreePath && (repo.kind !== 'remote' || !!repo.remoteTarget)
   const terminalWorktreePath = canOpenTerminal ? detail.branch?.worktreePath : null
   const tabs = visibleDetailTabs(!!terminalWorktreePath)
   const terminalScope = terminalWorktreePath
-    ? { kind: 'local' as const, repoRoot: repo.id, worktreePath: terminalWorktreePath }
+    ? repo.kind === 'remote'
+      ? { kind: 'remote' as const, repoId: repo.id, worktreePath: terminalWorktreePath }
+      : { kind: 'local' as const, repoRoot: repo.id, worktreePath: terminalWorktreePath }
     : null
   const terminalCount = terminalScope
     ? terminalContext.sessionSummaries(terminalSessionGroupKey(terminalScope!)).length

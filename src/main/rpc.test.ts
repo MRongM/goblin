@@ -4,11 +4,27 @@ import { isAncestor, getCurrentBranch, getUpstream } from '#/main/git/branches.t
 import { getWorktrees } from '#/main/git/worktrees.ts'
 import { getWorkingStatus } from '#/main/git/status.ts'
 import { resolveRemovableWorktree } from '#/main/git/guards.ts'
+import {
+  checkoutRemoteBranch,
+  createRemoteWorktree,
+  deleteRemoteBranch,
+  getRemoteGitHubUrl,
+  pushRemoteBranch,
+} from '#/main/ssh/git.ts'
+import { openHttpsExternal } from '#/main/external-url.ts'
 import { registerTrustedAppPath, registerTrustedWebContents } from '#/main/ipc/trusted-webcontents.ts'
 import { wireRpcIpc } from '#/main/rpc.ts'
 import type { RpcResponse } from '#/shared/rpc.ts'
 
 const ipcHandlers = new Map<string, (_event: unknown, input: any) => Promise<unknown>>()
+
+const remotePortMocks = vi.hoisted(() => ({
+  cleanupRepo: vi.fn(),
+  list: vi.fn(),
+  scan: vi.fn(),
+  start: vi.fn(),
+  stop: vi.fn(),
+}))
 
 vi.mock('electron', () => ({
   BrowserWindow: {
@@ -152,11 +168,13 @@ vi.mock('#/main/i18n/index.ts', () => ({
 vi.mock('#/main/system/terminals.ts', () => ({
   getResolvedTerminalApp: vi.fn(() => null),
   openInPreferredTerminal: vi.fn(),
+  openRemoteInPreferredTerminal: vi.fn(() => ({ ok: true, message: '/srv/goblin-feature-x' })),
 }))
 
 vi.mock('#/main/system/editors.ts', () => ({
   getResolvedEditorApp: vi.fn(() => null),
   openInPreferredEditor: vi.fn(),
+  openRemoteInPreferredEditor: vi.fn(() => ({ ok: true, message: '/srv/goblin-feature-x' })),
 }))
 
 vi.mock('#/main/events.ts', () => ({
@@ -170,6 +188,11 @@ vi.mock('#/main/terminal.ts', () => ({
 vi.mock('#/main/external-url.ts', () => ({
   openHttpExternal: vi.fn(),
   openHttpsExternal: vi.fn(),
+}))
+
+vi.mock('#/main/ssh/port-forward.ts', () => ({
+  remotePortForwardManager: remotePortMocks,
+  wireRemotePortForwardCleanup: vi.fn(),
 }))
 
 vi.mock('#/main/ssh/config.ts', () => ({
@@ -193,9 +216,17 @@ vi.mock('#/main/ssh/diagnostics.ts', () => ({
 }))
 
 vi.mock('#/main/ssh/git.ts', () => ({
+  checkoutRemoteBranch: vi.fn(() => ({ ok: true, message: 'checked out' })),
+  createRemoteWorktree: vi.fn(() => ({ ok: true, message: 'created' })),
+  deleteRemoteBranch: vi.fn(() => ({ ok: true, message: 'deleted' })),
+  getRemoteGitHubUrl: vi.fn(() => 'https://github.com/nano-props/goblin/pull/new/feature/x'),
   getRemoteLog: vi.fn(() => []),
+  getRemotePatch: vi.fn(() => ({ ok: true, message: 'patch' })),
   getRemoteSnapshot: vi.fn(() => ({ branches: [], current: '' })),
   getRemoteStatus: vi.fn(() => []),
+  pullRemoteBranch: vi.fn(() => ({ ok: true, message: 'pulled' })),
+  pushRemoteBranch: vi.fn(() => ({ ok: true, message: 'pushed' })),
+  removeRemoteWorktree: vi.fn(() => ({ ok: true, message: 'removed' })),
 }))
 
 vi.mock('#/main/ssh/path-picker.ts', () => ({
@@ -400,6 +431,136 @@ describe('main repo rpc cancellation', () => {
     ).resolves.toMatchObject({ ok: true })
   })
 
+  test('exposes typed remote branch action procedures', async () => {
+    await expect(invokeRpc('remote.checkout', { target: REMOTE_TARGET, branch: 'feature/x' })).resolves.toMatchObject({
+      ok: true,
+    })
+    await expect(invokeRpc('remote.push', { target: REMOTE_TARGET, branch: 'feature/x' })).resolves.toMatchObject({
+      ok: true,
+    })
+    await expect(
+      invokeRpc('remote.createWorktree', {
+        target: REMOTE_TARGET,
+        worktreePath: '/srv/goblin-feature-x',
+        newBranch: 'feature/x',
+        baseBranch: 'main',
+      }),
+    ).resolves.toMatchObject({ ok: true })
+
+    expect(checkoutRemoteBranch).toHaveBeenCalledWith(
+      expect.objectContaining({ id: REMOTE_TARGET.id }),
+      'feature/x',
+      undefined,
+      { signal: expect.any(AbortSignal) },
+    )
+    expect(pushRemoteBranch).toHaveBeenCalledWith(expect.objectContaining({ id: REMOTE_TARGET.id }), 'feature/x', {
+      signal: expect.any(AbortSignal),
+    })
+    expect(createRemoteWorktree).toHaveBeenCalledWith(
+      expect.objectContaining({ id: REMOTE_TARGET.id }),
+      expect.objectContaining({
+        baseBranch: 'main',
+        newBranch: 'feature/x',
+        signal: expect.any(AbortSignal),
+        worktreePath: '/srv/goblin-feature-x',
+      }),
+    )
+  })
+
+  test('rejects invalid remote worktree action inputs', async () => {
+    const result = await invokeRpc('remote.removeWorktree', {
+      target: REMOTE_TARGET,
+      branch: 'feature/x',
+      worktreePath: 'relative',
+      alsoDeleteBranch: true,
+    })
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error.code).toBe('BAD_REQUEST')
+  })
+
+  test('opens remote editor and external terminal through typed remote RPC', async () => {
+    await expect(
+      invokeRpc('remote.openEditor', { target: REMOTE_TARGET, path: '/srv/goblin-feature-x' }),
+    ).resolves.toEqual({ ok: true, data: { ok: true, message: '/srv/goblin-feature-x' } })
+    await expect(
+      invokeRpc('remote.openTerminal', { target: REMOTE_TARGET, path: '/srv/goblin-feature-x' }),
+    ).resolves.toEqual({ ok: true, data: { ok: true, message: '/srv/goblin-feature-x' } })
+  })
+
+  test('routes remote branch delete and GitHub PR opening', async () => {
+    vi.mocked(openHttpsExternal).mockResolvedValueOnce(true)
+
+    await expect(
+      invokeRpc('remote.deleteBranch', { target: REMOTE_TARGET, branch: 'feature/x', force: false }),
+    ).resolves.toEqual({ ok: true, data: { ok: true, message: 'deleted' } })
+    await expect(invokeRpc('remote.openGitHub', { target: REMOTE_TARGET, branch: 'feature/x' })).resolves.toEqual({
+      ok: true,
+      data: { ok: true, message: 'https://github.com/nano-props/goblin/pull/new/feature/x' },
+    })
+
+    expect(deleteRemoteBranch).toHaveBeenCalledWith(
+      expect.objectContaining({ id: REMOTE_TARGET.id }),
+      expect.objectContaining({ branch: 'feature/x', force: false, signal: expect.any(AbortSignal) }),
+    )
+    expect(getRemoteGitHubUrl).toHaveBeenCalledWith(
+      expect.objectContaining({ id: REMOTE_TARGET.id }),
+      'feature/x',
+      { signal: undefined },
+    )
+    expect(openHttpsExternal).toHaveBeenCalledWith('https://github.com/nano-props/goblin/pull/new/feature/x')
+  })
+
+  test('routes remote port start through the manager', async () => {
+    remotePortMocks.start.mockResolvedValue({
+      configId: 'cfg-1',
+      repoId: REMOTE_TARGET.id,
+      remotePort: 3000,
+      requestedLocalPort: null,
+      actualLocalPort: 3000,
+      localHost: '127.0.0.1',
+      remoteHost: '127.0.0.1',
+      status: 'running',
+      startedAt: 123,
+    })
+
+    const result = await invokeRpc('remotePorts.start', {
+      target: REMOTE_TARGET,
+      config: { id: 'cfg-1', remotePort: 3000, requestedLocalPort: null, label: null },
+    })
+
+    expect(result).toEqual({
+      ok: true,
+      data: {
+        configId: 'cfg-1',
+        repoId: REMOTE_TARGET.id,
+        remotePort: 3000,
+        requestedLocalPort: null,
+        actualLocalPort: 3000,
+        localHost: '127.0.0.1',
+        remoteHost: '127.0.0.1',
+        status: 'running',
+        startedAt: 123,
+      },
+    })
+    expect(remotePortMocks.start).toHaveBeenCalledWith(REMOTE_TARGET, {
+      id: 'cfg-1',
+      remotePort: 3000,
+      requestedLocalPort: null,
+      label: null,
+    })
+  })
+
+  test('rejects invalid remote port configs at the router boundary', async () => {
+    const result = await invokeRpc('remotePorts.start', {
+      target: REMOTE_TARGET,
+      config: { id: 'cfg-1', remotePort: 0, requestedLocalPort: null, label: null },
+    })
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error.code).toBe('BAD_REQUEST')
+  })
+
   test('rejects mismatched remote target ids at the RPC boundary', async () => {
     const result = await invokeRpc('remote.snapshot', {
       target: { ...REMOTE_TARGET, id: 'ssh://deploy@prod:22/srv/other' },
@@ -411,8 +572,8 @@ describe('main repo rpc cancellation', () => {
     })
   })
 
-  test('does not expose remote write or local editor procedures in Phase 2', async () => {
-    for (const path of ['remote.fetch', 'remote.createWorktree', 'remote.removeWorktree', 'remote.openEditor']) {
+  test('does not expose raw remote fetch procedures', async () => {
+    for (const path of ['remote.fetch']) {
       const result = await invokeRpc(path, { target: REMOTE_TARGET })
 
       expect(result.ok).toBe(false)

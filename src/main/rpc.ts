@@ -74,8 +74,8 @@ import { normalizeRemoteTarget, type RemoteRepoTarget, type RepoSessionEntry } f
 import { isGlobalShortcutRegistered, replaceGlobalShortcut, syncGlobalShortcuts } from '#/main/shortcuts.ts'
 import { buildAppMenu, setMenuWorkspaceLayout } from '#/main/menu.ts'
 import { applyLangPref, getCurrentLang, getDictionary } from '#/main/i18n/index.ts'
-import { getResolvedTerminalApp, openInPreferredTerminal } from '#/main/system/terminals.ts'
-import { getResolvedEditorApp, openInPreferredEditor } from '#/main/system/editors.ts'
+import { getResolvedTerminalApp, openInPreferredTerminal, openRemoteInPreferredTerminal } from '#/main/system/terminals.ts'
+import { getResolvedEditorApp, openInPreferredEditor, openRemoteInPreferredEditor } from '#/main/system/editors.ts'
 import { broadcastRpcEvent } from '#/main/events.ts'
 import { closeWorktreeSession } from '#/main/terminal.ts'
 import { openHttpExternal, openHttpsExternal } from '#/main/external-url.ts'
@@ -83,8 +83,21 @@ import { isTrustedIpcEvent } from '#/main/ipc/trusted-webcontents.ts'
 import { WINDOW_BACKGROUND_BY_COLOR_THEME } from '#/shared/theme-tokens.ts'
 import { listSshConfigHosts, resolveRemoteTarget as resolveSshRemoteTarget } from '#/main/ssh/config.ts'
 import { testRemoteRepository } from '#/main/ssh/diagnostics.ts'
-import { getRemoteLog, getRemoteSnapshot, getRemoteStatus } from '#/main/ssh/git.ts'
+import {
+  checkoutRemoteBranch,
+  createRemoteWorktree,
+  deleteRemoteBranch,
+  getRemoteGitHubUrl,
+  getRemoteLog,
+  getRemotePatch,
+  getRemoteSnapshot,
+  getRemoteStatus,
+  pullRemoteBranch,
+  pushRemoteBranch,
+  removeRemoteWorktree,
+} from '#/main/ssh/git.ts'
 import { getRemoteHome, listRemoteDirectory } from '#/main/ssh/path-picker.ts'
+import { remotePortForwardManager } from '#/main/ssh/port-forward.ts'
 
 const PROJECT_GITHUB_URL = 'https://github.com/nano-props/goblin'
 const PATCH_TIMEOUT_MS = 90_000
@@ -257,6 +270,10 @@ function normalizedRemoteTargetOrThrow(target: RemoteRepoTarget): RemoteRepoTarg
     throw new TRPCError({ code: 'BAD_REQUEST', message: 'Invalid remote repository target' })
   }
   return normalized
+}
+
+function isValidRemoteAbsolutePath(value: unknown): value is string {
+  return typeof value === 'string' && value.startsWith('/') && !value.includes('\0')
 }
 
 function createRpcHandlers(): AppRpcHandlers {
@@ -460,6 +477,88 @@ function createRpcHandlers(): AppRpcHandlers {
         if (!isValidBranch(branch)) return []
         return getRemoteLog(normalizedRemoteTargetOrThrow(target), branch, count, skip, { signal: currentRpcSignal() })
       },
+      patch: async ({ target, worktreePath }) => {
+        if (!isValidRemoteAbsolutePath(worktreePath)) return { ok: false, message: 'error.invalid-worktree-path' }
+        return getRemotePatch(normalizedRemoteTargetOrThrow(target), worktreePath, { signal: currentRpcSignal() })
+      },
+      checkout: async ({ target, branch, worktreePath }) => {
+        if (!isValidBranch(branch)) return { ok: false, message: 'error.invalid-arguments' }
+        if (worktreePath !== undefined && !isValidRemoteAbsolutePath(worktreePath)) {
+          return { ok: false, message: 'error.invalid-worktree-path' }
+        }
+        const normalized = normalizedRemoteTargetOrThrow(target)
+        return runCancellable(normalized.id, 'user', (signal) =>
+          checkoutRemoteBranch(normalized, branch, worktreePath, { signal }),
+        )
+      },
+      pull: async ({ target, branch, worktreePath }) => {
+        if (!isValidBranch(branch)) return { ok: false, message: 'error.invalid-arguments' }
+        if (worktreePath !== undefined && !isValidRemoteAbsolutePath(worktreePath)) {
+          return { ok: false, message: 'error.invalid-worktree-path' }
+        }
+        const normalized = normalizedRemoteTargetOrThrow(target)
+        return runCancellable(normalized.id, 'user', (signal) =>
+          pullRemoteBranch(normalized, branch, worktreePath, { signal }),
+        )
+      },
+      push: async ({ target, branch }) => {
+        if (!isValidBranch(branch)) return { ok: false, message: 'error.invalid-arguments' }
+        const normalized = normalizedRemoteTargetOrThrow(target)
+        return runCancellable(normalized.id, 'user', (signal) => pushRemoteBranch(normalized, branch, { signal }))
+      },
+      createWorktree: async ({ target, worktreePath, newBranch, baseBranch }) => {
+        if (!isValidRemoteAbsolutePath(worktreePath)) return { ok: false, message: 'error.invalid-worktree-path' }
+        if (!isValidBranch(newBranch) || !isValidBranch(baseBranch)) {
+          return { ok: false, message: 'error.invalid-arguments' }
+        }
+        const normalized = normalizedRemoteTargetOrThrow(target)
+        return runCancellable(normalized.id, 'user', (signal) =>
+          createRemoteWorktree(normalized, { worktreePath, newBranch, baseBranch, signal }),
+        )
+      },
+      removeWorktree: async (input) => {
+        if (
+          !isValidBranch(input.branch) ||
+          !isValidRemoteAbsolutePath(input.worktreePath) ||
+          typeof input.alsoDeleteBranch !== 'boolean' ||
+          (input.forceDeleteBranch !== undefined && typeof input.forceDeleteBranch !== 'boolean')
+        ) {
+          return { ok: false, message: 'error.invalid-arguments' }
+        }
+        const normalized = normalizedRemoteTargetOrThrow(input.target)
+        const { target: _target, ...remoteInput } = input
+        return runCancellable(normalized.id, 'user', (signal) =>
+          removeRemoteWorktree(normalized, { ...remoteInput, signal }),
+        )
+      },
+      deleteBranch: async ({ target, branch, force }) => {
+        if (!isValidBranch(branch)) return { ok: false, message: 'error.invalid-arguments' }
+        const normalized = normalizedRemoteTargetOrThrow(target)
+        return runCancellable(normalized.id, 'user', (signal) =>
+          deleteRemoteBranch(normalized, { branch, force, signal }),
+        )
+      },
+      openTerminal: async ({ target, path: remotePath }) => {
+        if (!isValidRemoteAbsolutePath(remotePath)) return { ok: false, message: 'error.invalid-path' }
+        return openRemoteInPreferredTerminal(normalizedRemoteTargetOrThrow(target), remotePath, getTerminalApp())
+      },
+      openEditor: async ({ target, path: remotePath }) => {
+        if (!isValidRemoteAbsolutePath(remotePath)) return { ok: false, message: 'error.invalid-path' }
+        return (
+          openRemoteInPreferredEditor(normalizedRemoteTargetOrThrow(target), remotePath, getEditorApp()) ?? {
+            ok: false,
+            message: 'error.remote-editor-unavailable',
+          }
+        )
+      },
+      openGitHub: async ({ target, branch }) => {
+        if (!isValidOptionalBranch(branch)) return { ok: false, message: 'error.invalid-arguments' }
+        const normalized = normalizedRemoteTargetOrThrow(target)
+        const url = await getRemoteGitHubUrl(normalized, branch, { signal: currentRpcSignal() })
+        if (!url) return { ok: false, message: 'error.open-github-no-origin' }
+        if (!(await openHttpsExternal(url))) return { ok: false, message: 'error.invalid-url' }
+        return { ok: true, message: url }
+      },
       home: async ({ target }) => {
         const normalized = normalizedRemoteTargetOrThrow(target)
         return getRemoteHome(normalized, { signal: currentRpcSignal() })
@@ -467,6 +566,17 @@ function createRpcHandlers(): AppRpcHandlers {
       listDirectory: async ({ target, path: remotePath }) => {
         const normalized = normalizedRemoteTargetOrThrow(target)
         return listRemoteDirectory(normalized, remotePath, { signal: currentRpcSignal() })
+      },
+    },
+    remotePorts: {
+      start: async ({ target, config }) => remotePortForwardManager.start(normalizedRemoteTargetOrThrow(target), config),
+      stop: async ({ target, configId }) =>
+        remotePortForwardManager.stop(normalizedRemoteTargetOrThrow(target), configId),
+      list: async ({ target }) => remotePortForwardManager.list(normalizedRemoteTargetOrThrow(target)),
+      scan: async ({ target }) =>
+        remotePortForwardManager.scan(normalizedRemoteTargetOrThrow(target), { signal: currentRpcSignal() }),
+      cleanupRepo: async ({ target }) => {
+        await remotePortForwardManager.cleanupRepo(normalizedRemoteTargetOrThrow(target))
       },
     },
     theme: {

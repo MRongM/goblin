@@ -19,7 +19,7 @@ export function isBranchActionBlocked(repo: RepoState): boolean {
 }
 
 export function repoBranchActionsAvailable(repo: RepoState): boolean {
-  return repo.kind !== 'remote'
+  return repo.kind !== 'remote' || !!repo.remoteTarget
 }
 
 export function branchActionsAvailable(repo: RepoState, branch: BranchInfo | null | undefined): boolean {
