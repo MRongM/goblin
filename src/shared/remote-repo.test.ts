@@ -4,6 +4,7 @@ import {
   normalizeRemoteTarget,
   remoteDisplayName,
   remoteTargetSubtitle,
+  remoteWorktreePathLabel,
 } from '#/shared/remote-repo.ts'
 
 describe('remote repository identity', () => {
@@ -59,6 +60,17 @@ describe('remote repository identity', () => {
       'prod.example.com:goblin',
     )
     expect(remoteTargetSubtitle(target!)).toBe('deploy@prod.example.com:/srv/goblin')
+  })
+
+  test('formats remote worktree paths with connection context for display only', () => {
+    const target = normalizeRemoteTarget({
+      user: 'deploy',
+      host: 'prod.example.com',
+      port: 2222,
+      remotePath: '/srv/goblin',
+    })
+
+    expect(remoteWorktreePathLabel(target!, '/srv/goblin-feature-x')).toBe('deploy@prod.example.com:/srv/goblin-feature-x')
   })
 
   test('rejects invalid inputs and strips secret-like fields', () => {

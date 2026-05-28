@@ -149,6 +149,7 @@ export const ko: Record<DictKey, string> = {
   'remote.loading': '불러오는 중…',
   'remote.diagnostics-title': 'SSH 진단',
   'remote.retry-diagnostics': '진단 다시 시도',
+  'remote.stale-title': '오래된 원격 데이터 표시 중',
   'remote.show-details': '세부 정보 표시',
   'remote.hide-details': '세부 정보 숨기기',
 
@@ -256,6 +257,7 @@ export const ko: Record<DictKey, string> = {
   'log.empty-for-branch': '{branch} 에 표시할 커밋이 없습니다.',
   'log.load-more': '더 보기',
   'log.loading-more': '불러오는 중…',
+  'log.stale-title': '오래된 커밋 표시 중',
 
   // ---- Status ------------------------------------------------------------
   'status.clean-title': '워킹 트리가 깨끗합니다',
@@ -336,6 +338,7 @@ export const ko: Record<DictKey, string> = {
   'action.create-worktree': '새 워크트리',
   'action.create-worktree-title': '새 워크트리 만들기',
   'action.retry': '다시 시도',
+  'action.retry-refresh': '새로 고침 다시 시도',
   'action.retry-diagnostics': 'SSH 진단 다시 시도',
   'action.create-worktree-creating-title': '{branch} 의 워크트리를 만드는 중…',
   'action.create-worktree-hint': '선택한 브랜치에서 새 브랜치를 만듭니다.',
@@ -352,6 +355,8 @@ export const ko: Record<DictKey, string> = {
   'action.menu': '작업',
   'action.refresh': '새로 고침',
   'action.refresh-title': 'git branch · git status · git log',
+  'action.refresh-remote': '원격 데이터 새로 고침',
+  'action.refresh-remote-title': 'SSH 로 브랜치, 상태, 표시 중인 로그 새로 고침',
 
   // ---- Errors / banners --------------------------------------------------
   'error.not-git-repo': 'git 리포지토리가 아닙니다',

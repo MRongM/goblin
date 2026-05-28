@@ -13,10 +13,12 @@ import {
 import { tildify } from '#/renderer/lib/paths.ts'
 import { PROTECTED_BRANCHES, branchPullRequestBelongsToBranch } from '#/shared/git-types.ts'
 import type { SelectedBranchDetail } from '#/renderer/components/branch-detail/model.ts'
-import type { RepoWorkspaceLayout } from '#/renderer/stores/repos/types.ts'
+import type { RepoState, RepoWorkspaceLayout } from '#/renderer/stores/repos/types.ts'
 import { repoWorkspaceBehavior } from '#/renderer/lib/workspace-layout.ts'
+import { remoteWorktreePathLabel } from '#/shared/remote-repo.ts'
 
 interface Props {
+  repo: RepoState
   detail: SelectedBranchDetail
   layout: RepoWorkspaceLayout
 }
@@ -64,14 +66,19 @@ function SyncValue({
   )
 }
 
-export function BranchStatus({ detail, layout }: Props) {
+export function BranchStatus({ repo, detail, layout }: Props) {
   const t = useT()
   const { branch, statusCount } = detail
   const behavior = repoWorkspaceBehavior(layout, false)
   if (!branch) return <EmptyState title={t('branches.empty')} />
 
   const protectedBranch = PROTECTED_BRANCHES.has(branch.name)
-  const worktreePath = branch.worktreePath ? tildify(branch.worktreePath) : ''
+  const worktreePath =
+    repo.kind === 'remote' && repo.remoteTarget && branch.worktreePath
+      ? remoteWorktreePathLabel(repo.remoteTarget, branch.worktreePath)
+      : branch.worktreePath
+        ? tildify(branch.worktreePath)
+        : ''
   const worktreeChangeCount = statusCount > 0 ? statusCount : (branch.worktreeChangeCount ?? 0)
   const pullRequest =
     branch.pullRequest && branchPullRequestBelongsToBranch(branch, branch.pullRequest) ? branch.pullRequest : undefined

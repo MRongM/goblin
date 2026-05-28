@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import os from 'node:os'
 import path from 'node:path'
+import type { RemoteCommandKind } from '#/main/ssh/commands.ts'
 import type { RemoteRepoTarget } from '#/shared/remote-repo.ts'
 
 const execaMock = vi.hoisted(() => vi.fn())
@@ -29,6 +30,13 @@ const ALIAS_TARGET: RemoteRepoTarget = {
   ...MANUAL_TARGET,
   alias: 'prod',
 }
+
+// @ts-expect-error Phase 2 remote commands are read-only; fetch belongs to remote operations.
+const _phase2RejectsFetchCommand: RemoteCommandKind = { type: 'gitFetch', path: '/srv/goblin' }
+// @ts-expect-error Phase 2 remote commands are read-only; worktree creation belongs to remote operations.
+const _phase2RejectsWorktreeAddCommand: RemoteCommandKind = { type: 'gitWorktreeAdd', path: '/srv/goblin' }
+void _phase2RejectsFetchCommand
+void _phase2RejectsWorktreeAddCommand
 
 describe('remote ssh command runner', () => {
   test('builds non-interactive ssh argv for manual targets', async () => {
@@ -129,20 +137,20 @@ describe('remote ssh command runner', () => {
     expect(execaMock).toHaveBeenCalledWith('ssh', expect.any(Array), expect.objectContaining({ timeout: 15_000 }))
   })
 
-  test('builds remote fetch and worktree commands with quoted paths', async () => {
+  test('builds remote read commands with quoted paths', async () => {
     const { buildRemoteCommandInvocation } = await import('#/main/ssh/commands.ts')
 
-    const fetch = buildRemoteCommandInvocation(MANUAL_TARGET, {
-      type: 'gitFetch',
-      path: "/srv/team's app",
-    })
     const worktrees = buildRemoteCommandInvocation(MANUAL_TARGET, {
       type: 'gitWorktreeList',
       path: "/srv/team's app",
     })
+    const status = buildRemoteCommandInvocation(MANUAL_TARGET, {
+      type: 'gitStatus',
+      path: "/srv/team's app",
+    })
 
-    expect(fetch.script).toBe("git -C '/srv/team'\\''s app' fetch --all --prune")
     expect(worktrees.script).toBe("git -C '/srv/team'\\''s app' worktree list --porcelain")
+    expect(status.script).toBe("git -C '/srv/team'\\''s app' status --porcelain -z")
   })
 
   test('builds remote status and log commands with bounded numeric args', async () => {
@@ -167,80 +175,4 @@ describe('remote ssh command runner', () => {
     expect(log.script).toContain("'feature/x'")
   })
 
-  test('builds remote worktree add command with branch and path quoting', async () => {
-    const { buildRemoteCommandInvocation } = await import('#/main/ssh/commands.ts')
-
-    const invocation = buildRemoteCommandInvocation(MANUAL_TARGET, {
-      type: 'gitWorktreeAdd',
-      path: '/srv/goblin',
-      worktreePath: "/srv/goblin-feature's",
-      newBranch: 'feature/new',
-      baseBranch: 'main',
-    })
-
-    expect(invocation.script).toBe(
-      "git -C '/srv/goblin' worktree add -b 'feature/new' -- '/srv/goblin-feature'\\''s' 'main'",
-    )
-  })
-
-  test('builds remote worktree remove and branch delete commands with quoted args', async () => {
-    const { buildRemoteCommandInvocation } = await import('#/main/ssh/commands.ts')
-
-    const remove = buildRemoteCommandInvocation(MANUAL_TARGET, {
-      type: 'gitWorktreeRemove',
-      path: '/srv/goblin',
-      worktreePath: "/srv/goblin-feature's",
-    })
-    const safeDelete = buildRemoteCommandInvocation(MANUAL_TARGET, {
-      type: 'gitBranchDelete',
-      path: '/srv/goblin',
-      branch: 'feature/delete',
-      force: false,
-    })
-    const forceDelete = buildRemoteCommandInvocation(MANUAL_TARGET, {
-      type: 'gitBranchDelete',
-      path: '/srv/goblin',
-      branch: 'feature/delete',
-      force: true,
-    })
-
-    expect(remove.script).toBe("git -C '/srv/goblin' worktree remove -- '/srv/goblin-feature'\\''s'")
-    expect(safeDelete.script).toBe("git -C '/srv/goblin' branch -d -- 'feature/delete'")
-    expect(forceDelete.script).toBe("git -C '/srv/goblin' branch -D -- 'feature/delete'")
-  })
-
-  test('builds remote upstream and ancestor checks with quoted refs', async () => {
-    const { buildRemoteCommandInvocation } = await import('#/main/ssh/commands.ts')
-
-    const upstream = buildRemoteCommandInvocation(MANUAL_TARGET, {
-      type: 'gitUpstream',
-      path: '/srv/goblin',
-      branch: "feature/quote's",
-    })
-    const ancestor = buildRemoteCommandInvocation(MANUAL_TARGET, {
-      type: 'gitIsAncestor',
-      path: '/srv/goblin',
-      ancestor: "feature/quote's",
-      descendant: 'origin/main',
-    })
-
-    expect(upstream.script).toBe("git -C '/srv/goblin' rev-parse --abbrev-ref 'feature/quote'\\''s@{u}'")
-    expect(ancestor.script).toBe(
-      "git -C '/srv/goblin' merge-base --is-ancestor -- 'feature/quote'\\''s' 'origin/main'",
-    )
-  })
-
-  test('builds interactive remote terminal invocation', async () => {
-    const { buildRemoteTerminalInvocation } = await import('#/main/ssh/commands.ts')
-
-    const invocation = buildRemoteTerminalInvocation(MANUAL_TARGET, "/srv/team's app", { cols: 100, rows: 30 })
-
-    expect(invocation.command).toBe('ssh')
-    expect(invocation.args).toEqual(
-      expect.arrayContaining(['-tt', '-o', 'StrictHostKeyChecking=yes', '-o', 'ConnectTimeout=10', '-p', '2222']),
-    )
-    expect(invocation.args).toContain('deploy@prod.example.com')
-    expect(invocation.script).toContain("cd '/srv/team'\\''s app'")
-    expect(invocation.script).toContain('exec "${SHELL:-/bin/sh}" -l')
-  })
 })

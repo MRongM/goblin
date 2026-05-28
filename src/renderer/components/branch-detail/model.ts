@@ -34,9 +34,11 @@ export function getSelectedBranchDetailPresentation(repo: RepoState) {
     },
     errors: {
       status: repo.resources.status.error,
+      log: branchLogResource?.error ?? null,
     },
     stale: {
       status: repo.resources.status.stale,
+      log: branchLogResource?.stale ?? false,
     },
   }
 }

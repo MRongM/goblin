@@ -18,15 +18,9 @@ export type RemoteCommandKind =
   | { type: 'revParseTopLevel'; path: string }
   | { type: 'listDirectories'; path: string; limit?: number }
   | { type: 'gitSnapshot'; path: string }
-  | { type: 'gitFetch'; path: string }
   | { type: 'gitWorktreeList'; path: string }
   | { type: 'gitStatus'; path: string }
   | { type: 'gitLog'; path: string; branch: string; count?: number; skip?: number }
-  | { type: 'gitWorktreeAdd'; path: string; worktreePath: string; newBranch: string; baseBranch: string }
-  | { type: 'gitWorktreeRemove'; path: string; worktreePath: string }
-  | { type: 'gitBranchDelete'; path: string; branch: string; force?: boolean }
-  | { type: 'gitUpstream'; path: string; branch: string }
-  | { type: 'gitIsAncestor'; path: string; ancestor: string; descendant: string }
 
 export interface RemoteCommandResult {
   ok: boolean
@@ -150,8 +144,6 @@ function scriptForCommand(command: RemoteCommandKind): string {
         `git -C ${repo} for-each-ref --format=${shellQuote(branchFormat)} refs/heads/`,
       ].join('\n')
     }
-    case 'gitFetch':
-      return `git -C ${shellQuote(command.path)} fetch --all --prune`
     case 'gitWorktreeList':
       return `git -C ${shellQuote(command.path)} worktree list --porcelain`
     case 'gitStatus':
@@ -169,22 +161,6 @@ function scriptForCommand(command: RemoteCommandKind): string {
         shellQuote(command.branch),
       ].join(' ')
     }
-    case 'gitWorktreeAdd':
-      return `git -C ${shellQuote(command.path)} worktree add -b ${shellQuote(command.newBranch)} -- ${shellQuote(
-        command.worktreePath,
-      )} ${shellQuote(command.baseBranch)}`
-    case 'gitWorktreeRemove':
-      return `git -C ${shellQuote(command.path)} worktree remove -- ${shellQuote(command.worktreePath)}`
-    case 'gitBranchDelete':
-      return `git -C ${shellQuote(command.path)} branch ${command.force ? '-D' : '-d'} -- ${shellQuote(
-        command.branch,
-      )}`
-    case 'gitUpstream':
-      return `git -C ${shellQuote(command.path)} rev-parse --abbrev-ref ${shellQuote(`${command.branch}@{u}`)}`
-    case 'gitIsAncestor':
-      return `git -C ${shellQuote(command.path)} merge-base --is-ancestor -- ${shellQuote(
-        command.ancestor,
-      )} ${shellQuote(command.descendant)}`
   }
   const exhaustive: never = command
   return exhaustive

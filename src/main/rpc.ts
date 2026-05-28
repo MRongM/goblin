@@ -75,7 +75,7 @@ import { isGlobalShortcutRegistered, replaceGlobalShortcut, syncGlobalShortcuts 
 import { buildAppMenu, setMenuWorkspaceLayout } from '#/main/menu.ts'
 import { applyLangPref, getCurrentLang, getDictionary } from '#/main/i18n/index.ts'
 import { getResolvedTerminalApp, openInPreferredTerminal } from '#/main/system/terminals.ts'
-import { getResolvedEditorApp, openInPreferredEditor, openRemoteInPreferredEditor } from '#/main/system/editors.ts'
+import { getResolvedEditorApp, openInPreferredEditor } from '#/main/system/editors.ts'
 import { broadcastRpcEvent } from '#/main/events.ts'
 import { closeWorktreeSession } from '#/main/terminal.ts'
 import { openHttpExternal, openHttpsExternal } from '#/main/external-url.ts'
@@ -83,14 +83,7 @@ import { isTrustedIpcEvent } from '#/main/ipc/trusted-webcontents.ts'
 import { WINDOW_BACKGROUND_BY_COLOR_THEME } from '#/shared/theme-tokens.ts'
 import { listSshConfigHosts, resolveRemoteTarget as resolveSshRemoteTarget } from '#/main/ssh/config.ts'
 import { testRemoteRepository } from '#/main/ssh/diagnostics.ts'
-import {
-  createRemoteWorktree,
-  fetchRemoteRepository,
-  getRemoteLog,
-  getRemoteSnapshot,
-  getRemoteStatus,
-  removeRemoteWorktree,
-} from '#/main/ssh/git.ts'
+import { getRemoteLog, getRemoteSnapshot, getRemoteStatus } from '#/main/ssh/git.ts'
 import { getRemoteHome, listRemoteDirectory } from '#/main/ssh/path-picker.ts'
 
 const PROJECT_GITHUB_URL = 'https://github.com/nano-props/goblin'
@@ -264,10 +257,6 @@ function normalizedRemoteTargetOrThrow(target: RemoteRepoTarget): RemoteRepoTarg
     throw new TRPCError({ code: 'BAD_REQUEST', message: 'Invalid remote repository target' })
   }
   return normalized
-}
-
-function isValidRemoteAbsolutePath(value: unknown): value is string {
-  return typeof value === 'string' && value.startsWith('/') && !value.includes('\0')
 }
 
 function createRpcHandlers(): AppRpcHandlers {
@@ -465,50 +454,11 @@ function createRpcHandlers(): AppRpcHandlers {
         const normalized = normalizedRemoteTargetOrThrow(target)
         return getRemoteSnapshot(normalized, { signal: currentRpcSignal() })
       },
-      fetch: async ({ target }) =>
-        fetchRemoteRepository(normalizedRemoteTargetOrThrow(target), { signal: currentRpcSignal() }),
       status: async ({ target }) =>
         getRemoteStatus(normalizedRemoteTargetOrThrow(target), { signal: currentRpcSignal() }),
       log: async ({ target, branch, count, skip }) => {
         if (!isValidBranch(branch)) return []
         return getRemoteLog(normalizedRemoteTargetOrThrow(target), branch, count, skip, { signal: currentRpcSignal() })
-      },
-      createWorktree: async ({ target, worktreePath, newBranch, baseBranch }) => {
-        if (!isValidRemoteAbsolutePath(worktreePath) || !isValidBranch(newBranch) || !isValidBranch(baseBranch)) {
-          return { ok: false, message: 'error.invalid-arguments' }
-        }
-        return createRemoteWorktree(normalizedRemoteTargetOrThrow(target), {
-          worktreePath,
-          newBranch,
-          baseBranch,
-          signal: currentRpcSignal(),
-        })
-      },
-      openEditor: async ({ target, path: remotePath }) => {
-        if (!isValidRemoteAbsolutePath(remotePath)) return { ok: false, message: 'error.invalid-path' }
-        return (
-          openRemoteInPreferredEditor(normalizedRemoteTargetOrThrow(target), remotePath, getEditorApp()) ?? {
-            ok: false,
-            message: 'error.editor-not-installed',
-          }
-        )
-      },
-      removeWorktree: async ({ target, branch, worktreePath, alsoDeleteBranch, forceDeleteBranch }) => {
-        if (
-          !isValidRemoteAbsolutePath(worktreePath) ||
-          !isValidBranch(branch) ||
-          typeof alsoDeleteBranch !== 'boolean' ||
-          (forceDeleteBranch !== undefined && typeof forceDeleteBranch !== 'boolean')
-        ) {
-          return { ok: false, message: 'error.invalid-arguments' }
-        }
-        return removeRemoteWorktree(normalizedRemoteTargetOrThrow(target), {
-          branch,
-          worktreePath,
-          alsoDeleteBranch,
-          forceDeleteBranch,
-          signal: currentRpcSignal(),
-        })
       },
       home: async ({ target }) => {
         const normalized = normalizedRemoteTargetOrThrow(target)

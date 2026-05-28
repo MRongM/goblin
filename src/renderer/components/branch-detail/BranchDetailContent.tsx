@@ -1,9 +1,10 @@
-import { ArrowLeft, FolderTree } from 'lucide-react'
+import { ArrowLeft, FolderTree, RefreshCw } from 'lucide-react'
 import { useEffect, type ReactNode } from 'react'
 import { useT } from '#/renderer/stores/i18n.ts'
 import type { DetailTab, RepoState, RepoWorkspaceLayout } from '#/renderer/stores/repos/types.ts'
 import { useReposStore } from '#/renderer/stores/repos/store.ts'
 import { EmptyState, ScrollPane } from '#/renderer/components/Layout.tsx'
+import { Button } from '#/renderer/components/ui/button.tsx'
 import { CommitDetail } from '#/renderer/components/CommitDetail.tsx'
 import { LogList } from '#/renderer/components/LogList.tsx'
 import { StatusList } from '#/renderer/components/StatusList.tsx'
@@ -35,18 +36,25 @@ export function BranchDetailContent({ repo, detail, detailId, contentId, layout 
   const t = useT()
   const setDetailTab = useReposStore((s) => s.setDetailTab)
   const { branch } = detail
+  const canOpenTerminal = repo.kind !== 'remote' && !!branch?.worktreePath
   useEffect(() => {
     if (!branch) return
-    const nextTab = detailTabForWorktree(repo.ui.detailTab, !!branch.worktreePath)
+    const nextTab = detailTabForWorktree(repo.ui.detailTab, repo.kind !== 'remote' && !!branch.worktreePath)
     if (nextTab !== repo.ui.detailTab) setDetailTab(repo.id, nextTab)
-  }, [branch, repo.id, repo.ui.detailTab, setDetailTab])
+  }, [branch, repo.id, repo.kind, repo.ui.detailTab, setDetailTab])
   if (!branch)
     return <EmptyState title={t(repo.data.branches.length === 0 ? 'branches.empty' : 'branches.filter-empty')} />
 
   return (
     <div id={contentId} className="flex min-h-0 flex-1 flex-col">
       {repo.ui.detailTab === 'status' && (
-        <BranchStatusTab detailId={detailId} detail={detail} layout={layout} busy={detail.loading.pullRequests} />
+        <BranchStatusTab
+          detailId={detailId}
+          repo={repo}
+          detail={detail}
+          layout={layout}
+          busy={detail.loading.pullRequests}
+        />
       )}
       {repo.ui.detailTab === 'changes' && (
         <BranchChangesTab
@@ -62,16 +70,18 @@ export function BranchDetailContent({ repo, detail, detailId, contentId, layout 
       {repo.ui.detailTab === 'commits' && (
         <BranchCommitsTab
           detailId={detailId}
-          repoId={repo.id}
+          repo={repo}
           branch={branch}
           branchLog={detail.branchLog}
           commitDetail={repo.ui.commitDetail}
           busy={detail.loading.commits}
           initialLoading={detail.loading.logInitial}
           appendLoading={detail.loading.logAppend}
+          logError={detail.errors.log}
+          logStale={detail.stale.log}
         />
       )}
-      {repo.ui.detailTab === 'terminal' && branch.worktreePath && (
+      {repo.ui.detailTab === 'terminal' && canOpenTerminal && (
         <BranchTerminalTab detailId={detailId} repo={repo} branch={branch} />
       )}
     </div>
@@ -94,11 +104,13 @@ function BranchTabPanel({ detailId, tabId, busy = false, children }: TabPanelPro
 
 function BranchStatusTab({
   detailId,
+  repo,
   detail,
   layout,
   busy,
 }: {
   detailId: string
+  repo: RepoState
   detail: SelectedBranchDetailPresentation
   layout: RepoWorkspaceLayout
   busy?: boolean
@@ -106,7 +118,7 @@ function BranchStatusTab({
   return (
     <BranchTabPanel detailId={detailId} tabId="status" busy={busy}>
       <ScrollPane>
-        <BranchStatus detail={detail} layout={layout} />
+        <BranchStatus repo={repo} detail={detail} layout={layout} />
       </ScrollPane>
     </BranchTabPanel>
   )
@@ -130,26 +142,45 @@ function BranchChangesTab({
   statusStale: boolean
 }) {
   const t = useT()
+  const refreshStatus = useReposStore((s) => s.refreshStatus)
   // Keep this tab-level count separate from StatusList's empty-state check: the tab decides the scroll boundary.
   const totalEntries = selectedStatus.reduce((n, wt) => n + wt.entries.length, 0)
+  const retry =
+    repo.kind === 'remote'
+      ? () => void refreshStatus(repo.id, { token: repo.instanceToken })
+      : undefined
 
   return (
     <BranchTabPanel detailId={detailId} tabId="changes" busy={statusLoading}>
       {branch.worktreePath && statusLoading && !repo.data.statusLoaded ? (
         <ListSkeleton rows={8} variant="status" />
       ) : branch.worktreePath && !repo.data.statusLoaded && statusError ? (
-        <EmptyState title={t(statusError)} />
+        <EmptyState title={t(statusError)} action={retry && <RetryButton busy={statusLoading} onRetry={retry} />} />
       ) : branch.worktreePath ? (
         totalEntries > 0 ? (
           <div className="flex min-h-0 flex-1 flex-col">
-            {statusStale && statusError && <StaleStatusNotice message={statusError} />}
+            {statusStale && statusError && (
+              <StaleNotice
+                message={statusError}
+                titleKey={repo.kind === 'remote' ? 'remote.stale-title' : 'status.stale-title'}
+                busy={statusLoading}
+                onRetry={retry}
+              />
+            )}
             <ScrollPane>
               <StatusList status={selectedStatus} emptyTitleKey="status.clean-title" emptyBodyKey="status.clean-body" />
             </ScrollPane>
           </div>
         ) : (
           <div className="flex min-h-0 flex-1 flex-col">
-            {statusStale && statusError && <StaleStatusNotice message={statusError} />}
+            {statusStale && statusError && (
+              <StaleNotice
+                message={statusError}
+                titleKey={repo.kind === 'remote' ? 'remote.stale-title' : 'status.stale-title'}
+                busy={statusLoading}
+                onRetry={retry}
+              />
+            )}
             <StatusList status={selectedStatus} emptyTitleKey="status.clean-title" emptyBodyKey="status.clean-body" />
           </div>
         )
@@ -164,58 +195,104 @@ function BranchChangesTab({
   )
 }
 
-function StaleStatusNotice({ message }: { message: string }) {
+function StaleNotice({
+  message,
+  titleKey,
+  busy = false,
+  onRetry,
+}: {
+  message: string
+  titleKey: string
+  busy?: boolean
+  onRetry?: () => void
+}) {
   const t = useT()
   return (
-    <div className="border-b border-warning-border bg-warning-surface px-4 py-2 text-xs text-warning">
-      <span className="font-medium">{t('status.stale-title')}</span>
-      <span className="text-muted-foreground"> — {t(message)}</span>
+    <div className="flex items-center justify-between gap-3 border-b border-warning-border bg-warning-surface px-4 py-2 text-xs text-warning">
+      <span>
+        <span className="font-medium">{t(titleKey)}</span>
+        <span className="text-muted-foreground"> - {t(message)}</span>
+      </span>
+      {onRetry && <RetryButton busy={busy} onRetry={onRetry} />}
     </div>
   )
 }
 
 function BranchCommitsTab({
   detailId,
-  repoId,
+  repo,
   branch,
   branchLog,
   commitDetail,
   busy,
   initialLoading,
   appendLoading,
+  logError,
+  logStale,
 }: {
   detailId: string
-  repoId: string
+  repo: RepoState
   branch: BranchDetailBranch
   branchLog: SelectedBranchDetailPresentation['branchLog']
   commitDetail: RepoState['ui']['commitDetail']
   busy: boolean
   initialLoading: boolean
   appendLoading: boolean
+  logError: string | null
+  logStale: boolean
 }) {
+  const t = useT()
+  const refreshBranchLog = useReposStore((s) => s.refreshBranchLog)
+  const retry =
+    repo.kind === 'remote'
+      ? () => void refreshBranchLog(repo.id, branch.name, { token: repo.instanceToken })
+      : undefined
+
   return (
     <BranchTabPanel detailId={detailId} tabId="commits" busy={busy}>
       {commitDetail.phase === 'open' ? (
-        <CommitDetail repoId={repoId} detail={commitDetail.detail} />
+        <CommitDetail repoId={repo.id} detail={commitDetail.detail} />
       ) : commitDetail.phase === 'opening' ? (
-        <OpeningCommitDetail repoId={repoId} />
+        <OpeningCommitDetail repoId={repo.id} />
       ) : initialLoading ? (
         <ListSkeleton variant="log" />
+      ) : !branchLog?.entries.length && logError ? (
+        <EmptyState title={t(logError)} action={retry && <RetryButton busy={busy} onRetry={retry} />} />
       ) : branchLog?.entries.length ? (
-        <ScrollPane>
-          <LogList
-            repoId={repoId}
-            log={branchLog.entries}
-            branch={branch.name}
-            selectedHash={branchLog.selectedHash ?? null}
-            hasMore={branchLog.hasMore}
-            loading={appendLoading}
-          />
-        </ScrollPane>
+        <div className="flex min-h-0 flex-1 flex-col">
+          {logStale && logError && (
+            <StaleNotice
+              message={logError}
+              titleKey={repo.kind === 'remote' ? 'remote.stale-title' : 'log.stale-title'}
+              busy={busy}
+              onRetry={retry}
+            />
+          )}
+          <ScrollPane>
+            <LogList
+              repoId={repo.id}
+              log={branchLog.entries}
+              branch={branch.name}
+              selectedHash={branchLog.selectedHash ?? null}
+              hasMore={branchLog.hasMore}
+              loading={appendLoading}
+            />
+          </ScrollPane>
+        </div>
       ) : (
-        <LogList repoId={repoId} log={[]} branch={branch.name} selectedHash={null} />
+        <LogList repoId={repo.id} log={[]} branch={branch.name} selectedHash={null} />
       )}
     </BranchTabPanel>
+  )
+}
+
+function RetryButton({ busy, onRetry }: { busy: boolean; onRetry: () => void }) {
+  const t = useT()
+  return (
+    <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={onRetry}>
+      <RefreshCw className={busy ? 'animate-spin' : undefined} />
+      {t('action.retry-refresh')}
+    </Button>
   )
 }
 
@@ -228,20 +305,8 @@ function BranchTerminalTab({
   repo: RepoState
   branch: BranchDetailBranch
 }) {
-  if (!branch.worktreePath) return null
-  const base =
-    repo.kind === 'remote'
-      ? repo.remoteTarget
-        ? {
-            kind: 'remote' as const,
-            repoId: repo.id,
-            target: repo.remoteTarget,
-            branch: branch.name,
-            worktreePath: branch.worktreePath,
-          }
-        : null
-      : { kind: 'local' as const, repoRoot: repo.id, branch: branch.name, worktreePath: branch.worktreePath }
-  if (!base) return null
+  if (repo.kind === 'remote' || !branch.worktreePath) return null
+  const base = { kind: 'local' as const, repoRoot: repo.id, branch: branch.name, worktreePath: branch.worktreePath }
   return (
     <BranchTabPanel detailId={detailId} tabId="terminal">
       <TerminalSlot base={base} />

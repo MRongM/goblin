@@ -11,13 +11,14 @@ vi.mock('#/renderer/stores/repos/store.ts', () => ({
   useReposStore: (selector: any) =>
     selector({
       runBranchAction: vi.fn(),
+      refreshAll: vi.fn(),
       refreshRemoteDiagnostics: vi.fn(),
       syncAndRefresh: vi.fn(),
     }),
 }))
 
 describe('RepoToolbarActions', () => {
-  test('shows refresh and new worktree for remote repositories', () => {
+  test('shows read-only refresh and diagnostics retry for remote repositories', () => {
     const repo = emptyRepo('ssh://deploy@prod:22/srv/goblin', 'prod:goblin', {
       kind: 'remote',
       remoteTarget: {
@@ -33,8 +34,9 @@ describe('RepoToolbarActions', () => {
 
     const html = renderToStaticMarkup(<RepoToolbarActions repo={repo} />)
 
-    expect(html).toContain('action.refresh')
-    expect(html).toContain('action.create-worktree')
+    expect(html).toContain('action.refresh-remote')
+    expect(html).not.toContain('action.fetch')
+    expect(html).not.toContain('action.create-worktree')
     expect(html).toContain('action.retry')
   })
 })

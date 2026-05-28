@@ -157,7 +157,6 @@ vi.mock('#/main/system/terminals.ts', () => ({
 vi.mock('#/main/system/editors.ts', () => ({
   getResolvedEditorApp: vi.fn(() => null),
   openInPreferredEditor: vi.fn(),
-  openRemoteInPreferredEditor: vi.fn(() => ({ ok: true, message: 'ok' })),
 }))
 
 vi.mock('#/main/events.ts', () => ({
@@ -194,12 +193,9 @@ vi.mock('#/main/ssh/diagnostics.ts', () => ({
 }))
 
 vi.mock('#/main/ssh/git.ts', () => ({
-  createRemoteWorktree: vi.fn(() => ({ ok: true, message: 'ok' })),
-  fetchRemoteRepository: vi.fn(() => ({ ok: true, message: 'ok' })),
   getRemoteLog: vi.fn(() => []),
   getRemoteSnapshot: vi.fn(() => ({ branches: [], current: '' })),
   getRemoteStatus: vi.fn(() => []),
-  removeRemoteWorktree: vi.fn(() => ({ ok: true, message: 'ok' })),
 }))
 
 vi.mock('#/main/ssh/path-picker.ts', () => ({
@@ -391,8 +387,8 @@ describe('main repo rpc cancellation', () => {
     )
   })
 
-  test('accepts remote fetch, status, log, and create worktree procedures', async () => {
-    await expect(invokeRpc('remote.fetch', { target: REMOTE_TARGET })).resolves.toMatchObject({ ok: true })
+  test('accepts read-only remote snapshot, status, and log procedures', async () => {
+    await expect(invokeRpc('remote.snapshot', { target: REMOTE_TARGET })).resolves.toMatchObject({ ok: true })
     await expect(invokeRpc('remote.status', { target: REMOTE_TARGET })).resolves.toMatchObject({ ok: true })
     await expect(
       invokeRpc('remote.log', {
@@ -402,58 +398,26 @@ describe('main repo rpc cancellation', () => {
         skip: 0,
       }),
     ).resolves.toMatchObject({ ok: true })
-    await expect(
-      invokeRpc('remote.createWorktree', {
-        target: REMOTE_TARGET,
-        worktreePath: '/srv/goblin-feature-x',
-        newBranch: 'feature/x',
-        baseBranch: 'main',
-      }),
-    ).resolves.toMatchObject({ ok: true })
-    await expect(
-      invokeRpc('remote.openEditor', {
-        target: REMOTE_TARGET,
-        path: '/srv/goblin-feature-x',
-      }),
-    ).resolves.toMatchObject({ ok: true, data: { ok: true, message: 'ok' } })
-    await expect(
-      invokeRpc('remote.removeWorktree', {
-        target: REMOTE_TARGET,
-        branch: 'feature/x',
-        worktreePath: '/srv/goblin-feature-x',
-        alsoDeleteBranch: true,
-        forceDeleteBranch: false,
-      }),
-    ).resolves.toMatchObject({ ok: true, data: { ok: true, message: 'ok' } })
   })
 
-  test('rejects invalid remote worktree create arguments at the router boundary', async () => {
-    const result = await invokeRpc('remote.createWorktree', {
-      target: REMOTE_TARGET,
-      worktreePath: 'relative/path',
-      newBranch: 'feature/x',
-      baseBranch: 'main',
+  test('rejects mismatched remote target ids at the RPC boundary', async () => {
+    const result = await invokeRpc('remote.snapshot', {
+      target: { ...REMOTE_TARGET, id: 'ssh://deploy@prod:22/srv/other' },
     })
 
-    expect(result.ok).toBe(false)
+    expect(result).toEqual({
+      ok: false,
+      error: { name: 'TRPCError', code: 'BAD_REQUEST', message: 'Invalid remote repository target' },
+    })
   })
 
-  test('rejects invalid remote editor and remove worktree paths at the router boundary', async () => {
-    await expect(
-      invokeRpc('remote.openEditor', {
-        target: REMOTE_TARGET,
-        path: 'relative/path',
-      }),
-    ).resolves.toMatchObject({ ok: false })
+  test('does not expose remote write or local editor procedures in Phase 2', async () => {
+    for (const path of ['remote.fetch', 'remote.createWorktree', 'remote.removeWorktree', 'remote.openEditor']) {
+      const result = await invokeRpc(path, { target: REMOTE_TARGET })
 
-    await expect(
-      invokeRpc('remote.removeWorktree', {
-        target: REMOTE_TARGET,
-        branch: 'feature/x',
-        worktreePath: 'relative/path',
-        alsoDeleteBranch: false,
-      }),
-    ).resolves.toMatchObject({ ok: false })
+      expect(result.ok).toBe(false)
+      if (!result.ok) expect(result.error).toMatchObject({ name: 'TRPCError', code: 'NOT_FOUND' })
+    }
   })
 
   test('does not expose a raw remote command RPC procedure', async () => {

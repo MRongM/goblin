@@ -44,6 +44,7 @@ interface EmptyStateProps {
   icon?: ReactNode
   title: ReactNode
   body?: ReactNode
+  action?: ReactNode
   tone?: 'neutral' | 'success'
 }
 
@@ -135,7 +136,7 @@ export function ScrollPane({ children }: ShellProps) {
   )
 }
 
-export function EmptyState({ icon, title, body, tone = 'neutral' }: EmptyStateProps) {
+export function EmptyState({ icon, title, body, action, tone = 'neutral' }: EmptyStateProps) {
   return (
     <div className="flex flex-1 items-center justify-center p-6 text-center">
       <div>
@@ -151,6 +152,7 @@ export function EmptyState({ icon, title, body, tone = 'neutral' }: EmptyStatePr
         )}
         <div className="text-sm font-medium text-foreground">{title}</div>
         {body && <div className="mt-1 text-xs text-muted-foreground">{body}</div>}
+        {action && <div className="mt-3 flex justify-center">{action}</div>}
       </div>
     </div>
   )

@@ -28,12 +28,16 @@ import {
   runSelectedBranchStatusWorkflow,
 } from '#/renderer/stores/repos/refresh-workflows.ts'
 
-function branchHasWorktree(repo: RepoState, branchName: string | null): boolean {
-  return !!branchName && repo.data.branches.some((branch) => branch.name === branchName && !!branch.worktreePath)
+function branchCanOpenTerminal(repo: RepoState, branchName: string | null): boolean {
+  return (
+    repo.kind !== 'remote' &&
+    !!branchName &&
+    repo.data.branches.some((branch) => branch.name === branchName && !!branch.worktreePath)
+  )
 }
 
 function detailTabForSelection(repo: RepoState, tab: DetailTab, selectedBranch = repo.ui.selectedBranch): DetailTab {
-  return detailTabForWorktree(tab, branchHasWorktree(repo, selectedBranch))
+  return detailTabForWorktree(tab, branchCanOpenTerminal(repo, selectedBranch))
 }
 
 export function createSelectionActions(set: ReposSet, get: ReposGet) {

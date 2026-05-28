@@ -1,8 +1,8 @@
 // Repo-level chrome buttons. These actions sit here because they are
 // unrelated to any single branch:
 //
-//   Refresh — `git fetch --all --prune` on origin, then rebuilds the
-//             local snapshot (branches, status, log) from disk.
+//   Refresh — local repos fetch before rebuilding repository state; remote
+//             repos run read-only SSH refreshes only.
 //
 // Branch-scoped operations (Checkout / Pull / Push / Open in Terminal
 // / Open in GitHub) live with the selected-branch detail, not here —
@@ -26,10 +26,15 @@ interface Props {
 export function RepoToolbarActions({ repo }: Props) {
   const t = useT()
   const runBranchAction = useReposStore((s) => s.runBranchAction)
+  const refreshAll = useReposStore((s) => s.refreshAll)
   const refreshRemoteDiagnostics = useReposStore((s) => s.refreshRemoteDiagnostics)
   const [createOpen, setCreateOpen] = useState(false)
   const branchActionBusy = resourceBusy(repo.resources.branchAction)
   const diagnosticsBusy = resourceBusy(repo.resources.diagnostics)
+  const remoteRefreshBusy =
+    resourceBusy(repo.resources.snapshot) ||
+    resourceBusy(repo.resources.status) ||
+    Object.values(repo.resources.logsByBranch).some(resourceBusy)
 
   // RepoView reuses the same React instance across repo switches
   // (no `key={activeId}` on the parent), so RepoToolbarActions keeps
@@ -58,6 +63,44 @@ export function RepoToolbarActions({ repo }: Props) {
 
   const createTip = t('action.create-worktree-title')
   const retryTip = t('action.retry-diagnostics')
+  const remoteRefreshTip = t('action.refresh-remote-title')
+
+  if (repo.kind === 'remote') {
+    return (
+      <div className="flex items-center gap-1">
+        <Tip label={remoteRefreshTip}>
+          <span className="inline-flex">
+            <Button
+              variant="ghost"
+              onClick={() => {
+                if (!remoteRefreshBusy) void refreshAll(repo.id, { token: repo.instanceToken })
+              }}
+              disabled={remoteRefreshBusy}
+              aria-label={remoteRefreshTip}
+            >
+              <RefreshCw className={remoteRefreshBusy ? 'animate-spin' : undefined} />
+              {t('action.refresh-remote')}
+            </Button>
+          </span>
+        </Tip>
+        <Tip label={retryTip}>
+          <span className="inline-flex">
+            <Button
+              variant="ghost"
+              onClick={() => {
+                if (!diagnosticsBusy) void refreshRemoteDiagnostics(repo.id, { token: repo.instanceToken })
+              }}
+              disabled={diagnosticsBusy}
+              aria-label={retryTip}
+            >
+              <RefreshCw className={diagnosticsBusy ? 'animate-spin' : undefined} />
+              {t('action.retry')}
+            </Button>
+          </span>
+        </Tip>
+      </div>
+    )
+  }
 
   // Buttons carry their label inline so the adjacent refresh-like glyphs
   // don't make the user guess which action they are invoking.
@@ -69,9 +112,9 @@ export function RepoToolbarActions({ repo }: Props) {
           <Button
             variant="ghost"
             onClick={() => {
-              if (!branchActionBusy && (repo.kind !== 'remote' || repo.remoteTarget)) setCreateOpen(true)
+              if (!branchActionBusy) setCreateOpen(true)
             }}
-            disabled={branchActionBusy || (repo.kind === 'remote' && !repo.remoteTarget)}
+            disabled={branchActionBusy}
             aria-label={createTip}
           >
             <FolderPlus />
@@ -79,23 +122,6 @@ export function RepoToolbarActions({ repo }: Props) {
           </Button>
         </span>
       </Tip>
-      {repo.kind === 'remote' && (
-        <Tip label={retryTip}>
-          <span className="inline-flex">
-            <Button
-              variant="ghost"
-              onClick={() => {
-                if (!diagnosticsBusy) void refreshRemoteDiagnostics(repo.id, { token: repo.instanceToken })
-              }}
-              disabled={diagnosticsBusy}
-              aria-label={retryTip}
-            >
-              <RefreshCw />
-              {t('action.retry')}
-            </Button>
-          </span>
-        </Tip>
-      )}
       <CreateWorktreeDialog
         open={createOpen}
         repo={repo}

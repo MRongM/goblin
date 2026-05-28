@@ -136,7 +136,7 @@ describe('remote fetch timestamps', () => {
     expect(useReposStore.getState().repos[REMOTE_TARGET.id]?.resources.fetch.loadedAt).toBeNull()
   })
 
-  test('manual sync fetches remote repositories and refreshes remote data', async () => {
+  test('manual sync refreshes remote repositories through the read-only path', async () => {
     const token = seedRemoteRepo()
     const calls: string[] = []
     rpcHandlers['remote.fetch'] = async ({ target }: { target: RemoteRepoTarget }) => {
@@ -154,13 +154,11 @@ describe('remote fetch timestamps', () => {
 
     await useReposStore.getState().syncAndRefresh(REMOTE_TARGET.id, { token })
 
-    expect(calls).toContain(`fetch:${REMOTE_TARGET.id}`)
-    expect(calls).toContain('snapshot')
-    expect(calls).toContain('status')
-    expect(useReposStore.getState().repos[REMOTE_TARGET.id]?.resources.fetch.loadedAt).not.toBeNull()
+    expect(calls).toEqual(['snapshot'])
+    expect(useReposStore.getState().repos[REMOTE_TARGET.id]?.resources.fetch.loadedAt).toBeNull()
   })
 
-  test('remote snapshot refresh prunes remote terminal sessions to current remote worktree paths', async () => {
+  test('remote snapshot refresh skips terminal pruning', async () => {
     const token = seedRemoteRepo()
     const pruneCalls: TerminalPruneRepoInput[] = []
     overrideTerminalBridge({
@@ -179,13 +177,7 @@ describe('remote fetch timestamps', () => {
 
     await useReposStore.getState().refreshSnapshot(REMOTE_TARGET.id, { token })
 
-    expect(pruneCalls).toEqual([
-      {
-        kind: 'remote',
-        repoId: REMOTE_TARGET.id,
-        worktreePaths: ['/srv/goblin', '/srv/goblin-feature-x'],
-      },
-    ])
+    expect(pruneCalls).toEqual([])
   })
 
   test('manual sync records the remote fetch settled time', async () => {
@@ -677,6 +669,66 @@ describe('core refresh request ordering', () => {
     await useReposStore.getState().refreshAll(REPO_ID, { token })
 
     expect(logCalls).toBe(0)
+  })
+
+  test('refreshAll refreshes remote snapshot and visible commit log without fetch state', async () => {
+    const token = seedRemoteRepo()
+    const calls: string[] = []
+    useReposStore.setState((s) => ({
+      repos: {
+        ...s.repos,
+        [REMOTE_TARGET.id]: replaceRepo(s.repos[REMOTE_TARGET.id]!, (repo) => {
+          repo.data.branches = [branch('old')]
+          repo.ui.selectedBranch = 'old'
+          repo.ui.detailTab = 'commits'
+        }),
+      },
+    }))
+    rpcHandlers['remote.snapshot'] = async () => {
+      calls.push('snapshot')
+      return { branches: [branch('main')], current: 'main' }
+    }
+    rpcHandlers['remote.status'] = async () => {
+      calls.push('status')
+      return []
+    }
+    rpcHandlers['remote.log'] = async ({ branch: branchName }: { branch: string }) => {
+      calls.push(`log:${branchName}`)
+      return []
+    }
+
+    await useReposStore.getState().refreshAll(REMOTE_TARGET.id, { token })
+
+    expect(calls).toEqual(['snapshot', 'log:main'])
+    expect(useReposStore.getState().repos[REMOTE_TARGET.id]?.resources.fetch.loadedAt).toBeNull()
+  })
+
+  test('refreshAll refreshes remote status only when changes are visible', async () => {
+    const token = seedRemoteRepo()
+    const calls: string[] = []
+    useReposStore.setState((s) => ({
+      repos: {
+        ...s.repos,
+        [REMOTE_TARGET.id]: replaceRepo(s.repos[REMOTE_TARGET.id]!, (repo) => {
+          repo.data.branches = [branch('main')]
+          repo.ui.selectedBranch = 'main'
+          repo.ui.detailTab = 'changes'
+        }),
+      },
+    }))
+    rpcHandlers['remote.snapshot'] = async () => {
+      calls.push('snapshot')
+      return { branches: [branch('main')], current: 'main' }
+    }
+    rpcHandlers['remote.status'] = async () => {
+      calls.push('status')
+      return []
+    }
+
+    await useReposStore.getState().refreshAll(REMOTE_TARGET.id, { token })
+
+    expect(calls).toEqual(['snapshot', 'status'])
+    expect(useReposStore.getState().repos[REMOTE_TARGET.id]?.resources.fetch.loadedAt).toBeNull()
   })
 
   test('refreshAll stops after snapshot when the repo is reopened', async () => {

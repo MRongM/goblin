@@ -13,6 +13,15 @@ import type { BranchInfo } from '#/renderer/types.ts'
 import { DEFAULT_DETAIL_PANE_SIZES } from '#/shared/workspace-layout.ts'
 
 const REPO_ID = '/tmp/gbl-selection-test-repo'
+const REMOTE_TARGET = {
+  id: REPO_ID,
+  alias: 'prod',
+  host: 'prod',
+  user: 'deploy',
+  port: 22,
+  remotePath: '/srv/goblin',
+  displayName: 'prod:goblin',
+}
 const rpcHandlers: Record<string, (input: any) => unknown> = {}
 
 function seedRepo(options: {
@@ -384,6 +393,18 @@ describe('setDetailTab', () => {
 
   test('falls back to status when terminal is selected without a worktree', () => {
     seedRepo({ selectedBranch: 'feature/plain', detailTab: 'commits' })
+
+    useReposStore.getState().setDetailTab(REPO_ID, 'terminal')
+
+    expect(useReposStore.getState().repos[REPO_ID]?.ui.detailTab).toBe('status')
+  })
+
+  test('falls back to status for remote branches even when worktree metadata exists', () => {
+    seedRepo({ selectedBranch: 'feature/worktree', detailTab: 'commits' })
+    updateRepoForTest((repo) => {
+      repo.kind = 'remote'
+      repo.remoteTarget = REMOTE_TARGET
+    })
 
     useReposStore.getState().setDetailTab(REPO_ID, 'terminal')
 

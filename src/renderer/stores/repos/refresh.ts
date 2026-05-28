@@ -291,7 +291,7 @@ export function createRefreshActions(set: ReposSet, get: ReposGet) {
             r.ui.selectedBranch = selected
             if (
               r.ui.detailTab === 'terminal' &&
-              !branches.some((branch) => branch.name === selected && branch.worktreePath)
+              (r.kind === 'remote' || !branches.some((branch) => branch.name === selected && branch.worktreePath))
             ) {
               r.ui.detailTab = 'status'
             }
@@ -482,17 +482,14 @@ export function createRefreshActions(set: ReposSet, get: ReposGet) {
       if (!repoBefore) return
       const token = options?.token ?? repoBefore.instanceToken
       if (repoBefore.instanceToken !== token) return
+      if (repoBefore.kind === 'remote') {
+        await get().refreshAll(id, { token })
+        return
+      }
       if (!canStartManualFetch(repoBefore)) return
-      const fetchTask =
-        repoBefore.kind === 'remote'
-          ? repoBefore.remoteTarget
-            ? (signal: AbortSignal) => rpc.remote.fetch.mutate({ target: repoBefore.remoteTarget! }, { signal })
-            : null
-          : (signal: AbortSignal) => rpc.repo.fetch.mutate({ cwd: id }, { signal })
-      if (!fetchTask) return
       let result: ExecResult | null
       try {
-        result = await runNetworkTask(id, fetchTask, {
+        result = await runNetworkTask(id, (signal) => rpc.repo.fetch.mutate({ cwd: id }, { signal }), {
           token,
           reason: 'user-fetch',
           priority: 100,

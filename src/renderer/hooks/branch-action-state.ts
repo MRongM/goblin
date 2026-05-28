@@ -19,13 +19,12 @@ export function isBranchActionBlocked(repo: RepoState): boolean {
 }
 
 export function repoBranchActionsAvailable(repo: RepoState): boolean {
-  return repo.kind !== 'remote' || !!repo.remoteTarget
+  return repo.kind !== 'remote'
 }
 
 export function branchActionsAvailable(repo: RepoState, branch: BranchInfo | null | undefined): boolean {
   if (!branch || !repoBranchActionsAvailable(repo)) return false
-  if (repo.kind !== 'remote') return true
-  return !!branch.worktreePath
+  return true
 }
 
 export function branchActionItemIdFromKind(kind: RepoBranchActionKind | null): BranchActionItemId | null {

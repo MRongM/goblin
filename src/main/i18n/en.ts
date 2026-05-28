@@ -156,6 +156,7 @@ export const en = {
   'remote.loading': 'Loading…',
   'remote.diagnostics-title': 'SSH diagnostics',
   'remote.retry-diagnostics': 'Retry diagnostics',
+  'remote.stale-title': 'Showing stale remote data',
   'remote.show-details': 'Show details',
   'remote.hide-details': 'Hide details',
 
@@ -265,6 +266,7 @@ export const en = {
   'log.empty-for-branch': 'No commits to show for {branch}.',
   'log.load-more': 'Load more',
   'log.loading-more': 'Loading…',
+  'log.stale-title': 'Showing stale commits',
 
   // ---- Status -------------------------------------------------------------
   'status.clean-title': 'Working tree is clean',
@@ -344,6 +346,7 @@ export const en = {
   'action.create-worktree': 'New worktree',
   'action.create-worktree-title': 'Create a new worktree',
   'action.retry': 'Retry',
+  'action.retry-refresh': 'Retry refresh',
   'action.retry-diagnostics': 'Retry SSH diagnostics',
   'action.create-worktree-creating-title': 'Creating worktree for {branch}…',
   'action.create-worktree-hint': 'A new branch will be created from the selected base.',
@@ -360,6 +363,8 @@ export const en = {
   'action.menu': 'Actions',
   'action.refresh': 'Refresh',
   'action.refresh-title': 'git branch · git status · git log',
+  'action.refresh-remote': 'Refresh remote data',
+  'action.refresh-remote-title': 'Refresh branches, status, and visible log over SSH',
 
   // ---- Errors / banners ---------------------------------------------------
   'error.not-git-repo': 'Not a git repository',

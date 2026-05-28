@@ -8,8 +8,9 @@ import type { ExecResult } from '#/renderer/types.ts'
 // when the UI change happened; refresh methods still own final repo-exists and
 // stale-token validation before writing results.
 export function runInitialRepoLoad(get: ReposGet, refresh: { id: string; token: number }): void {
+  const repo = get().repos[refresh.id]
   void get().refreshSnapshot(refresh.id, { token: refresh.token })
-  void get().refreshStatus(refresh.id, { token: refresh.token })
+  if (repo?.kind !== 'remote') void get().refreshStatus(refresh.id, { token: refresh.token })
 }
 
 export function runBranchViewModeChangedWorkflow(
@@ -113,25 +114,23 @@ export function runSnapshotSuccessWorkflow(
 ): void {
   if (!options.isSnapshotCurrent()) return
   const repo = get().repos[options.id]
-  persistRepoCache(set, repo, options.token)
-  const pruneInput =
-    repo?.kind === 'remote'
-      ? { kind: 'remote' as const, repoId: options.id, worktreePaths: options.worktreePaths }
-      : { repoRoot: options.id, worktreePaths: options.worktreePaths }
-  void terminalBridge.pruneRepo(pruneInput).catch((err) => {
-    console.warn('[terminal] failed to prune repo sessions', err)
-  })
-  void (async () => {
-    try {
-      if (options.isSnapshotCurrent()) await refreshPullRequestsAfterSnapshot(get, options)
-    } catch (err) {
-      console.warn('[refreshPullRequests] failed', err)
-      const message = err instanceof Error ? err.message : String(err)
-      updateIfFresh(set, options.id, options.token, (r) => {
-        r.events = appendRepoEvent(r.events, errorEvent(message))
-      })
-    }
-  })()
+  if (repo?.kind !== 'remote') {
+    persistRepoCache(set, repo, options.token)
+    void terminalBridge.pruneRepo({ repoRoot: options.id, worktreePaths: options.worktreePaths }).catch((err) => {
+      console.warn('[terminal] failed to prune repo sessions', err)
+    })
+    void (async () => {
+      try {
+        if (options.isSnapshotCurrent()) await refreshPullRequestsAfterSnapshot(get, options)
+      } catch (err) {
+        console.warn('[refreshPullRequests] failed', err)
+        const message = err instanceof Error ? err.message : String(err)
+        updateIfFresh(set, options.id, options.token, (r) => {
+          r.events = appendRepoEvent(r.events, errorEvent(message))
+        })
+      }
+    })()
+  }
   runSnapshotVisibleDetailBackfill(get, options)
 }
 
@@ -159,13 +158,14 @@ function runSnapshotVisibleDetailBackfill(
 
 export async function runRefreshAllWorkflow(get: ReposGet, options: { id: string; token: number }): Promise<void> {
   await get().refreshSnapshot(options.id, { skipLogBackfill: true, token: options.token })
-  // Status is always refreshed (regardless of which detail tab is
-  // active) because the selected-branch detail toolbar surfaces the
-  // dirty file count on every view. Log only matters when it's
-  // visible, so we keep its refresh tab-gated.
+  // Local status is refreshed regardless of tab because the selected
+  // branch toolbar surfaces dirty counts. Remote status stays lazy and
+  // only refreshes when the changes panel is visible.
   const after = get().repos[options.id]
   if (!after || after.instanceToken !== options.token) return
-  await get().refreshStatus(options.id, { token: options.token })
+  if (after.kind !== 'remote' || after.ui.detailTab === 'changes') {
+    await get().refreshStatus(options.id, { token: options.token })
+  }
   const afterStatus = get().repos[options.id]
   if (!afterStatus || afterStatus.instanceToken !== options.token) return
   if (afterStatus.ui.detailTab === 'commits')

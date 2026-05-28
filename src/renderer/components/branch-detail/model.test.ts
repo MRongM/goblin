@@ -99,4 +99,16 @@ describe('getSelectedBranchDetailPresentation', () => {
     expect(detail.stale.status).toBe(true)
     expect(detail.errors.status).toBe('status failed')
   })
+
+  test('surfaces selected branch log errors from per-branch resource state', () => {
+    const repo = emptyRepo('/tmp/gbl-detail-presentation-log-error', 'repo')
+    repo.data.branches = [createBranch('main')]
+    repo.ui.selectedBranch = 'main'
+    repo.resources.logsByBranch.main = { phase: 'idle', loadedAt: Date.now(), error: 'log failed', stale: true }
+
+    const detail = getSelectedBranchDetailPresentation(repo)
+
+    expect(detail.errors.log).toBe('log failed')
+    expect(detail.stale.log).toBe(true)
+  })
 })

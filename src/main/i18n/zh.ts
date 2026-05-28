@@ -148,6 +148,7 @@ export const zh: Record<DictKey, string> = {
   'remote.loading': '正在加载…',
   'remote.diagnostics-title': 'SSH 诊断',
   'remote.retry-diagnostics': '重试诊断',
+  'remote.stale-title': '正在显示旧的远端数据',
   'remote.show-details': '显示详情',
   'remote.hide-details': '隐藏详情',
 
@@ -255,6 +256,7 @@ export const zh: Record<DictKey, string> = {
   'log.empty-for-branch': '{branch} 暂无提交可显示。',
   'log.load-more': '加载更多',
   'log.loading-more': '正在加载…',
+  'log.stale-title': '正在显示旧的提交记录',
 
   // ---- Status ------------------------------------------------------------
   'status.clean-title': '工作区已清空',
@@ -334,6 +336,7 @@ export const zh: Record<DictKey, string> = {
   'action.create-worktree': '新工作树',
   'action.create-worktree-title': '创建新工作树',
   'action.retry': '重试',
+  'action.retry-refresh': '重试刷新',
   'action.retry-diagnostics': '重试 SSH 诊断',
   'action.create-worktree-creating-title': '正在创建 {branch} 的工作树…',
   'action.create-worktree-hint': '将基于所选分支创建一个新分支。',
@@ -350,6 +353,8 @@ export const zh: Record<DictKey, string> = {
   'action.menu': '操作',
   'action.refresh': '刷新',
   'action.refresh-title': 'git branch · git status · git log',
+  'action.refresh-remote': '刷新远端数据',
+  'action.refresh-remote-title': '通过 SSH 刷新分支、状态和当前提交记录',
 
   // ---- Errors / banners --------------------------------------------------
   'error.not-git-repo': '不是 git 仓库',

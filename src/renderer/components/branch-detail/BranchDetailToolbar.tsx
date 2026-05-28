@@ -35,13 +35,13 @@ export function BranchDetailToolbar({ repo, detail, detailId, contentId, collaps
   const shortcutsDisabled = useSettingsStore((s) => s.shortcutsDisabled)
   const terminalContext = useTerminalSessionContext()
   const behavior = repoWorkspaceBehavior(layout, collapsed, focusMode)
-  const tabs = visibleDetailTabs(!!detail.branch?.worktreePath)
-  const terminalScope = detail.branch?.worktreePath
-    ? repo.kind === 'remote'
-      ? { kind: 'remote' as const, repoId: repo.id, worktreePath: detail.branch.worktreePath }
-      : { kind: 'local' as const, repoRoot: repo.id, worktreePath: detail.branch.worktreePath }
+  const canOpenTerminal = repo.kind !== 'remote' && !!detail.branch?.worktreePath
+  const terminalWorktreePath = canOpenTerminal ? detail.branch?.worktreePath : null
+  const tabs = visibleDetailTabs(!!terminalWorktreePath)
+  const terminalScope = terminalWorktreePath
+    ? { kind: 'local' as const, repoRoot: repo.id, worktreePath: terminalWorktreePath }
     : null
-  const terminalCount = detail.branch?.worktreePath
+  const terminalCount = terminalScope
     ? terminalContext.sessionSummaries(terminalSessionGroupKey(terminalScope!)).length
     : 0
 
@@ -52,7 +52,7 @@ export function BranchDetailToolbar({ repo, detail, detailId, contentId, collaps
     const key = detailTabNavigationKey(e.key)
     if (!key) return
     e.preventDefault()
-    const nextTab = navigatedDetailTab(tabId, key, !!detail.branch?.worktreePath)
+    const nextTab = navigatedDetailTab(tabId, key, canOpenTerminal)
     setDetailTab(repo.id, nextTab)
     setDetailCollapsed(false)
     // The tablist stays mounted even when the panel is collapsed; optional chaining guards transient unmounts.

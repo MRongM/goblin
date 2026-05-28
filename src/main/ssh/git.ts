@@ -8,7 +8,7 @@ import {
   type RemoteCommandKind,
   type RemoteCommandResult,
 } from '#/main/ssh/commands.ts'
-import { PROTECTED_BRANCHES, type BranchInfo, type ExecResult, type LogEntry, type WorktreeInfo, type WorktreeStatus } from '#/shared/git-types.ts'
+import type { BranchInfo, LogEntry, WorktreeInfo, WorktreeStatus } from '#/shared/git-types.ts'
 import type { RemoteRepoTarget } from '#/shared/remote-repo.ts'
 
 type RemoteGitRunner = (
@@ -17,7 +17,6 @@ type RemoteGitRunner = (
   options?: { signal?: AbortSignal; timeoutMs?: number },
 ) => Promise<RemoteCommandResult>
 
-const REMOTE_WORKTREE_OP_TIMEOUT_MS = 180_000
 const REMOTE_WORKTREE_STATUS_CONCURRENCY = 8
 
 export interface RemoteRepoSnapshot {
@@ -31,15 +30,6 @@ interface SnapshotSections {
   branches: string[]
 }
 
-interface RemoveRemoteWorktreeInput {
-  branch: string
-  worktreePath: string
-  alsoDeleteBranch: boolean
-  forceDeleteBranch?: boolean
-  signal?: AbortSignal
-  run?: RemoteGitRunner
-}
-
 export async function getRemoteSnapshot(
   target: RemoteRepoTarget,
   options: { signal?: AbortSignal; run?: RemoteGitRunner } = {},
@@ -51,15 +41,6 @@ export async function getRemoteSnapshot(
   ])
   if (!result.ok) return null
   return parseRemoteSnapshot(result.stdout, worktrees)
-}
-
-export async function fetchRemoteRepository(
-  target: RemoteRepoTarget,
-  options: { signal?: AbortSignal; run?: RemoteGitRunner } = {},
-): Promise<ExecResult> {
-  const run: RemoteGitRunner = options.run ?? ((command, t, runOptions) => runRemoteCommand(t, command, runOptions))
-  const result = await run({ type: 'gitFetch', path: target.remotePath }, target, { signal: options.signal })
-  return remoteExecResult(result)
 }
 
 export async function getRemoteStatus(
@@ -103,78 +84,6 @@ export async function getRemoteLog(
   return parseLog(result.stdout)
 }
 
-export async function createRemoteWorktree(
-  target: RemoteRepoTarget,
-  input: { worktreePath: string; newBranch: string; baseBranch: string; signal?: AbortSignal; run?: RemoteGitRunner },
-): Promise<ExecResult> {
-  const run: RemoteGitRunner = input.run ?? ((command, t, runOptions) => runRemoteCommand(t, command, runOptions))
-  const result = await run(
-    {
-      type: 'gitWorktreeAdd',
-      path: target.remotePath,
-      worktreePath: input.worktreePath,
-      newBranch: input.newBranch,
-      baseBranch: input.baseBranch,
-    },
-    target,
-    { signal: input.signal, timeoutMs: REMOTE_WORKTREE_OP_TIMEOUT_MS },
-  )
-  return remoteExecResult(result)
-}
-
-export async function removeRemoteWorktree(
-  target: RemoteRepoTarget,
-  input: RemoveRemoteWorktreeInput,
-): Promise<ExecResult> {
-  const run: RemoteGitRunner = input.run ?? ((command, t, runOptions) => runRemoteCommand(t, command, runOptions))
-  if (input.signal?.aborted) return { ok: false, message: 'cancelled' }
-
-  const listResult = await run({ type: 'gitWorktreeList', path: target.remotePath }, target, { signal: input.signal })
-  if (input.signal?.aborted) return { ok: false, message: 'cancelled' }
-  if (!listResult.ok) return remoteExecResult(listResult)
-
-  const resolved = resolveRemoteRemovableWorktree(
-    parseWorktrees(listResult.stdout),
-    input.branch,
-    input.worktreePath,
-    target.remotePath,
-  )
-  if ('ok' in resolved) return resolved
-  if (resolved.isLocked === true) return { ok: false, message: 'error.cannot-remove-locked-worktree' }
-
-  const status = await run({ type: 'gitStatus', path: resolved.path }, target, { signal: input.signal })
-  if (input.signal?.aborted) return { ok: false, message: 'cancelled' }
-  if (!status.ok) return { ok: false, message: 'error.cannot-remove-dirty-worktree' }
-  if (parseStatus(status.stdout).length > 0) return { ok: false, message: 'error.cannot-remove-dirty-worktree' }
-
-  const shouldForceDeleteBranch = input.forceDeleteBranch === true
-  if (input.alsoDeleteBranch) {
-    if (PROTECTED_BRANCHES.has(input.branch)) return { ok: false, message: 'error.cannot-delete-protected-branch' }
-    const safelyDeletable =
-      shouldForceDeleteBranch ||
-      (await isRemoteSafelyDeletableBranch(target, input.branch, { signal: input.signal, run }))
-    if (input.signal?.aborted) return { ok: false, message: 'cancelled' }
-    if (!safelyDeletable) return { ok: false, message: 'error.cannot-remove-unpushed-worktree' }
-  }
-
-  const removeResult = await run(
-    { type: 'gitWorktreeRemove', path: target.remotePath, worktreePath: resolved.path },
-    target,
-    { signal: input.signal, timeoutMs: REMOTE_WORKTREE_OP_TIMEOUT_MS },
-  )
-  if (input.signal?.aborted) return { ok: false, message: 'cancelled' }
-  if (!removeResult.ok) return remoteExecResult(removeResult)
-  if (!input.alsoDeleteBranch) return remoteExecResult(removeResult)
-
-  const deleteResult = await run(
-    { type: 'gitBranchDelete', path: target.remotePath, branch: input.branch, force: shouldForceDeleteBranch },
-    target,
-    { signal: input.signal, timeoutMs: REMOTE_WORKTREE_OP_TIMEOUT_MS },
-  )
-  if (input.signal?.aborted) return { ok: false, message: 'cancelled' }
-  return remoteExecResult(deleteResult)
-}
-
 export function parseRemoteSnapshot(output: string, worktrees: WorktreeInfo[] = []): RemoteRepoSnapshot | null {
   const sections = splitSnapshotSections(output)
   if (!sections) return null
@@ -216,57 +125,6 @@ async function getRemoteWorktrees(
     options.signal,
   )
   return worktrees
-}
-
-function resolveRemoteRemovableWorktree(
-  worktrees: WorktreeInfo[],
-  branch: string,
-  worktreePath: string,
-  repoPath: string,
-): WorktreeInfo | ExecResult {
-  const target = worktrees.find((wt) => wt.path === worktreePath && wt.branch === branch)
-  if (!target) return { ok: false, message: 'error.worktree-not-found-for-branch' }
-  if (target.isPrimary || target.path === repoPath) return { ok: false, message: 'error.cannot-remove-main-worktree' }
-  return target
-}
-
-async function getRemoteUpstream(
-  target: RemoteRepoTarget,
-  branch: string,
-  options: { signal?: AbortSignal; run: RemoteGitRunner },
-): Promise<string | null> {
-  const result = await options.run({ type: 'gitUpstream', path: target.remotePath, branch }, target, {
-    signal: options.signal,
-  })
-  if (!result.ok || options.signal?.aborted) return null
-  return result.stdout.trim() || null
-}
-
-async function isRemoteAncestor(
-  target: RemoteRepoTarget,
-  ancestor: string,
-  descendant: string,
-  options: { signal?: AbortSignal; run: RemoteGitRunner },
-): Promise<boolean> {
-  const result = await options.run({ type: 'gitIsAncestor', path: target.remotePath, ancestor, descendant }, target, {
-    signal: options.signal,
-  })
-  return result.ok && !options.signal?.aborted
-}
-
-async function isRemoteSafelyDeletableBranch(
-  target: RemoteRepoTarget,
-  branch: string,
-  options: { signal?: AbortSignal; run: RemoteGitRunner },
-): Promise<boolean> {
-  const upstream = await getRemoteUpstream(target, branch, options)
-  if (options.signal?.aborted) return false
-  return isRemoteAncestor(target, branch, upstream ?? 'HEAD', options)
-}
-
-function remoteExecResult(result: RemoteCommandResult): ExecResult {
-  if (result.ok) return { ok: true, message: result.stdout || result.stderr || 'ok' }
-  return { ok: false, message: result.message || result.stderr || 'error.unknown' }
 }
 
 function splitSnapshotSections(output: string): SnapshotSections | null {

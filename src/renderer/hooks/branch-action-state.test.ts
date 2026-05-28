@@ -31,7 +31,7 @@ describe('isBranchActionBlocked', () => {
 })
 
 describe('repoBranchActionsAvailable', () => {
-  test('keeps local branch actions available and enables remote repos with targets', () => {
+  test('keeps branch actions local-only', () => {
     const local = emptyRepo('/tmp/gbl-branch-action-local', 'repo')
     const remote = emptyRepo('ssh://deploy@prod:22/srv/goblin', 'prod:goblin', {
       kind: 'remote',
@@ -48,11 +48,11 @@ describe('repoBranchActionsAvailable', () => {
     const remoteMissingTarget = emptyRepo('ssh://deploy@prod:22/srv/missing', 'prod:missing', { kind: 'remote' })
 
     expect(repoBranchActionsAvailable(local)).toBe(true)
-    expect(repoBranchActionsAvailable(remote)).toBe(true)
+    expect(repoBranchActionsAvailable(remote)).toBe(false)
     expect(repoBranchActionsAvailable(remoteMissingTarget)).toBe(false)
   })
 
-  test('uses branch-level availability for remote worktree rows', () => {
+  test('keeps remote branch rows read-only even when worktree metadata exists', () => {
     const remote = emptyRepo('ssh://deploy@prod:22/srv/goblin', 'prod:goblin', {
       kind: 'remote',
       remoteTarget: {
@@ -68,7 +68,7 @@ describe('repoBranchActionsAvailable', () => {
 
     expect(branchActionsAvailable(remote, createBranch('feature/x'))).toBe(false)
     expect(branchActionsAvailable(remote, createBranch('feature/x', { worktreePath: '/srv/goblin-feature-x' }))).toBe(
-      true,
+      false,
     )
   })
 })

@@ -156,6 +156,7 @@ export const ja: Record<DictKey, string> = {
   'remote.loading': '読み込み中…',
   'remote.diagnostics-title': 'SSH 診断',
   'remote.retry-diagnostics': '診断を再試行',
+  'remote.stale-title': '古いリモートデータを表示中',
   'remote.show-details': '詳細を表示',
   'remote.hide-details': '詳細を隠す',
 
@@ -263,6 +264,7 @@ export const ja: Record<DictKey, string> = {
   'log.empty-for-branch': '{branch} に表示できるコミットがありません。',
   'log.load-more': 'さらに読み込む',
   'log.loading-more': '読み込み中…',
+  'log.stale-title': '古いコミットを表示中',
 
   // ---- Status ------------------------------------------------------------
   'status.clean-title': '作業ツリーはクリーンです',
@@ -343,6 +345,7 @@ export const ja: Record<DictKey, string> = {
   'action.create-worktree': '新しいワークツリー',
   'action.create-worktree-title': '新しいワークツリーを作成',
   'action.retry': '再試行',
+  'action.retry-refresh': '更新を再試行',
   'action.retry-diagnostics': 'SSH 診断を再試行',
   'action.create-worktree-creating-title': '{branch} のワークツリーを作成中…',
   'action.create-worktree-hint': '選択したブランチから新しいブランチを作成します。',
@@ -359,6 +362,8 @@ export const ja: Record<DictKey, string> = {
   'action.menu': '操作',
   'action.refresh': '更新',
   'action.refresh-title': 'git branch · git status · git log',
+  'action.refresh-remote': 'リモートデータを更新',
+  'action.refresh-remote-title': 'SSH 経由でブランチ、ステータス、表示中のログを更新',
 
   // ---- Errors / banners --------------------------------------------------
   'error.not-git-repo': 'git リポジトリではありません',

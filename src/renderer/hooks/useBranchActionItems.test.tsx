@@ -63,14 +63,14 @@ function remoteRepo() {
 }
 
 describe('useBranchActionItems remote visibility', () => {
-  test('shows only editor and remove worktree for remote linked worktrees', () => {
-    expect(visibleIds()).toEqual(['editor', 'removeWorktree'])
+  test('shows no actions for remote linked worktrees', () => {
+    expect(visibleIds()).toEqual([])
   })
 
-  test('shows only editor for the primary remote worktree', () => {
+  test('shows no actions for the primary remote worktree', () => {
     expect(
       visibleIds(remoteRepo(), createBranch('main', { worktreePath: '/srv/goblin', worktreeIsPrimary: true })),
-    ).toEqual(['editor'])
+    ).toEqual([])
   })
 
   test('shows no remote actions when there is no worktree path', () => {

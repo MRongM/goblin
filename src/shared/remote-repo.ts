@@ -121,6 +121,10 @@ export function remoteTargetSubtitle(target: Pick<RemoteRepoTarget, 'host' | 'us
   return `${target.user}@${target.host}:${target.remotePath}`
 }
 
+export function remoteWorktreePathLabel(target: Pick<RemoteRepoTarget, 'host' | 'user'>, path: string): string {
+  return `${target.user}@${target.host}:${path}`
+}
+
 export function remoteDisplayName(
   target: Pick<RemoteRepoTargetInput, 'alias' | 'host' | 'remotePath'>,
 ): string {
