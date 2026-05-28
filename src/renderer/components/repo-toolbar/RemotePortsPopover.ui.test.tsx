@@ -62,6 +62,18 @@ function remoteRepo(): RepoState {
   return repo
 }
 
+function remoteRepoWithManyPorts(count: number): RepoState {
+  const repo = remoteRepo()
+  repo.remotePorts.sessions = {}
+  repo.remotePorts.configs = Array.from({ length: count }, (_, index) => ({
+    id: `cfg-${index + 1}`,
+    remotePort: 3000 + index,
+    requestedLocalPort: 3000 + index,
+    label: `service-${index + 1}`,
+  }))
+  return repo
+}
+
 async function openPopover() {
   const trigger = document.querySelector<HTMLButtonElement>('button[aria-label="remote-ports.title"]')
   expect(trigger).not.toBeNull()
@@ -134,5 +146,20 @@ describe('RemotePortsPopover', () => {
       requestedLocalPort: null,
       label: null,
     })
+  })
+
+  test('keeps long port lists inside a scrollable popover body', async () => {
+    await act(async () => {
+      root.render(<RemotePortsPopover repo={remoteRepoWithManyPorts(30)} />)
+    })
+    await openPopover()
+
+    const content = document.querySelector<HTMLElement>('[data-slot="popover-content"]')
+    const scrollBody = document.querySelector<HTMLElement>('[data-remote-port-scroll]')
+
+    expect(content?.className).toContain('max-h-(--radix-popover-content-available-height)')
+    expect(content?.className).toContain('overflow-hidden')
+    expect(scrollBody?.className).toContain('overflow-y-auto')
+    expect(document.body.textContent).toContain('service-30')
   })
 })

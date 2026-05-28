@@ -15,12 +15,13 @@ describe('app shutdown', () => {
     const settings = deferred<boolean>()
     const terminals = deferred<void>()
     const portForwards = deferred<void>()
+    const unregisterAppShortcuts = vi.fn()
 
     wireAppShutdown(app, {
       flushSettings: vi.fn(() => settings.promise),
       shutdownTerminalSessions: vi.fn(() => terminals.promise),
       cleanupPortForwards: vi.fn(() => portForwards.promise),
-      unregisterAppShortcuts: vi.fn(),
+      unregisterAppShortcuts,
     })
 
     const event = { preventDefault: vi.fn() }
@@ -36,6 +37,7 @@ describe('app shutdown', () => {
 
     portForwards.resolve()
     await flushPromises()
+    expect(unregisterAppShortcuts).toHaveBeenCalledTimes(1)
     expect(app.exit).toHaveBeenCalledWith(0)
   })
 

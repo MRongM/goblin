@@ -169,7 +169,7 @@ export function AddRemoteRepositoryDialog({ open, onClose, onAddRemote }: Props)
 
   return (
     <Dialog open={open} onOpenChange={(nextOpen) => !nextOpen && onClose()}>
-      <DialogContent className="sm:max-w-2xl">
+      <DialogContent className="max-h-[calc(100vh-2rem)] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>{t('remote.add-title')}</DialogTitle>
           <DialogDescription>{t('remote.add-description')}</DialogDescription>

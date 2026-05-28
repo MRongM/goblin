@@ -16,9 +16,18 @@ export interface AppShutdownDeps {
 }
 
 export function wireAppShutdown(app: ShutdownApp, deps: AppShutdownDeps): void {
-  app.on('will-quit', () => {
-    deps.unregisterAppShortcuts()
-  })
+  let shortcutsUnregistered = false
+  const unregisterShortcutsOnce = (): void => {
+    if (shortcutsUnregistered) return
+    shortcutsUnregistered = true
+    try {
+      deps.unregisterAppShortcuts()
+    } catch (err) {
+      console.error('[shortcuts] unregister failed before quit', err)
+    }
+  }
+
+  app.on('will-quit', unregisterShortcutsOnce)
 
   let isQuitting = false
   app.on('before-quit', (event) => {
@@ -26,13 +35,14 @@ export function wireAppShutdown(app: ShutdownApp, deps: AppShutdownDeps): void {
     if (isQuitting) return
     isQuitting = true
 
-    void runQuitCleanup(deps).finally(() => {
+    void runQuitCleanup(deps, unregisterShortcutsOnce).finally(() => {
       app.exit(0)
     })
   })
 }
 
-async function runQuitCleanup(deps: AppShutdownDeps): Promise<void> {
+async function runQuitCleanup(deps: AppShutdownDeps, unregisterShortcutsOnce: () => void): Promise<void> {
+  unregisterShortcutsOnce()
   const [settings, terminals, portForwards] = await Promise.allSettled([
     deps.flushSettings(),
     deps.shutdownTerminalSessions(),

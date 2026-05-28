@@ -61,4 +61,14 @@ describe('AddRemoteRepositoryDialog UI', () => {
     expect(rpcMocks.identityFileDialog).toHaveBeenCalledTimes(1)
     expect(input?.value).toBe('/Users/deploy/.ssh/id_ed25519')
   })
+
+  test('keeps the remote directory browser inside a scrollable dialog viewport', async () => {
+    await act(async () => {
+      root.render(<AddRemoteRepositoryDialog open={true} onClose={vi.fn()} onAddRemote={vi.fn()} />)
+    })
+
+    const dialog = document.querySelector<HTMLElement>('[data-slot="dialog-content"]')
+    expect(dialog?.className).toContain('max-h-[calc(100vh-2rem)]')
+    expect(dialog?.className).toContain('overflow-y-auto')
+  })
 })

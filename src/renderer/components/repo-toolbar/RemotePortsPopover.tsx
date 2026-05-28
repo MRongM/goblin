@@ -56,7 +56,10 @@ export function RemotePortsPopover({ repo }: Props) {
           )}
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-[25rem] p-0">
+      <PopoverContent
+        align="end"
+        className="flex max-h-(--radix-popover-content-available-height) w-[25rem] flex-col overflow-hidden p-0"
+      >
         <PopoverHeader className="border-b border-separator px-3 py-2">
           <div className="flex items-center justify-between gap-2">
             <PopoverTitle className="text-xs">{t('remote-ports.title')}</PopoverTitle>
@@ -78,7 +81,7 @@ export function RemotePortsPopover({ repo }: Props) {
           </div>
         </PopoverHeader>
 
-        <div className="space-y-3 p-3">
+        <div data-remote-port-scroll className="min-h-0 space-y-3 overflow-y-auto p-3">
           <form data-remote-port-form className="grid grid-cols-[1fr_1fr_auto] gap-2" onSubmit={addManual}>
             <PortInput
               id="remote-port-forward-remote-port"
