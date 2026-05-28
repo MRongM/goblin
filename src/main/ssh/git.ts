@@ -101,6 +101,18 @@ export async function getRemotePatch(
   return remoteExecResult(result)
 }
 
+export async function fetchRemoteRepository(
+  target: RemoteRepoTarget,
+  options: { signal?: AbortSignal; run?: RemoteGitRunner } = {},
+): Promise<ExecResult> {
+  const run: RemoteGitRunner = options.run ?? ((command, t, runOptions) => runRemoteCommand(t, command, runOptions))
+  const result = await run({ type: 'gitFetchAll', path: target.remotePath }, target, {
+    signal: options.signal,
+    timeoutMs: REMOTE_BRANCH_OP_TIMEOUT_MS,
+  })
+  return remoteExecResult(result)
+}
+
 export async function checkoutRemoteBranch(
   target: RemoteRepoTarget,
   branch: string,

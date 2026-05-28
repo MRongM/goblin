@@ -87,6 +87,7 @@ import {
   checkoutRemoteBranch,
   createRemoteWorktree,
   deleteRemoteBranch,
+  fetchRemoteRepository,
   getRemoteGitHubUrl,
   getRemoteLog,
   getRemotePatch,
@@ -466,6 +467,12 @@ function createRpcHandlers(): AppRpcHandlers {
       testRepository: async ({ target }) => {
         const normalized = normalizedRemoteTargetOrThrow(target)
         return testRemoteRepository(normalized, { signal: currentRpcSignal() })
+      },
+      fetch: async ({ target, kind }) => {
+        const normalized = normalizedRemoteTargetOrThrow(target)
+        return runCancellable(normalized.id, kind === 'background' ? 'background' : 'user', (signal) =>
+          fetchRemoteRepository(normalized, { signal }),
+        )
       },
       snapshot: async ({ target }) => {
         const normalized = normalizedRemoteTargetOrThrow(target)

@@ -122,21 +122,29 @@ describe('remote fetch timestamps', () => {
     ])
   })
 
-  test('backgroundFetch still skips remote repositories', async () => {
+  test('backgroundFetch fetches remote repositories and refreshes remote state', async () => {
     seedRemoteRepo()
-    let fetchCalls = 0
-    rpcHandlers['remote.fetch'] = async () => {
-      fetchCalls += 1
+    const calls: string[] = []
+    rpcHandlers['remote.fetch'] = async ({ target }: { target: RemoteRepoTarget }) => {
+      calls.push(`fetch:${target.id}`)
       return { ok: true, message: 'ok' }
+    }
+    rpcHandlers['remote.snapshot'] = async () => {
+      calls.push('snapshot')
+      return { branches: [branch('feature/remote')], current: 'feature/remote' }
+    }
+    rpcHandlers['remote.status'] = async () => {
+      calls.push('status')
+      return []
     }
 
     await useReposStore.getState().backgroundFetch(REMOTE_TARGET.id)
 
-    expect(fetchCalls).toBe(0)
-    expect(useReposStore.getState().repos[REMOTE_TARGET.id]?.resources.fetch.loadedAt).toBeNull()
+    expect(calls).toEqual([`fetch:${REMOTE_TARGET.id}`, 'snapshot', 'status'])
+    expect(useReposStore.getState().repos[REMOTE_TARGET.id]?.resources.fetch.loadedAt).not.toBeNull()
   })
 
-  test('manual sync refreshes remote repositories through the read-only path', async () => {
+  test('manual sync fetches remote repositories before refreshing them', async () => {
     const token = seedRemoteRepo()
     const calls: string[] = []
     rpcHandlers['remote.fetch'] = async ({ target }: { target: RemoteRepoTarget }) => {
@@ -154,8 +162,25 @@ describe('remote fetch timestamps', () => {
 
     await useReposStore.getState().syncAndRefresh(REMOTE_TARGET.id, { token })
 
-    expect(calls).toEqual(['snapshot'])
-    expect(useReposStore.getState().repos[REMOTE_TARGET.id]?.resources.fetch.loadedAt).toBeNull()
+    expect(calls).toEqual([`fetch:${REMOTE_TARGET.id}`, 'snapshot'])
+    expect(useReposStore.getState().repos[REMOTE_TARGET.id]?.resources.fetch.loadedAt).not.toBeNull()
+  })
+
+  test('backgroundFetch records remote fetch failures', async () => {
+    seedRemoteRepo()
+    rpcHandlers['remote.fetch'] = async () => ({ ok: false, message: 'fatal: remote rejected' })
+
+    await useReposStore.getState().backgroundFetch(REMOTE_TARGET.id)
+
+    expect(useReposStore.getState().repos[REMOTE_TARGET.id]?.remote).toEqual({
+      fetchFailed: true,
+      fetchError: 'fatal: remote rejected',
+    })
+    expect(useReposStore.getState().repos[REMOTE_TARGET.id]?.resources.fetch).toMatchObject({
+      phase: 'idle',
+      error: 'fatal: remote rejected',
+      stale: false,
+    })
   })
 
   test('remote snapshot refresh skips terminal pruning', async () => {

@@ -8,6 +8,7 @@ import {
   checkoutRemoteBranch,
   createRemoteWorktree,
   deleteRemoteBranch,
+  fetchRemoteRepository,
   getRemoteGitHubUrl,
   pushRemoteBranch,
 } from '#/main/ssh/git.ts'
@@ -219,6 +220,7 @@ vi.mock('#/main/ssh/git.ts', () => ({
   checkoutRemoteBranch: vi.fn(() => ({ ok: true, message: 'checked out' })),
   createRemoteWorktree: vi.fn(() => ({ ok: true, message: 'created' })),
   deleteRemoteBranch: vi.fn(() => ({ ok: true, message: 'deleted' })),
+  fetchRemoteRepository: vi.fn(() => ({ ok: true, message: 'fetched' })),
   getRemoteGitHubUrl: vi.fn(() => 'https://github.com/nano-props/goblin/pull/new/feature/x'),
   getRemoteLog: vi.fn(() => []),
   getRemotePatch: vi.fn(() => ({ ok: true, message: 'patch' })),
@@ -431,6 +433,17 @@ describe('main repo rpc cancellation', () => {
     ).resolves.toMatchObject({ ok: true })
   })
 
+  test('exposes typed remote fetch procedure', async () => {
+    await expect(invokeRpc('remote.fetch', { target: REMOTE_TARGET, kind: 'background' })).resolves.toEqual({
+      ok: true,
+      data: { ok: true, message: 'fetched' },
+    })
+
+    expect(fetchRemoteRepository).toHaveBeenCalledWith(expect.objectContaining({ id: REMOTE_TARGET.id }), {
+      signal: expect.any(AbortSignal),
+    })
+  })
+
   test('exposes typed remote branch action procedures', async () => {
     await expect(invokeRpc('remote.checkout', { target: REMOTE_TARGET, branch: 'feature/x' })).resolves.toMatchObject({
       ok: true,
@@ -570,15 +583,6 @@ describe('main repo rpc cancellation', () => {
       ok: false,
       error: { name: 'TRPCError', code: 'BAD_REQUEST', message: 'Invalid remote repository target' },
     })
-  })
-
-  test('does not expose raw remote fetch procedures', async () => {
-    for (const path of ['remote.fetch']) {
-      const result = await invokeRpc(path, { target: REMOTE_TARGET })
-
-      expect(result.ok).toBe(false)
-      if (!result.ok) expect(result.error).toMatchObject({ name: 'TRPCError', code: 'NOT_FOUND' })
-    }
   })
 
   test('does not expose a raw remote command RPC procedure', async () => {

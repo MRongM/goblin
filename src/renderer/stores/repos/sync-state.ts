@@ -20,7 +20,7 @@ export function canStartManualFetch(repo: RepoState | undefined): repo is RepoSt
 }
 
 export function canStartRemoteFetch(repo: RepoState | undefined): repo is RepoState {
-  return !!repo && repo.kind !== 'remote' && canStartManualFetch(repo)
+  return !!repo && canStartManualFetch(repo)
 }
 
 export function isRemoteFetchDue(

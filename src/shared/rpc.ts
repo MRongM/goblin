@@ -239,6 +239,7 @@ export interface AppRpcHandlers {
     identityFileDialog: () => Promise<string | null>
     resolveTarget: (input: RemoteConnectionInput) => Promise<ResolvedRemoteTarget>
     testRepository: (input: { target: RemoteRepoTarget }) => Promise<RemoteDiagnosticsResult>
+    fetch: (input: { target: RemoteRepoTarget; kind?: NetworkOpKind }) => Promise<ExecResult>
     snapshot: (input: { target: RemoteRepoTarget }) => Promise<RepoSnapshot | null>
     status: (input: { target: RemoteRepoTarget }) => Promise<WorktreeStatus[]>
     log: (input: { target: RemoteRepoTarget; branch: string; count?: number; skip?: number }) => Promise<LogEntry[]>
@@ -438,6 +439,9 @@ export function createAppRouter(handlers: AppRpcHandlers) {
       testRepository: p
         .input(v.object({ target: RemoteTargetSchema }))
         .query(({ input }) => handlers.remote.testRepository(input)),
+      fetch: p
+        .input(v.object({ target: RemoteTargetSchema, kind: v.optional(v.picklist(['user', 'background'])) }))
+        .mutation(({ input }) => handlers.remote.fetch(input)),
       snapshot: p.input(v.object({ target: RemoteTargetSchema })).query(({ input }) => handlers.remote.snapshot(input)),
       status: p.input(v.object({ target: RemoteTargetSchema })).query(({ input }) => handlers.remote.status(input)),
       log: p

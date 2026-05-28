@@ -148,6 +148,24 @@ describe('RemotePortsPopover', () => {
     })
   })
 
+  test('organizes saved and discovered ports in a wider management layout', async () => {
+    await act(async () => {
+      root.render(<RemotePortsPopover repo={remoteRepo()} />)
+    })
+    await openPopover()
+
+    const content = document.querySelector<HTMLElement>('[data-slot="popover-content"]')
+    const layout = document.querySelector<HTMLElement>('[data-remote-port-layout]')
+    const saved = document.querySelector<HTMLElement>('[data-remote-port-saved]')
+    const discovered = document.querySelector<HTMLElement>('[data-remote-port-discovered]')
+
+    expect(content?.className).toContain('w-[min(calc(100vw-1rem),44rem)]')
+    expect(layout?.className).toContain('sm:grid-cols-[minmax(0,1fr)_11rem]')
+    expect(saved?.textContent).toContain('remote-ports.saved')
+    expect(discovered?.textContent).toContain('remote-ports.discovered')
+    expect(discovered?.textContent).toContain('vite')
+  })
+
   test('keeps long port lists inside a scrollable popover body', async () => {
     await act(async () => {
       root.render(<RemotePortsPopover repo={remoteRepoWithManyPorts(30)} />)

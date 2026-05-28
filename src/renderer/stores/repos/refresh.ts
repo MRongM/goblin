@@ -31,7 +31,7 @@ import {
 } from '#/renderer/stores/repos/resources.ts'
 import { branchPullRequestBelongsToBranch } from '#/shared/git-types.ts'
 import type { RepoOperationReason, RepoPullRequestReason } from '#/renderer/stores/repos/operations.ts'
-import type { BranchLogState, ReposGet, ReposSet } from '#/renderer/stores/repos/types.ts'
+import type { BranchLogState, RepoState, ReposGet, ReposSet } from '#/renderer/stores/repos/types.ts'
 import type { ExecResult, LogEntry, PullRequestFetchMode, PullRequestInfo } from '#/renderer/types.ts'
 import { rpc } from '#/renderer/rpc.ts'
 
@@ -94,6 +94,17 @@ function finishPullRequestBranchResources(
 }
 
 export function createRefreshActions(set: ReposSet, get: ReposGet) {
+  function fetchTaskForRepo(
+    repo: RepoState,
+    kind?: 'user' | 'background',
+  ): ((signal: AbortSignal) => Promise<ExecResult>) | null {
+    if (repo.kind === 'remote') {
+      if (!repo.remoteTarget) return null
+      return (signal) => rpc.remote.fetch.mutate({ target: repo.remoteTarget!, kind }, { signal })
+    }
+    return (signal) => rpc.repo.fetch.mutate({ cwd: repo.id, kind }, { signal })
+  }
+
   async function runNetworkTask(
     id: string,
     task: (signal: AbortSignal) => Promise<ExecResult>,
@@ -482,14 +493,12 @@ export function createRefreshActions(set: ReposSet, get: ReposGet) {
       if (!repoBefore) return
       const token = options?.token ?? repoBefore.instanceToken
       if (repoBefore.instanceToken !== token) return
-      if (repoBefore.kind === 'remote') {
-        await get().refreshAll(id, { token })
-        return
-      }
+      const fetchTask = fetchTaskForRepo(repoBefore, 'user')
+      if (!fetchTask) return
       if (!canStartManualFetch(repoBefore)) return
       let result: ExecResult | null
       try {
-        result = await runNetworkTask(id, (signal) => rpc.repo.fetch.mutate({ cwd: id }, { signal }), {
+        result = await runNetworkTask(id, fetchTask, {
           token,
           reason: 'user-fetch',
           priority: 100,
@@ -512,8 +521,9 @@ export function createRefreshActions(set: ReposSet, get: ReposGet) {
 
       const repoBefore = get().repos[id]
       if (!repoBefore) return
-      if (!localRepoAvailable(repoBefore)) return
       if (!canStartRemoteFetch(repoBefore)) return
+      const fetchTask = fetchTaskForRepo(repoBefore, 'background')
+      if (!fetchTask) return
       const token = repoBefore.instanceToken
 
       let resolveWork!: () => void
@@ -526,11 +536,7 @@ export function createRefreshActions(set: ReposSet, get: ReposGet) {
 
       void (async () => {
         try {
-          const result = await runNetworkTask(
-            id,
-            (signal) => rpc.repo.fetch.mutate({ cwd: id, kind: 'background' }, { signal }),
-            { token, reason: 'background-fetch' },
-          )
+          const result = await runNetworkTask(id, fetchTask, { token, reason: 'background-fetch' })
           if (!result) return
           await runBackgroundFetchResultWorkflow(set, get, { id, token, result })
         } catch (err) {

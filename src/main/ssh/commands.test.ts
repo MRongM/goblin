@@ -170,6 +170,10 @@ describe('remote ssh command runner', () => {
   test('builds remote branch action commands with quoted refs and paths', async () => {
     const { buildRemoteCommandInvocation } = await import('#/main/ssh/commands.ts')
 
+    const fetchAll = buildRemoteCommandInvocation(MANUAL_TARGET, {
+      type: 'gitFetchAll',
+      path: "/srv/team's app",
+    })
     const checkout = buildRemoteCommandInvocation(MANUAL_TARGET, {
       type: 'gitCheckout',
       path: "/srv/team's app",
@@ -192,6 +196,7 @@ describe('remote ssh command runner', () => {
       branch: 'feature/x',
     })
 
+    expect(fetchAll.script).toBe("git -C '/srv/team'\\''s app' fetch --all --prune")
     expect(checkout.script).toBe("git -C '/srv/team'\\''s app' switch -- 'feature/x'")
     expect(push.script).toBe("git -C '/srv/goblin' push -u origin 'feature/quote'\\''s'")
     expect(currentPull.script).toBe("git -C '/srv/goblin-feature-x' pull --ff-only")

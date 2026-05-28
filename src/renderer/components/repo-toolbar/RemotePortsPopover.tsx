@@ -1,4 +1,4 @@
-import { ExternalLink, Plug, RefreshCw, Trash2 } from 'lucide-react'
+import { ExternalLink, Play, Plug, Plus, RefreshCw, Square, Trash2 } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
 import { CopyButton } from '#/renderer/components/CopyButton.tsx'
 import { Tip } from '#/renderer/components/Tip.tsx'
@@ -26,6 +26,7 @@ export function RemotePortsPopover({ repo }: Props) {
   const stopRemotePortForward = useReposStore((s) => s.stopRemotePortForward)
   const scanRemotePorts = useReposStore((s) => s.scanRemotePorts)
   const runningCount = Object.values(repo.remotePorts.sessions).filter((session) => session.status === 'running').length
+  const savedCount = repo.remotePorts.configs.length
   const parsedRemotePort = parsePort(remotePort)
   const parsedLocalPort = parsePort(localPort)
   const canAdd = parsedRemotePort !== null && (localPort.trim() === '' || parsedLocalPort !== null)
@@ -58,11 +59,16 @@ export function RemotePortsPopover({ repo }: Props) {
       </PopoverTrigger>
       <PopoverContent
         align="end"
-        className="flex max-h-(--radix-popover-content-available-height) w-[25rem] flex-col overflow-hidden p-0"
+        className="flex max-h-(--radix-popover-content-available-height) w-[min(calc(100vw-1rem),44rem)] flex-col overflow-hidden p-0"
       >
         <PopoverHeader className="border-b border-separator px-3 py-2">
           <div className="flex items-center justify-between gap-2">
-            <PopoverTitle className="text-xs">{t('remote-ports.title')}</PopoverTitle>
+            <div className="min-w-0">
+              <PopoverTitle className="text-xs">{t('remote-ports.title')}</PopoverTitle>
+              <div className="truncate text-[11px] text-muted-foreground">
+                {t('remote-ports.summary', { running: runningCount, total: savedCount })}
+              </div>
+            </div>
             <Tip label={t('remote-ports.scan')}>
               <span className="inline-flex">
                 <Button
@@ -82,71 +88,101 @@ export function RemotePortsPopover({ repo }: Props) {
         </PopoverHeader>
 
         <div data-remote-port-scroll className="min-h-0 space-y-3 overflow-y-auto p-3">
-          <form data-remote-port-form className="grid grid-cols-[1fr_1fr_auto] gap-2" onSubmit={addManual}>
-            <PortInput
-              id="remote-port-forward-remote-port"
-              value={remotePort}
-              onChange={setRemotePort}
-              placeholder={t('remote-ports.remote-port')}
-            />
-            <PortInput value={localPort} onChange={setLocalPort} placeholder={t('remote-ports.local-port')} />
-            <Button type="submit" variant="outline" disabled={!canAdd}>
-              {t('remote-ports.add')}
-            </Button>
-          </form>
-
-          <div className="space-y-1.5">
-            {repo.remotePorts.configs.length === 0 ? (
-              <div className="rounded-md border border-dashed border-border px-3 py-4 text-center text-xs text-muted-foreground">
-                {t('remote-ports.empty')}
-              </div>
-            ) : (
-              repo.remotePorts.configs.map((config) => (
-                <RemotePortRow
-                  key={config.id}
-                  repo={repo}
-                  config={config}
-                  onStart={() => void startRemotePortForward(repo.id, config.id)}
-                  onStop={() => void stopRemotePortForward(repo.id, config.id)}
-                  onRemove={() => void removeRemotePortForward(repo.id, config.id)}
+          <div data-remote-port-layout className="grid min-h-0 gap-3 sm:grid-cols-[minmax(0,1fr)_11rem]">
+            <section data-remote-port-saved className="min-w-0 space-y-2">
+              <form data-remote-port-form className="grid grid-cols-[1fr_1fr_auto] gap-2" onSubmit={addManual}>
+                <PortInput
+                  id="remote-port-forward-remote-port"
+                  value={remotePort}
+                  onChange={setRemotePort}
+                  placeholder={t('remote-ports.remote-port')}
                 />
-              ))
-            )}
-          </div>
+                <PortInput value={localPort} onChange={setLocalPort} placeholder={t('remote-ports.local-port')} />
+                <Button type="submit" variant="outline" disabled={!canAdd}>
+                  <Plus />
+                  {t('remote-ports.add')}
+                </Button>
+              </form>
 
-          {(repo.remotePorts.scan.error || repo.remotePorts.scan.message) && (
-            <div className="rounded-md bg-muted px-2 py-1.5 text-xs text-muted-foreground">
-              {repo.remotePorts.scan.error ?? t(repo.remotePorts.scan.message ?? '')}
-            </div>
-          )}
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-xs font-medium text-foreground">{t('remote-ports.saved')}</div>
+                <Badge variant="outline" className="font-mono tabular-nums">
+                  {savedCount}
+                </Badge>
+              </div>
 
-          {repo.remotePorts.scan.ports.length > 0 && (
-            <div className="space-y-1.5 border-t border-separator pt-3">
-              <div className="text-xs font-medium text-foreground">{t('remote-ports.discovered')}</div>
-              {repo.remotePorts.scan.ports.map((port) => (
-                <div key={`${port.port}:${port.pid ?? ''}`} className="flex min-h-7 items-center gap-2 text-xs">
-                  <span className="w-14 shrink-0 font-mono tabular-nums">:{port.port}</span>
-                  <span className="min-w-0 flex-1 truncate text-muted-foreground">
-                    {port.processName ?? t('remote-ports.unknown-process')}
-                  </span>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() =>
-                      addRemotePortForward(repo.id, {
-                        remotePort: port.port,
-                        requestedLocalPort: port.port,
-                        label: port.processName,
-                      })
-                    }
-                  >
-                    {t('remote-ports.forward')}
-                  </Button>
+              <div className="space-y-1.5">
+                {repo.remotePorts.configs.length === 0 ? (
+                  <div className="rounded-md border border-dashed border-border px-3 py-4 text-center text-xs text-muted-foreground">
+                    {t('remote-ports.empty')}
+                  </div>
+                ) : (
+                  repo.remotePorts.configs.map((config) => (
+                    <RemotePortRow
+                      key={config.id}
+                      repo={repo}
+                      config={config}
+                      onStart={() => void startRemotePortForward(repo.id, config.id)}
+                      onStop={() => void stopRemotePortForward(repo.id, config.id)}
+                      onRemove={() => void removeRemotePortForward(repo.id, config.id)}
+                    />
+                  ))
+                )}
+              </div>
+            </section>
+
+            <section
+              data-remote-port-discovered
+              className="min-w-0 space-y-2 border-t border-separator pt-3 sm:border-l sm:border-t-0 sm:pt-0 sm:pl-3"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-xs font-medium text-foreground">{t('remote-ports.discovered')}</div>
+                {repo.remotePorts.scan.phase === 'loading' && <RefreshCw className="size-3 animate-spin text-muted-foreground" />}
+              </div>
+
+              {(repo.remotePorts.scan.error || repo.remotePorts.scan.message) && (
+                <div className="rounded-md bg-muted px-2 py-1.5 text-xs text-muted-foreground">
+                  {repo.remotePorts.scan.error ?? t(repo.remotePorts.scan.message ?? '')}
                 </div>
-              ))}
-            </div>
-          )}
+              )}
+
+              {repo.remotePorts.scan.ports.length === 0 ? (
+                <div className="rounded-md border border-dashed border-border px-2 py-3 text-xs text-muted-foreground">
+                  {t('remote-ports.discovered-empty')}
+                </div>
+              ) : (
+                <div className="space-y-1.5">
+                  {repo.remotePorts.scan.ports.map((port) => (
+                    <div
+                      key={`${port.port}:${port.pid ?? ''}`}
+                      className="grid min-h-8 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-md border border-border px-2 py-1.5 text-xs"
+                    >
+                      <div className="min-w-0">
+                        <div className="font-mono tabular-nums text-foreground">:{port.port}</div>
+                        <div className="truncate text-[11px] text-muted-foreground">
+                          {port.processName ?? t('remote-ports.unknown-process')}
+                        </div>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() =>
+                          addRemotePortForward(repo.id, {
+                            remotePort: port.port,
+                            requestedLocalPort: port.port,
+                            label: port.processName,
+                          })
+                        }
+                      >
+                        {t('remote-ports.forward')}
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+          </div>
         </div>
       </PopoverContent>
     </Popover>
@@ -199,24 +235,25 @@ function RemotePortRow({
   const status = session?.status ?? 'stopped'
 
   return (
-    <div className="rounded-md border border-border px-2 py-2">
-      <div className="flex items-center justify-between gap-2">
-        <div className="min-w-0">
-          <div className="truncate text-xs font-medium text-foreground">
-            {config.label ?? t('remote-ports.mapping', { remotePort: config.remotePort })}
+    <div data-remote-port-row className="rounded-md border border-border px-2 py-2">
+      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2">
+        <div className="min-w-0 space-y-1">
+          <div className="flex min-w-0 items-center gap-2">
+            <div className="min-w-0 truncate text-xs font-medium text-foreground">
+              {config.label ?? t('remote-ports.mapping', { remotePort: config.remotePort })}
+            </div>
+            <Badge variant={statusBadgeVariant(status)}>{status}</Badge>
           </div>
-          <div className="truncate font-mono text-[11px] text-muted-foreground">
+          <div className="truncate font-mono text-[11px] text-foreground">
             {url ?? t('remote-ports.local-target', { localPort: config.requestedLocalPort ?? config.remotePort })}
           </div>
-          {requestedMismatch && (
-            <div className="truncate text-[11px] text-muted-foreground">
-              {t('remote-ports.requested-local', { port: requested })}
-            </div>
-          )}
+          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
+            <span className="font-mono tabular-nums">{t('remote-ports.mapping', { remotePort: config.remotePort })}</span>
+            {requestedMismatch && <span>{t('remote-ports.requested-local', { port: requested })}</span>}
+          </div>
           {session?.message && <div className="truncate text-[11px] text-danger">{session.message}</div>}
         </div>
         <div className="flex shrink-0 items-center gap-1">
-          <Badge variant={statusBadgeVariant(status)}>{status}</Badge>
           {url && (
             <>
               <CopyButton
@@ -240,6 +277,7 @@ function RemotePortRow({
             </>
           )}
           <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={running ? onStop : onStart}>
+            {running ? <Square /> : <Play />}
             {t(running ? 'remote-ports.stop' : 'remote-ports.start')}
           </Button>
           <Tip label={t('remote-ports.remove')}>

@@ -170,6 +170,22 @@ describe('remote git snapshot', () => {
 })
 
 describe('remote git branch actions', () => {
+  test('fetches all remotes from the remote repository path', async () => {
+    const { fetchRemoteRepository } = await import('#/main/ssh/git.ts')
+    const run = vi.fn(async () => ({ ok: true, stdout: 'fetched', stderr: '' }))
+
+    await expect(fetchRemoteRepository(TARGET, { run })).resolves.toEqual({
+      ok: true,
+      message: 'fetched',
+    })
+
+    expect(run).toHaveBeenCalledWith(
+      { type: 'gitFetchAll', path: '/srv/goblin' },
+      TARGET,
+      { signal: undefined, timeoutMs: 180_000 },
+    )
+  })
+
   test('checks out a branch in the provided remote worktree path', async () => {
     const { checkoutRemoteBranch } = await import('#/main/ssh/git.ts')
     const run = vi.fn(async () => ({ ok: true, stdout: '', stderr: '' }))

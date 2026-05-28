@@ -55,13 +55,13 @@ describe('canStartRemoteFetch', () => {
     },
   )
 
-  test('allows manual fetch checks for remote repos but keeps background remote fetch blocked', () => {
+  test('allows scheduled fetch checks for remote repos', () => {
     const remote = repo()
     remote.kind = 'remote'
 
     expect(canStartManualFetch(remote)).toBe(true)
-    expect(canStartRemoteFetch(remote)).toBe(false)
-    expect(isRemoteFetchDue(remote, 60_000, 100_000)).toBe(false)
+    expect(canStartRemoteFetch(remote)).toBe(true)
+    expect(isRemoteFetchDue(remote, 60_000, 100_000)).toBe(true)
   })
 })
 

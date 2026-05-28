@@ -22,6 +22,7 @@ export type RemoteCommandKind =
   | { type: 'gitWorktreeList'; path: string }
   | { type: 'gitStatus'; path: string }
   | { type: 'gitLog'; path: string; branch: string; count?: number; skip?: number }
+  | { type: 'gitFetchAll'; path: string }
   | { type: 'gitCheckout'; path: string; branch: string }
   | { type: 'gitPullCurrent'; path: string }
   | { type: 'gitFetchBranch'; path: string; remote: string; remoteBranch: string; branch: string }
@@ -180,6 +181,8 @@ function scriptForCommand(command: RemoteCommandKind): string {
     }
     case 'gitCheckout':
       return `git -C ${shellQuote(command.path)} switch -- ${shellQuote(command.branch)}`
+    case 'gitFetchAll':
+      return `git -C ${shellQuote(command.path)} fetch --all --prune`
     case 'gitPullCurrent':
       return `git -C ${shellQuote(command.path)} pull --ff-only`
     case 'gitFetchBranch':
