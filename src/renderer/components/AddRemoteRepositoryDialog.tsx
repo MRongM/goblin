@@ -58,6 +58,11 @@ export function AddRemoteRepositoryDialog({ open, onClose, onAddRemote }: Props)
   const canBrowse =
     !loading && (mode === 'config' ? alias.trim().length > 0 : host.trim().length > 0 && user.trim().length > 0)
 
+  function clearResolvedRemoteState() {
+    setTarget(null)
+    setDiagnostics(null)
+  }
+
   useEffect(() => {
     if (!open) return
     setHosts([])
@@ -144,8 +149,7 @@ export function AddRemoteRepositoryDialog({ open, onClose, onAddRemote }: Props)
       const selectedPath = await rpc.remote.identityFileDialog.mutate()
       if (!selectedPath) return
       setIdentityFile(selectedPath)
-      setTarget(null)
-      setDiagnostics(null)
+      clearResolvedRemoteState()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     }
@@ -188,12 +192,22 @@ export function AddRemoteRepositoryDialog({ open, onClose, onAddRemote }: Props)
             <button
               type="button"
               className={modeButtonClass(mode === 'config')}
-              onClick={() => setMode('config')}
+              onClick={() => {
+                setMode('config')
+                clearResolvedRemoteState()
+              }}
               disabled={hosts.length === 0}
             >
               {t('remote.ssh-config')}
             </button>
-            <button type="button" className={modeButtonClass(mode === 'manual')} onClick={() => setMode('manual')}>
+            <button
+              type="button"
+              className={modeButtonClass(mode === 'manual')}
+              onClick={() => {
+                setMode('manual')
+                clearResolvedRemoteState()
+              }}
+            >
               {t('remote.enter-manually')}
             </button>
           </div>
@@ -210,8 +224,7 @@ export function AddRemoteRepositoryDialog({ open, onClose, onAddRemote }: Props)
                   disabled={loading}
                   onChange={(event) => {
                     setAlias(event.target.value)
-                    setTarget(null)
-                    setDiagnostics(null)
+                    clearResolvedRemoteState()
                   }}
                   className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-ring"
                 >
@@ -230,9 +243,36 @@ export function AddRemoteRepositoryDialog({ open, onClose, onAddRemote }: Props)
             </div>
           ) : (
             <div className="grid gap-3 sm:grid-cols-[1fr_1fr_5rem]">
-              <Field label={t('remote.host')} id="remote-host" value={host} disabled={loading} onChange={setHost} />
-              <Field label={t('remote.user')} id="remote-user" value={user} disabled={loading} onChange={setUser} />
-              <Field label={t('remote.port')} id="remote-port" value={port} disabled={loading} onChange={setPort} />
+              <Field
+                label={t('remote.host')}
+                id="remote-host"
+                value={host}
+                disabled={loading}
+                onChange={(value) => {
+                  setHost(value)
+                  clearResolvedRemoteState()
+                }}
+              />
+              <Field
+                label={t('remote.user')}
+                id="remote-user"
+                value={user}
+                disabled={loading}
+                onChange={(value) => {
+                  setUser(value)
+                  clearResolvedRemoteState()
+                }}
+              />
+              <Field
+                label={t('remote.port')}
+                id="remote-port"
+                value={port}
+                disabled={loading}
+                onChange={(value) => {
+                  setPort(value)
+                  clearResolvedRemoteState()
+                }}
+              />
             </div>
           )}
 
@@ -248,8 +288,7 @@ export function AddRemoteRepositoryDialog({ open, onClose, onAddRemote }: Props)
                 placeholder="~/.ssh/id_ed25519"
                 onChange={(event) => {
                   setIdentityFile(event.target.value)
-                  setTarget(null)
-                  setDiagnostics(null)
+                  clearResolvedRemoteState()
                 }}
                 className="min-w-0 flex-1 rounded-md border border-input bg-background px-3 py-2 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-ring"
               />
@@ -279,8 +318,7 @@ export function AddRemoteRepositoryDialog({ open, onClose, onAddRemote }: Props)
                 disabled={loading}
                 onChange={(event) => {
                   setRemotePath(event.target.value)
-                  setTarget(null)
-                  setDiagnostics(null)
+                  clearResolvedRemoteState()
                 }}
                 placeholder="/srv/goblin"
                 className="min-w-0 flex-1 rounded-md border border-input bg-background px-3 py-2 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-ring"
@@ -300,7 +338,7 @@ export function AddRemoteRepositoryDialog({ open, onClose, onAddRemote }: Props)
               value={remotePath}
               onSelect={(path) => {
                 setRemotePath(path)
-                setDiagnostics(null)
+                clearResolvedRemoteState()
               }}
               onClose={() => setPickerOpen(false)}
             />

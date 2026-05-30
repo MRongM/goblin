@@ -61,4 +61,24 @@ describe('remote directory picker backend', () => {
     expect(result.truncated).toBe(true)
     expect(result.entries[0]).toMatchObject({ path: '/srv/dir-0', status: 'unreadable' })
   })
+
+  test('bounds child directory classification concurrency', async () => {
+    const { listRemoteDirectory } = await import('#/main/ssh/path-picker.ts')
+    const paths = Array.from({ length: 24 }, (_, index) => `/srv/dir-${index}`)
+    let active = 0
+    let maxActive = 0
+
+    await listRemoteDirectory(TARGET, '/srv', {
+      run: async (command: RemoteCommandKind): Promise<RemoteCommandResult> => {
+        if (command.type === 'listDirectories') return { ok: true, stdout: paths.join('\n'), stderr: '' }
+        active += 1
+        maxActive = Math.max(maxActive, active)
+        await new Promise((resolve) => setTimeout(resolve, 0))
+        active -= 1
+        return { ok: false, stdout: '', stderr: 'not a repository', message: 'not a repository' }
+      },
+    })
+
+    expect(maxActive).toBeLessThanOrEqual(8)
+  })
 })

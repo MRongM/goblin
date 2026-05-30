@@ -18,6 +18,7 @@ type RemoteGitRunner = (
 ) => Promise<RemoteCommandResult>
 
 const REMOTE_WORKTREE_STATUS_CONCURRENCY = 8
+const REMOTE_PATCH_UNTRACKED_DIFF_CONCURRENCY = 8
 const REMOTE_BRANCH_OP_TIMEOUT_MS = 180_000
 const REMOTE_PATCH_TIMEOUT_MS = 90_000
 
@@ -59,11 +60,12 @@ export async function getRemoteStatus(
     async (worktree): Promise<WorktreeStatus | null> => {
       const status = await run({ type: 'gitStatus', path: worktree.path }, target, { signal: options.signal })
       if (options.signal?.aborted) return null
+      if (!status.ok) return null
       return {
         path: worktree.path,
         branch: worktree.branch,
         isMain: worktree.isPrimary,
-        entries: status.ok ? parseStatus(status.stdout) : [],
+        entries: parseStatus(status.stdout),
       }
     },
     options.signal,
@@ -94,11 +96,41 @@ export async function getRemotePatch(
   const run: RemoteGitRunner = options.run ?? ((command, t, runOptions) => runRemoteCommand(t, command, runOptions))
   const known = await resolveKnownRemoteWorktree(target, worktreePath, { signal: options.signal, run })
   if ('ok' in known) return known
-  const result = await run({ type: 'gitPatch', path: known.path }, target, {
+  const tracked = await run({ type: 'gitPatch', path: known.path }, target, {
     signal: options.signal,
     timeoutMs: REMOTE_PATCH_TIMEOUT_MS,
   })
-  return remoteExecResult(result)
+  if (options.signal?.aborted) return { ok: false, message: 'cancelled' }
+  if (!tracked.ok) return remoteExecResult(tracked)
+
+  const status = await run({ type: 'gitStatusAll', path: known.path }, target, {
+    signal: options.signal,
+    timeoutMs: REMOTE_PATCH_TIMEOUT_MS,
+  })
+  if (options.signal?.aborted) return { ok: false, message: 'cancelled' }
+  if (!status.ok) return remoteExecResult(status)
+
+  const untrackedPaths = parseStatus(status.stdout)
+    .filter((entry) => entry.x === '?' && entry.y === '?')
+    .map((entry) => entry.path)
+  const untrackedPatches = await mapWithConcurrency(
+    untrackedPaths,
+    REMOTE_PATCH_UNTRACKED_DIFF_CONCURRENCY,
+    async (filePath): Promise<string | ExecResult> => {
+      const result = await run({ type: 'gitDiffNoIndex', path: known.path, filePath }, target, {
+        signal: options.signal,
+        timeoutMs: REMOTE_PATCH_TIMEOUT_MS,
+      })
+      if (options.signal?.aborted) return { ok: false, message: 'cancelled' }
+      return result.ok ? result.stdout : remoteExecResult(result)
+    },
+    options.signal,
+  )
+  const failedPatch = untrackedPatches.find((patch): patch is ExecResult => typeof patch !== 'string')
+  if (failedPatch) return failedPatch
+  const patchTexts = untrackedPatches.filter((patch): patch is string => typeof patch === 'string')
+  const combined = [tracked.stdout, ...patchTexts].filter((part) => part.length > 0).join('\n')
+  return { ok: true, message: combined.length > 0 ? `${combined}\n` : '' }
 }
 
 export async function fetchRemoteRepository(

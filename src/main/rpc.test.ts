@@ -373,6 +373,35 @@ describe('main repo rpc cancellation', () => {
     await expect(snapshot).resolves.toEqual({ ok: true, data: null })
   })
 
+  test('aborts remote cancellable operations by request id', async () => {
+    let observedSignal: AbortSignal | undefined
+    let markStarted!: () => void
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve
+    })
+    vi.mocked(fetchRemoteRepository).mockImplementation(
+      (_target, options) =>
+        new Promise((resolve) => {
+          observedSignal = options?.signal
+          markStarted()
+          options?.signal?.addEventListener('abort', () => resolve({ ok: false, message: 'cancelled' }), {
+            once: true,
+          })
+          setTimeout(() => resolve({ ok: true, message: 'not-cancelled' }), 100)
+        }),
+    )
+
+    const fetch = invokeRpc('remote.fetch', { target: REMOTE_TARGET, kind: 'user' }, trustedEvent, 'rpc-remote-fetch')
+    await started
+    expect(observedSignal).toBeInstanceOf(AbortSignal)
+
+    const aborted = await invokeAbortRpc({ requestId: 'rpc-remote-fetch' }, trustedEvent)
+
+    expect(aborted).toBe(true)
+    expect(observedSignal?.aborted).toBe(true)
+    await expect(fetch).resolves.toEqual({ ok: true, data: { ok: false, message: 'cancelled' } })
+  })
+
   test('rejects invalid remote manual ports at the router boundary', async () => {
     for (const port of [0, 65536, Number.NaN]) {
       const result = await invokeRpc('remote.resolveTarget', {

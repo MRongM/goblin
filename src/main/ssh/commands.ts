@@ -23,6 +23,8 @@ export type RemoteCommandKind =
   | { type: 'gitStatus'; path: string }
   | { type: 'gitLog'; path: string; branch: string; count?: number; skip?: number }
   | { type: 'gitFetchAll'; path: string }
+  | { type: 'gitStatusAll'; path: string }
+  | { type: 'gitDiffNoIndex'; path: string; filePath: string }
   | { type: 'gitCheckout'; path: string; branch: string }
   | { type: 'gitPullCurrent'; path: string }
   | { type: 'gitFetchBranch'; path: string; remote: string; remoteBranch: string; branch: string }
@@ -158,10 +160,15 @@ function scriptForCommand(command: RemoteCommandKind): string {
       ].join('\n')
     }
     case 'gitPatch':
+      return `git -C ${shellQuote(command.path)} diff HEAD --binary`
+    case 'gitStatusAll':
+      return `git -C ${shellQuote(command.path)} status --porcelain -z -uall`
+    case 'gitDiffNoIndex':
       return [
-        `git -C ${shellQuote(command.path)} diff HEAD --binary`,
-        `git -C ${shellQuote(command.path)} status --porcelain -z -uall`,
-      ].join('\n')
+        `git -C ${shellQuote(command.path)} diff --binary --no-index -- /dev/null ${shellQuote(command.filePath)}`,
+        'code=$?',
+        '[ "$code" -eq 0 ] || [ "$code" -eq 1 ]',
+      ].join('; ')
     case 'gitWorktreeList':
       return `git -C ${shellQuote(command.path)} worktree list --porcelain`
     case 'gitStatus':

@@ -144,6 +144,35 @@ describe('remote git snapshot', () => {
     ])
   })
 
+  test('does not render failed remote status reads as clean worktrees', async () => {
+    const { getRemoteStatus } = await import('#/main/ssh/git.ts')
+    const run = vi.fn(async (command) => {
+      if (command.type === 'gitWorktreeList') {
+        return {
+          ok: true,
+          stderr: '',
+          stdout: [
+            'worktree /srv/goblin',
+            'HEAD abc1234',
+            'branch refs/heads/main',
+            '',
+            'worktree /srv/goblin-feature-x',
+            'HEAD def5678',
+            'branch refs/heads/feature/x',
+          ].join('\n'),
+        }
+      }
+      if (command.type === 'gitStatus' && command.path === '/srv/goblin-feature-x') {
+        return { ok: false, stderr: 'Permission denied', stdout: '', message: 'Permission denied' }
+      }
+      return { ok: true, stderr: '', stdout: '' }
+    })
+
+    await expect(getRemoteStatus(TARGET, { run })).resolves.toEqual([
+      { path: '/srv/goblin', branch: 'main', isMain: true, entries: [] },
+    ])
+  })
+
   test('reads remote logs with pagination args', async () => {
     const { getRemoteLog } = await import('#/main/ssh/git.ts')
     const run = vi.fn(async () => ({
@@ -232,6 +261,77 @@ describe('remote git branch actions', () => {
       TARGET,
       { signal: undefined, timeoutMs: 180_000 },
     )
+  })
+
+  test('builds remote copy-patch output for tracked and untracked files', async () => {
+    const { getRemotePatch } = await import('#/main/ssh/git.ts')
+    const run = vi.fn(async (command) => {
+      if (command.type === 'gitWorktreeList') {
+        return {
+          ok: true,
+          stderr: '',
+          stdout: [
+            'worktree /srv/goblin',
+            'HEAD abc1234',
+            'branch refs/heads/main',
+            '',
+            'worktree /srv/goblin-feature-x',
+            'HEAD def5678',
+            'branch refs/heads/feature/x',
+          ].join('\n'),
+        }
+      }
+      if (command.type === 'gitPatch') return { ok: true, stderr: '', stdout: 'diff --git a/tracked.txt b/tracked.txt' }
+      if (command.type === 'gitStatusAll') return { ok: true, stderr: '', stdout: ' M tracked.txt\0?? new file.txt\0' }
+      if (command.type === 'gitDiffNoIndex') {
+        return { ok: true, stderr: '', stdout: 'diff --git a/new file.txt b/new file.txt\n+untracked' }
+      }
+      return { ok: true, stderr: '', stdout: '' }
+    })
+
+    await expect(getRemotePatch(TARGET, '/srv/goblin-feature-x', { run })).resolves.toEqual({
+      ok: true,
+      message: 'diff --git a/tracked.txt b/tracked.txt\ndiff --git a/new file.txt b/new file.txt\n+untracked\n',
+    })
+    expect(run).toHaveBeenCalledWith(
+      { type: 'gitDiffNoIndex', path: '/srv/goblin-feature-x', filePath: 'new file.txt' },
+      TARGET,
+      { signal: undefined, timeoutMs: 90_000 },
+    )
+  })
+
+  test('returns cancelled instead of partial patch output when aborted during untracked diff reads', async () => {
+    const { getRemotePatch } = await import('#/main/ssh/git.ts')
+    const ctrl = new AbortController()
+    const run = vi.fn(async (command) => {
+      if (command.type === 'gitWorktreeList') {
+        return {
+          ok: true,
+          stderr: '',
+          stdout: [
+            'worktree /srv/goblin',
+            'HEAD abc1234',
+            'branch refs/heads/main',
+            '',
+            'worktree /srv/goblin-feature-x',
+            'HEAD def5678',
+            'branch refs/heads/feature/x',
+          ].join('\n'),
+        }
+      }
+      if (command.type === 'gitPatch') return { ok: true, stderr: '', stdout: 'diff --git a/tracked.txt b/tracked.txt' }
+      if (command.type === 'gitStatusAll') return { ok: true, stderr: '', stdout: '?? new-a.txt\0?? new-b.txt\0' }
+      if (command.type === 'gitDiffNoIndex' && command.filePath === 'new-a.txt') {
+        ctrl.abort()
+        return { ok: true, stderr: '', stdout: 'diff --git a/new-a.txt b/new-a.txt\n+partial' }
+      }
+      return { ok: true, stderr: '', stdout: '' }
+    })
+
+    await expect(getRemotePatch(TARGET, '/srv/goblin-feature-x', { run, signal: ctrl.signal })).resolves.toEqual({
+      ok: false,
+      message: 'cancelled',
+    })
   })
 
   test('removes a clean non-primary remote worktree without deleting the branch', async () => {

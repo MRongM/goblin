@@ -71,4 +71,49 @@ describe('AddRemoteRepositoryDialog UI', () => {
     expect(dialog?.className).toContain('max-h-[calc(100vh-2rem)]')
     expect(dialog?.className).toContain('overflow-y-auto')
   })
+
+  test('clears resolved target display when manual connection fields change', async () => {
+    const target = {
+      id: 'ssh://deploy@prod:22/srv/goblin',
+      alias: null,
+      host: 'prod',
+      user: 'deploy',
+      port: 22,
+      remotePath: '/srv/goblin',
+      displayName: 'prod:goblin',
+    }
+    rpcMocks.resolveTarget.mockResolvedValue({ target })
+    rpcMocks.testRepository.mockResolvedValue({ target, ok: true, stages: [] })
+
+    await act(async () => {
+      root.render(<AddRemoteRepositoryDialog open={true} onClose={vi.fn()} onAddRemote={vi.fn()} />)
+    })
+    await changeInput('#remote-host', 'prod')
+    await changeInput('#remote-user', 'deploy')
+    await changeInput('#remote-path', '/srv/goblin')
+
+    const testButton = Array.from(document.querySelectorAll<HTMLButtonElement>('button')).find((button) =>
+      button.textContent?.includes('remote.test-connection'),
+    )
+    expect(testButton).not.toBeNull()
+    await act(async () => {
+      testButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+
+    expect(document.body.textContent).toContain(target.id)
+
+    await changeInput('#remote-host', 'prod-new')
+
+    expect(document.body.textContent).not.toContain(target.id)
+  })
 })
+
+async function changeInput(selector: string, value: string): Promise<void> {
+  const input = document.querySelector<HTMLInputElement>(selector)
+  expect(input).not.toBeNull()
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
+    setter?.call(input, value)
+    input?.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+}

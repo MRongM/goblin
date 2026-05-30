@@ -880,6 +880,17 @@ async function runCancellable(
   }
 
   const ctrl = new AbortController()
+  const parentSignal = currentRpcSignal()
+  let cleanupParentAbort: (() => void) | null = null
+  if (parentSignal) {
+    if (parentSignal.aborted) {
+      ctrl.abort()
+    } else {
+      const abort = () => ctrl.abort()
+      parentSignal.addEventListener('abort', abort, { once: true })
+      cleanupParentAbort = () => parentSignal.removeEventListener('abort', abort)
+    }
+  }
   let resolveDone!: () => void
   const done = new Promise<void>((resolve) => {
     resolveDone = resolve
@@ -889,6 +900,7 @@ async function runCancellable(
   try {
     return await fn(ctrl.signal)
   } finally {
+    cleanupParentAbort?.()
     if (activeOpControllers.get(repoId) === slot) activeOpControllers.delete(repoId)
     resolveDone()
   }

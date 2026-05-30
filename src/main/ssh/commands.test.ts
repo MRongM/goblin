@@ -256,8 +256,30 @@ describe('remote ssh command runner', () => {
     })
 
     expect(origin.script).toBe("git -C '/srv/goblin' remote get-url origin")
-    expect(patch.script).toContain("git -C '/srv/goblin-feature-x' diff HEAD --binary")
-    expect(patch.script).toContain("git -C '/srv/goblin-feature-x' status --porcelain -z -uall")
+    expect(patch.script).toBe("git -C '/srv/goblin-feature-x' diff HEAD --binary")
   })
 
+  test('builds separate remote patch support commands for tracked and untracked files', async () => {
+    const { buildRemoteCommandInvocation } = await import('#/main/ssh/commands.ts')
+
+    const tracked = buildRemoteCommandInvocation(MANUAL_TARGET, {
+      type: 'gitPatch',
+      path: '/srv/goblin-feature-x',
+    })
+    const statusAll = buildRemoteCommandInvocation(MANUAL_TARGET, {
+      type: 'gitStatusAll',
+      path: '/srv/goblin-feature-x',
+    })
+    const untracked = buildRemoteCommandInvocation(MANUAL_TARGET, {
+      type: 'gitDiffNoIndex',
+      path: '/srv/goblin-feature-x',
+      filePath: "new file's.txt",
+    })
+
+    expect(tracked.script).toBe("git -C '/srv/goblin-feature-x' diff HEAD --binary")
+    expect(statusAll.script).toBe("git -C '/srv/goblin-feature-x' status --porcelain -z -uall")
+    expect(untracked.script).toContain(
+      "git -C '/srv/goblin-feature-x' diff --binary --no-index -- /dev/null 'new file'\\''s.txt'",
+    )
+  })
 })

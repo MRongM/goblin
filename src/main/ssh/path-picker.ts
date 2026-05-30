@@ -2,6 +2,7 @@ import { runRemoteCommand, type RemoteCommandKind, type RemoteCommandResult } fr
 import type { RemoteDirectoryEntry, RemoteDirectoryListing, RemoteRepoTarget } from '#/shared/remote-repo.ts'
 
 const MAX_DIRECTORY_ENTRIES = 200
+const DIRECTORY_CLASSIFY_CONCURRENCY = 8
 
 type PathPickerRunner = (
   command: RemoteCommandKind,
@@ -40,8 +41,11 @@ export async function listRemoteDirectory(
 
   const paths = uniqueLines(result.stdout).filter(isAbsoluteRemotePath)
   const truncated = paths.length > MAX_DIRECTORY_ENTRIES
-  const entries = await Promise.all(
-    paths.slice(0, MAX_DIRECTORY_ENTRIES).map((childPath) => classifyDirectory(run, target, childPath, options.signal)),
+  const entries = await mapWithConcurrency(
+    paths.slice(0, MAX_DIRECTORY_ENTRIES),
+    DIRECTORY_CLASSIFY_CONCURRENCY,
+    (childPath) => classifyDirectory(run, target, childPath, options.signal),
+    options.signal,
   )
   return { path: remotePath, entries, truncated }
 }
@@ -84,4 +88,24 @@ function basename(remotePath: string): string {
   const trimmed = remotePath.replace(/\/+$/, '')
   if (!trimmed || trimmed === '/') return '/'
   return trimmed.slice(trimmed.lastIndexOf('/') + 1) || trimmed
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+  signal?: AbortSignal,
+): Promise<R[]> {
+  const results = new Array<R>(items.length)
+  let cursor = 0
+  const worker = async () => {
+    while (true) {
+      if (signal?.aborted) return
+      const index = cursor++
+      if (index >= items.length) return
+      results[index] = await fn(items[index]!)
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker))
+  return results
 }
