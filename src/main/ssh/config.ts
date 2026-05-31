@@ -11,6 +11,18 @@ import {
 
 const SSH_CONFIG_PATH = path.join(os.homedir(), '.ssh', 'config')
 const SSH_G_TIMEOUT_MS = 10_000
+const SSH_CONFIG_DIR_MODE = 0o700
+const SSH_CONFIG_FILE_MODE = 0o600
+const DEFAULT_IDENTITY_FILE = '~/.ssh/id_ed25519'
+
+export type SshConfigHostUpdateStatus = 'created' | 'existing'
+
+export interface EnsureSshConfigHostInput {
+  host: string
+  user: string
+  port: number
+  identityFile?: string
+}
 
 export async function listSshConfigHosts(configPath: string = SSH_CONFIG_PATH): Promise<SshConfigHost[]> {
   try {
@@ -53,6 +65,36 @@ export function parseSshConfigHosts(content: string): SshConfigHost[] {
     }
   }
   return hosts
+}
+
+export async function ensureSshConfigHost(
+  input: EnsureSshConfigHostInput,
+  configPath: string = SSH_CONFIG_PATH,
+): Promise<SshConfigHostUpdateStatus> {
+  const host = input.host.trim()
+  const user = input.user.trim()
+  const identityFile = (input.identityFile ?? DEFAULT_IDENTITY_FILE).trim()
+  if (!isSafeSshConfigToken(host) || !isSafeSshConfigToken(user) || !isSafeSshConfigToken(identityFile)) {
+    throw new Error('Invalid SSH config host')
+  }
+  if (!Number.isInteger(input.port) || input.port < 1 || input.port > 65535) {
+    throw new Error('Invalid SSH config port')
+  }
+
+  await fs.mkdir(path.dirname(configPath), { recursive: true, mode: SSH_CONFIG_DIR_MODE })
+  const content = await readSshConfig(configPath)
+  if (parseSshConfigHosts(content).some((item) => item.alias === host)) return 'existing'
+
+  const prefix = sshConfigAppendPrefix(content)
+  await fs.appendFile(
+    configPath,
+    `${prefix}${formatSshConfigHostBlock({ host, user, port: input.port, identityFile })}`,
+    {
+      mode: SSH_CONFIG_FILE_MODE,
+    },
+  )
+  await fs.chmod(configPath, SSH_CONFIG_FILE_MODE)
+  return 'created'
 }
 
 export async function resolveRemoteTarget(
@@ -131,4 +173,35 @@ function isConcreteAlias(alias: string): boolean {
 function stripComment(line: string): string {
   const index = line.indexOf('#')
   return index === -1 ? line : line.slice(0, index)
+}
+
+async function readSshConfig(configPath: string): Promise<string> {
+  try {
+    return await fs.readFile(configPath, 'utf-8')
+  } catch {
+    return ''
+  }
+}
+
+function formatSshConfigHostBlock(input: Required<EnsureSshConfigHostInput>): string {
+  return [
+    `Host ${input.host}`,
+    `  HostName ${input.host}`,
+    `  User ${input.user}`,
+    ...(input.port === 22 ? [] : [`  Port ${input.port}`]),
+    `  IdentityFile ${input.identityFile}`,
+    '  IdentitiesOnly yes',
+    '',
+  ].join('\n')
+}
+
+function sshConfigAppendPrefix(content: string): string {
+  if (content.length === 0) return ''
+  if (content.endsWith('\n\n')) return ''
+  if (content.endsWith('\n')) return '\n'
+  return '\n\n'
+}
+
+function isSafeSshConfigToken(value: string): boolean {
+  return value.length > 0 && !/[\x00-\x20\x7f#]/.test(value)
 }

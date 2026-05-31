@@ -19,7 +19,11 @@ import type {
   RemoteRepoTarget,
   RepoSessionEntry,
   ResolvedRemoteTarget,
+  SshInitAccessInput,
   SshConfigHost,
+  SshInitConnectionInput,
+  SshInitPrepareResult,
+  SshInitTrustHostKeyInput,
 } from '#/shared/remote-repo.ts'
 import type {
   RemotePortForwardConfig,
@@ -235,6 +239,9 @@ export interface AppRpcHandlers {
     openEditor: (input: { path: string }) => Promise<ExecResult>
   }
   remote: {
+    prepareSshInit: (input: SshInitConnectionInput) => Promise<SshInitPrepareResult>
+    trustSshHostKey: (input: SshInitTrustHostKeyInput) => Promise<ExecResult>
+    initializeSshAccess: (input: SshInitAccessInput) => Promise<ExecResult>
     listSshHosts: () => Promise<SshConfigHost[]>
     identityFileDialog: () => Promise<string | null>
     resolveTarget: (input: RemoteConnectionInput) => Promise<ResolvedRemoteTarget>
@@ -320,6 +327,50 @@ const RemoteTargetSchema = v.object({
   displayName: v.string(),
 })
 const RemoteBranchInput = v.object({ target: RemoteTargetSchema, branch: v.string() })
+const AsciiControlCharacter = /[\x00-\x1f\x7f]/
+const SshInitHostUserText = v.pipe(
+  v.string(),
+  v.maxLength(1024),
+  v.check((value) => !AsciiControlCharacter.test(value), 'Invalid SSH initialization text'),
+  v.transform((value) => value.trim()),
+  v.minLength(1),
+)
+const SshInitHostKeyLine = v.pipe(
+  v.string(),
+  v.minLength(1),
+  v.maxLength(4096),
+  v.check((value) => !AsciiControlCharacter.test(value), 'Invalid SSH host key line'),
+)
+const SshInitFingerprint = v.pipe(
+  v.string(),
+  v.maxLength(256),
+  v.check((value) => !AsciiControlCharacter.test(value), 'Invalid SSH host key fingerprint'),
+  v.transform((value) => value.trim()),
+  v.minLength(1),
+)
+const SshInitPassword = v.pipe(
+  v.string(),
+  v.minLength(1),
+  v.maxLength(4096),
+  v.check((value) => !value.includes('\0'), 'Invalid SSH initialization password'),
+)
+const SshInitConnectionInputSchema = v.object({
+  host: SshInitHostUserText,
+  user: SshInitHostUserText,
+  port: v.optional(PortNumber, 22),
+})
+const SshInitTrustHostKeyInputSchema = v.object({
+  host: SshInitHostUserText,
+  port: PortNumber,
+  key: SshInitHostKeyLine,
+  fingerprint: SshInitFingerprint,
+})
+const SshInitAccessInputSchema = v.object({
+  host: SshInitHostUserText,
+  user: SshInitHostUserText,
+  port: PortNumber,
+  password: SshInitPassword,
+})
 const RemotePortForwardConfigSchema = v.object({
   id: v.pipe(v.string(), v.minLength(1)),
   remotePort: PortNumber,
@@ -433,6 +484,15 @@ export function createAppRouter(handlers: AppRpcHandlers) {
       openEditor: p.input(PathInput).mutation(({ input }) => handlers.repo.openEditor(input)),
     }),
     remote: t.router({
+      prepareSshInit: p
+        .input(SshInitConnectionInputSchema)
+        .query(({ input }) => handlers.remote.prepareSshInit(input)),
+      trustSshHostKey: p
+        .input(SshInitTrustHostKeyInputSchema)
+        .mutation(({ input }) => handlers.remote.trustSshHostKey(input)),
+      initializeSshAccess: p
+        .input(SshInitAccessInputSchema)
+        .mutation(({ input }) => handlers.remote.initializeSshAccess(input)),
       listSshHosts: p.input(EmptyInput).query(() => handlers.remote.listSshHosts()),
       identityFileDialog: p.input(EmptyInput).mutation(() => handlers.remote.identityFileDialog()),
       resolveTarget: p.input(RemoteConnectionInputSchema).query(({ input }) => handlers.remote.resolveTarget(input)),

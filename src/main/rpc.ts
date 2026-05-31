@@ -99,6 +99,7 @@ import {
 } from '#/main/ssh/git.ts'
 import { getRemoteHome, listRemoteDirectory } from '#/main/ssh/path-picker.ts'
 import { remotePortForwardManager } from '#/main/ssh/port-forward.ts'
+import { initializeSshAccess, prepareSshInit, trustSshHostKey } from '#/main/ssh/initialization.ts'
 
 const PROJECT_GITHUB_URL = 'https://github.com/nano-props/goblin'
 const PATCH_TIMEOUT_MS = 90_000
@@ -461,6 +462,9 @@ function createRpcHandlers(): AppRpcHandlers {
       },
     },
     remote: {
+      prepareSshInit: async (input) => prepareSshInit(input, { signal: currentRpcSignal() }),
+      trustSshHostKey: async (input) => trustSshHostKey(input, { signal: currentRpcSignal() }),
+      initializeSshAccess: async (input) => initializeSshAccess(input, { signal: currentRpcSignal() }),
       listSshHosts: async () => listSshConfigHosts(),
       identityFileDialog: openSshIdentityFileDialog,
       resolveTarget: async (input) => resolveSshRemoteTarget(input, currentRpcSignal()),

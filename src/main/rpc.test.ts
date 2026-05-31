@@ -12,6 +12,11 @@ import {
   getRemoteGitHubUrl,
   pushRemoteBranch,
 } from '#/main/ssh/git.ts'
+import {
+  initializeSshAccess,
+  prepareSshInit,
+  trustSshHostKey,
+} from '#/main/ssh/initialization.ts'
 import { openHttpsExternal } from '#/main/external-url.ts'
 import { registerTrustedAppPath, registerTrustedWebContents } from '#/main/ipc/trusted-webcontents.ts'
 import { wireRpcIpc } from '#/main/rpc.ts'
@@ -231,6 +236,12 @@ vi.mock('#/main/ssh/git.ts', () => ({
   removeRemoteWorktree: vi.fn(() => ({ ok: true, message: 'removed' })),
 }))
 
+vi.mock('#/main/ssh/initialization.ts', () => ({
+  initializeSshAccess: vi.fn(() => ({ ok: true, message: 'ssh initialized' })),
+  prepareSshInit: vi.fn(() => ({ ok: true, keyStatus: 'existing', hostKeyStatus: 'trusted' })),
+  trustSshHostKey: vi.fn(() => ({ ok: true, message: 'host key trusted' })),
+}))
+
 vi.mock('#/main/ssh/path-picker.ts', () => ({
   getRemoteHome: vi.fn(() => '/home/deploy'),
   listRemoteDirectory: vi.fn(() => ({ path: '/home/deploy', entries: [], truncated: false })),
@@ -429,6 +440,99 @@ describe('main repo rpc cancellation', () => {
 
     expect(result.ok).toBe(true)
     if (result.ok) expect(result.data).toMatchObject({ target: { identityFile: '~/.ssh/prod_ed25519' } })
+  })
+
+  test('exposes typed SSH initialization procedures', async () => {
+    await expect(
+      invokeRpc(
+        'remote.prepareSshInit',
+        { host: 'prod.example.com', user: 'deploy', port: 2222 },
+        trustedEvent,
+        'rpc-ssh-init-prepare',
+      ),
+    ).resolves.toEqual({
+      ok: true,
+      data: { ok: true, keyStatus: 'existing', hostKeyStatus: 'trusted' },
+    })
+    await expect(
+      invokeRpc(
+        'remote.trustSshHostKey',
+        {
+          host: 'prod.example.com',
+          port: 2222,
+          key: 'prod.example.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKv7g9tYvQ==',
+          fingerprint: 'SHA256:abc123',
+        },
+        trustedEvent,
+        'rpc-ssh-init-trust-host-key',
+      ),
+    ).resolves.toEqual({ ok: true, data: { ok: true, message: 'host key trusted' } })
+    await expect(
+      invokeRpc(
+        'remote.initializeSshAccess',
+        {
+          host: 'prod.example.com',
+          user: 'deploy',
+          port: 2222,
+          password: 'temporary-password',
+        },
+        trustedEvent,
+        'rpc-ssh-init-access',
+      ),
+    ).resolves.toEqual({ ok: true, data: { ok: true, message: 'ssh initialized' } })
+
+    expect(prepareSshInit).toHaveBeenCalledWith(
+      { host: 'prod.example.com', user: 'deploy', port: 2222 },
+      { signal: expect.any(AbortSignal) },
+    )
+    expect(trustSshHostKey).toHaveBeenCalledWith(
+      {
+        host: 'prod.example.com',
+        port: 2222,
+        key: 'prod.example.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKv7g9tYvQ==',
+        fingerprint: 'SHA256:abc123',
+      },
+      { signal: expect.any(AbortSignal) },
+    )
+    expect(initializeSshAccess).toHaveBeenCalledWith(
+      { host: 'prod.example.com', user: 'deploy', port: 2222, password: 'temporary-password' },
+      { signal: expect.any(AbortSignal) },
+    )
+  })
+
+  test('rejects invalid SSH initialization inputs at the router boundary', async () => {
+    const invalidInputs = [
+      ['remote.prepareSshInit', { host: '', user: 'deploy', port: 22 }],
+      ['remote.prepareSshInit', { host: 'bad\0host', user: 'deploy', port: 22 }],
+      ['remote.prepareSshInit', { host: 'bad\nhost', user: 'deploy', port: 22 }],
+      ['remote.prepareSshInit', { host: 'bad\rhost', user: 'deploy', port: 22 }],
+      ['remote.prepareSshInit', { host: 'bad\u0001host', user: 'deploy', port: 22 }],
+      ['remote.prepareSshInit', { host: 'prod', user: '', port: 22 }],
+      ['remote.prepareSshInit', { host: 'prod', user: '   ', port: 22 }],
+      ['remote.prepareSshInit', { host: 'prod', user: 'bad\ruser', port: 22 }],
+      ['remote.prepareSshInit', { host: 'prod', user: 'deploy', port: 0 }],
+      ['remote.trustSshHostKey', { host: 'prod', port: 22, key: '', fingerprint: 'SHA256:abc123' }],
+      ['remote.trustSshHostKey', { host: 'prod', port: 22, key: 'prod\rssh-ed25519 AAAA', fingerprint: 'SHA256:abc123' }],
+      ['remote.trustSshHostKey', { host: 'prod', port: 22, key: 'prod\u0001 ssh-ed25519 AAAA', fingerprint: 'SHA256:abc123' }],
+      ['remote.trustSshHostKey', { host: 'prod', port: 22, key: 'prod ssh-ed25519 AAAA', fingerprint: '' }],
+      ['remote.trustSshHostKey', { host: 'prod', port: 22, key: 'prod ssh-ed25519 AAAA', fingerprint: '   ' }],
+      ['remote.trustSshHostKey', { host: 'prod', port: 22, key: 'prod ssh-ed25519 AAAA', fingerprint: 'bad\nfp' }],
+      ['remote.trustSshHostKey', { host: 'prod', port: 22, key: 'prod ssh-ed25519 AAAA', fingerprint: 'SHA256:\u0001abc' }],
+      ['remote.initializeSshAccess', { host: 'prod', user: 'deploy', port: 22, password: '' }],
+      ['remote.initializeSshAccess', { host: 'prod', user: 'deploy', port: 65536, password: 'secret' }],
+    ] as const
+    const prepareSshInitCallCount = vi.mocked(prepareSshInit).mock.calls.length
+    const trustSshHostKeyCallCount = vi.mocked(trustSshHostKey).mock.calls.length
+    const initializeSshAccessCallCount = vi.mocked(initializeSshAccess).mock.calls.length
+
+    for (const [path, input] of invalidInputs) {
+      const result = await invokeRpc(path, input)
+      expect(result.ok).toBe(false)
+      if (!result.ok) expect(result.error.code).toBe('BAD_REQUEST')
+    }
+    expect(prepareSshInit).toHaveBeenCalledTimes(prepareSshInitCallCount)
+    expect(trustSshHostKey).toHaveBeenCalledTimes(trustSshHostKeyCallCount)
+    expect(initializeSshAccess).toHaveBeenCalledTimes(initializeSshAccessCallCount)
   })
 
   test('opens an SSH identity file dialog in the local .ssh directory', async () => {

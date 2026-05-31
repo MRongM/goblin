@@ -11,6 +11,7 @@ import {
 import { Button } from '#/renderer/components/ui/button.tsx'
 import { RemoteDiagnosticsPanel } from '#/renderer/components/RemoteDiagnosticsPanel.tsx'
 import { RemoteRepositoryPathPicker } from '#/renderer/components/RemoteRepositoryPathPicker.tsx'
+import { SshInitializationPanel } from '#/renderer/components/SshInitializationPanel.tsx'
 import { rpc } from '#/renderer/rpc.ts'
 import { useT } from '#/renderer/stores/i18n.ts'
 import type {
@@ -28,23 +29,28 @@ interface Props {
 
 export type AddRemoteMode = 'config' | 'manual'
 
+const DEFAULT_MANUAL_USER = 'root'
+const DEFAULT_MANUAL_PORT = '22'
+
 export function AddRemoteRepositoryDialog({ open, onClose, onAddRemote }: Props) {
   const t = useT()
   const [hosts, setHosts] = useState<SshConfigHost[]>([])
   const [mode, setMode] = useState<AddRemoteMode>('manual')
   const [alias, setAlias] = useState('')
   const [host, setHost] = useState('')
-  const [user, setUser] = useState('')
-  const [port, setPort] = useState('')
+  const [user, setUser] = useState(DEFAULT_MANUAL_USER)
+  const [port, setPort] = useState(DEFAULT_MANUAL_PORT)
   const [identityFile, setIdentityFile] = useState('')
   const [remotePath, setRemotePath] = useState('')
   const [target, setTarget] = useState<RemoteRepoTarget | null>(null)
   const [diagnostics, setDiagnostics] = useState<RemoteDiagnosticsResult | null>(null)
   const [loading, setLoading] = useState(false)
+  const [initializingSsh, setInitializingSsh] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [pickerOpen, setPickerOpen] = useState(false)
 
   const portResult = useMemo(() => parseRemotePort(port), [port])
+  const pending = loading || initializingSsh
   const pathError = remotePathError(remotePath)
   const canSubmit = canSubmitRemoteRepository({
     mode,
@@ -53,10 +59,10 @@ export function AddRemoteRepositoryDialog({ open, onClose, onAddRemote }: Props)
     user,
     remotePath,
     portError: portResult.error,
-    pending: loading,
+    pending,
   })
   const canBrowse =
-    !loading && (mode === 'config' ? alias.trim().length > 0 : host.trim().length > 0 && user.trim().length > 0)
+    !pending && (mode === 'config' ? alias.trim().length > 0 : host.trim().length > 0 && user.trim().length > 0)
 
   function clearResolvedRemoteState() {
     setTarget(null)
@@ -69,13 +75,14 @@ export function AddRemoteRepositoryDialog({ open, onClose, onAddRemote }: Props)
     setMode('manual')
     setAlias('')
     setHost('')
-    setUser('')
-    setPort('')
+    setUser(DEFAULT_MANUAL_USER)
+    setPort(DEFAULT_MANUAL_PORT)
     setIdentityFile('')
     setRemotePath('')
     setTarget(null)
     setDiagnostics(null)
     setLoading(false)
+    setInitializingSsh(false)
     setError(null)
     setPickerOpen(false)
     let cancelled = false
@@ -113,8 +120,8 @@ export function AddRemoteRepositoryDialog({ open, onClose, onAddRemote }: Props)
     return resolved.target
   }
 
-  async function handleTest() {
-    if (!canSubmit) return
+  async function runConnectionTest(options: { requireCanSubmit?: boolean } = {}) {
+    if (options.requireCanSubmit !== false && !canSubmit) return
     setLoading(true)
     setError(null)
     try {
@@ -127,6 +134,23 @@ export function AddRemoteRepositoryDialog({ open, onClose, onAddRemote }: Props)
     } finally {
       setLoading(false)
     }
+  }
+
+  async function refreshSshConfigHosts() {
+    try {
+      const items = await rpc.remote.listSshHosts.query()
+      setHosts(items)
+      setAlias((currentAlias) =>
+        items.some((item) => item.alias === currentAlias) ? currentAlias : (items[0]?.alias ?? ''),
+      )
+      if (mode === 'config' && items.length === 0) setMode('manual')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  async function handleTest() {
+    await runConnectionTest()
   }
 
   async function handleBrowse() {
@@ -194,9 +218,12 @@ export function AddRemoteRepositoryDialog({ open, onClose, onAddRemote }: Props)
               className={modeButtonClass(mode === 'config')}
               onClick={() => {
                 setMode('config')
+                setAlias((currentAlias) =>
+                  hosts.some((item) => item.alias === currentAlias) ? currentAlias : (hosts[0]?.alias ?? ''),
+                )
                 clearResolvedRemoteState()
               }}
-              disabled={hosts.length === 0}
+              disabled={pending || hosts.length === 0}
             >
               {t('remote.ssh-config')}
             </button>
@@ -207,6 +234,7 @@ export function AddRemoteRepositoryDialog({ open, onClose, onAddRemote }: Props)
                 setMode('manual')
                 clearResolvedRemoteState()
               }}
+              disabled={pending}
             >
               {t('remote.enter-manually')}
             </button>
@@ -221,7 +249,7 @@ export function AddRemoteRepositoryDialog({ open, onClose, onAddRemote }: Props)
                 <select
                   id="remote-ssh-host"
                   value={alias}
-                  disabled={loading}
+                  disabled={pending}
                   onChange={(event) => {
                     setAlias(event.target.value)
                     clearResolvedRemoteState()
@@ -247,7 +275,7 @@ export function AddRemoteRepositoryDialog({ open, onClose, onAddRemote }: Props)
                 label={t('remote.host')}
                 id="remote-host"
                 value={host}
-                disabled={loading}
+                disabled={pending}
                 onChange={(value) => {
                   setHost(value)
                   clearResolvedRemoteState()
@@ -257,7 +285,7 @@ export function AddRemoteRepositoryDialog({ open, onClose, onAddRemote }: Props)
                 label={t('remote.user')}
                 id="remote-user"
                 value={user}
-                disabled={loading}
+                disabled={pending}
                 onChange={(value) => {
                   setUser(value)
                   clearResolvedRemoteState()
@@ -267,7 +295,7 @@ export function AddRemoteRepositoryDialog({ open, onClose, onAddRemote }: Props)
                 label={t('remote.port')}
                 id="remote-port"
                 value={port}
-                disabled={loading}
+                disabled={pending}
                 onChange={(value) => {
                   setPort(value)
                   clearResolvedRemoteState()
@@ -275,6 +303,20 @@ export function AddRemoteRepositoryDialog({ open, onClose, onAddRemote }: Props)
               />
             </div>
           )}
+
+          <SshInitializationPanel
+            mode={mode}
+            host={host}
+            user={user}
+            port={portResult.port ?? 22}
+            portError={portResult.error}
+            disabled={loading}
+            onBusyChange={setInitializingSsh}
+            onInitialized={async () => {
+              await runConnectionTest({ requireCanSubmit: false })
+              await refreshSshConfigHosts()
+            }}
+          />
 
           <div>
             <label className="block text-sm font-medium text-foreground" htmlFor="remote-private-key">
@@ -284,7 +326,7 @@ export function AddRemoteRepositoryDialog({ open, onClose, onAddRemote }: Props)
               <input
                 id="remote-private-key"
                 value={identityFile}
-                disabled={loading}
+                disabled={pending}
                 placeholder="~/.ssh/id_ed25519"
                 onChange={(event) => {
                   setIdentityFile(event.target.value)
@@ -296,7 +338,7 @@ export function AddRemoteRepositoryDialog({ open, onClose, onAddRemote }: Props)
                 type="button"
                 variant="outline"
                 size="icon"
-                disabled={loading}
+                disabled={pending}
                 aria-label={t('remote.choose-private-key')}
                 title={t('remote.choose-private-key')}
                 onClick={() => void handleIdentityFileBrowse()}
@@ -315,7 +357,7 @@ export function AddRemoteRepositoryDialog({ open, onClose, onAddRemote }: Props)
               <input
                 id="remote-path"
                 value={remotePath}
-                disabled={loading}
+                disabled={pending}
                 onChange={(event) => {
                   setRemotePath(event.target.value)
                   clearResolvedRemoteState()

@@ -6,18 +6,24 @@ import { AddRemoteRepositoryDialog } from '#/renderer/components/AddRemoteReposi
 
 const rpcMocks = vi.hoisted(() => ({
   identityFileDialog: vi.fn(),
+  initializeSshAccess: vi.fn(),
   listSshHosts: vi.fn(),
+  prepareSshInit: vi.fn(),
   resolveTarget: vi.fn(),
   testRepository: vi.fn(),
+  trustSshHostKey: vi.fn(),
 }))
 
 vi.mock('#/renderer/rpc.ts', () => ({
   rpc: {
     remote: {
       identityFileDialog: { mutate: rpcMocks.identityFileDialog },
+      initializeSshAccess: { mutate: rpcMocks.initializeSshAccess },
       listSshHosts: { query: rpcMocks.listSshHosts },
+      prepareSshInit: { query: rpcMocks.prepareSshInit },
       resolveTarget: { query: rpcMocks.resolveTarget },
       testRepository: { query: rpcMocks.testRepository },
+      trustSshHostKey: { mutate: rpcMocks.trustSshHostKey },
     },
   },
 }))
@@ -36,7 +42,10 @@ describe('AddRemoteRepositoryDialog UI', () => {
     document.body.appendChild(host)
     root = createRoot(host)
     rpcMocks.identityFileDialog.mockResolvedValue('/Users/deploy/.ssh/id_ed25519')
+    rpcMocks.initializeSshAccess.mockResolvedValue({ ok: true, message: 'installed' })
     rpcMocks.listSshHosts.mockResolvedValue([])
+    rpcMocks.prepareSshInit.mockResolvedValue({ ok: true, keyStatus: 'existing', hostKeyStatus: 'trusted' })
+    rpcMocks.trustSshHostKey.mockResolvedValue({ ok: true, message: 'trusted' })
   })
 
   afterEach(() => {
@@ -70,6 +79,28 @@ describe('AddRemoteRepositoryDialog UI', () => {
     const dialog = document.querySelector<HTMLElement>('[data-slot="dialog-content"]')
     expect(dialog?.className).toContain('max-h-[calc(100vh-2rem)]')
     expect(dialog?.className).toContain('overflow-y-auto')
+  })
+
+  test('prefills and resets manual user and port defaults when opened', async () => {
+    await act(async () => {
+      root.render(<AddRemoteRepositoryDialog open={true} onClose={vi.fn()} onAddRemote={vi.fn()} />)
+    })
+
+    expect(document.querySelector<HTMLInputElement>('#remote-user')?.value).toBe('root')
+    expect(document.querySelector<HTMLInputElement>('#remote-port')?.value).toBe('22')
+
+    await changeInput('#remote-user', 'deploy')
+    await changeInput('#remote-port', '2222')
+
+    await act(async () => {
+      root.render(<AddRemoteRepositoryDialog open={false} onClose={vi.fn()} onAddRemote={vi.fn()} />)
+    })
+    await act(async () => {
+      root.render(<AddRemoteRepositoryDialog open={true} onClose={vi.fn()} onAddRemote={vi.fn()} />)
+    })
+
+    expect(document.querySelector<HTMLInputElement>('#remote-user')?.value).toBe('root')
+    expect(document.querySelector<HTMLInputElement>('#remote-port')?.value).toBe('22')
   })
 
   test('clears resolved target display when manual connection fields change', async () => {
@@ -106,7 +137,98 @@ describe('AddRemoteRepositoryDialog UI', () => {
 
     expect(document.body.textContent).not.toContain(target.id)
   })
+
+  test('initializes SSH access from manual mode and then runs diagnostics', async () => {
+    const target = {
+      id: 'ssh://deploy@prod.example.com:22/srv/goblin',
+      alias: null,
+      host: 'prod.example.com',
+      user: 'deploy',
+      port: 22,
+      remotePath: '/srv/goblin',
+      displayName: 'prod.example.com:goblin',
+    }
+    rpcMocks.resolveTarget.mockResolvedValue({ target })
+    rpcMocks.testRepository.mockResolvedValue({ target, ok: true, stages: [] })
+
+    await act(async () => {
+      root.render(<AddRemoteRepositoryDialog open={true} onClose={vi.fn()} onAddRemote={vi.fn()} />)
+    })
+    await changeInput('#remote-host', 'prod.example.com')
+    await changeInput('#remote-user', 'deploy')
+    await changeInput('#remote-path', '/srv/goblin')
+    await expandInitializationPanel()
+    await changeInput('#remote-ssh-init-password', 'secret')
+
+    await act(async () => {
+      buttonWithText('remote.ssh-init-button')?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+
+    expect(rpcMocks.prepareSshInit).toHaveBeenCalledWith({ host: 'prod.example.com', user: 'deploy', port: 22 })
+    expect(rpcMocks.initializeSshAccess).toHaveBeenCalledWith({
+      host: 'prod.example.com',
+      user: 'deploy',
+      port: 22,
+      password: 'secret',
+    })
+    expect(rpcMocks.resolveTarget).toHaveBeenCalledWith({
+      mode: 'manual',
+      host: 'prod.example.com',
+      user: 'deploy',
+      port: 22,
+      remotePath: '/srv/goblin',
+    })
+    expect(rpcMocks.testRepository).toHaveBeenCalledWith({ target })
+  })
+
+  test('refreshes SSH config hosts after successful manual initialization', async () => {
+    const target = {
+      id: 'ssh://deploy@prod.example.com:22/srv/goblin',
+      alias: null,
+      host: 'prod.example.com',
+      user: 'deploy',
+      port: 22,
+      remotePath: '/srv/goblin',
+      displayName: 'prod.example.com:goblin',
+    }
+    rpcMocks.listSshHosts
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ alias: 'prod-init', hostName: 'prod.example.com', user: 'deploy', port: 22 }])
+    rpcMocks.resolveTarget.mockResolvedValue({ target })
+    rpcMocks.testRepository.mockResolvedValue({ target, ok: true, stages: [] })
+
+    await act(async () => {
+      root.render(<AddRemoteRepositoryDialog open={true} onClose={vi.fn()} onAddRemote={vi.fn()} />)
+    })
+    await changeInput('#remote-host', 'prod.example.com')
+    await changeInput('#remote-user', 'deploy')
+    await changeInput('#remote-path', '/srv/goblin')
+    await expandInitializationPanel()
+    await changeInput('#remote-ssh-init-password', 'secret')
+
+    await act(async () => {
+      buttonWithText('remote.ssh-init-button')?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+
+    expect(rpcMocks.listSshHosts).toHaveBeenCalledTimes(2)
+    const configButton = buttonWithText('remote.ssh-config')
+    expect(configButton?.disabled).toBe(false)
+
+    await act(async () => {
+      configButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+
+    expect(document.querySelector<HTMLSelectElement>('#remote-ssh-host')?.textContent).toContain('prod-init')
+  })
 })
+
+async function expandInitializationPanel(): Promise<void> {
+  const toggle = document.querySelector<HTMLButtonElement>('button[aria-expanded]')
+  expect(toggle).not.toBeNull()
+  await act(async () => {
+    toggle?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+  })
+}
 
 async function changeInput(selector: string, value: string): Promise<void> {
   const input = document.querySelector<HTMLInputElement>(selector)
@@ -116,4 +238,10 @@ async function changeInput(selector: string, value: string): Promise<void> {
     setter?.call(input, value)
     input?.dispatchEvent(new Event('input', { bubbles: true }))
   })
+}
+
+function buttonWithText(text: string): HTMLButtonElement | undefined {
+  return Array.from(document.querySelectorAll<HTMLButtonElement>('button')).find((button) =>
+    button.textContent?.includes(text),
+  )
 }

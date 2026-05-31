@@ -26,6 +26,50 @@ export type RemoteConnectionInput =
   | { mode: 'config'; alias: string; remotePath: string; identityFile?: string }
   | { mode: 'manual'; host: string; user: string; port?: number; remotePath: string; identityFile?: string }
 
+export interface SshInitConnectionInput {
+  host: string
+  user: string
+  port: number
+}
+
+export type SshInitKeyStatus = 'existing' | 'generated' | 'public-key-recreated'
+export type SshInitHostKeyStatus = 'trusted' | 'needs-confirmation' | 'changed'
+
+export interface SshHostKeyConfirmation {
+  host: string
+  port: number
+  key: string
+  keyType: string
+  fingerprint: string
+}
+
+export type SshInitPrepareResult =
+  | { ok: true; keyStatus: SshInitKeyStatus; hostKeyStatus: 'trusted' }
+  | {
+      ok: true
+      keyStatus: SshInitKeyStatus
+      hostKeyStatus: 'needs-confirmation'
+      confirmation: SshHostKeyConfirmation
+    }
+  | {
+      ok: true
+      keyStatus: SshInitKeyStatus
+      hostKeyStatus: 'changed'
+      confirmation: SshHostKeyConfirmation
+    }
+  | { ok: false; keyStatus?: SshInitKeyStatus; message: string }
+
+export interface SshInitTrustHostKeyInput {
+  host: string
+  port: number
+  key: string
+  fingerprint: string
+}
+
+export interface SshInitAccessInput extends SshInitConnectionInput {
+  password: string
+}
+
 export interface ResolvedRemoteTarget {
   target: RemoteRepoTarget
 }
@@ -125,9 +169,7 @@ export function remoteWorktreePathLabel(target: Pick<RemoteRepoTarget, 'host' | 
   return `${target.user}@${target.host}:${path}`
 }
 
-export function remoteDisplayName(
-  target: Pick<RemoteRepoTargetInput, 'alias' | 'host' | 'remotePath'>,
-): string {
+export function remoteDisplayName(target: Pick<RemoteRepoTargetInput, 'alias' | 'host' | 'remotePath'>): string {
   const alias = typeof target.alias === 'string' && safeText(target.alias) ? target.alias.trim() : null
   const host = typeof target.host === 'string' && safeText(target.host) ? target.host.trim() : 'remote'
   const remotePath =
