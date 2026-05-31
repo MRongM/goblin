@@ -1,0 +1,160 @@
+:root,
+html[data-theme='light']:not([data-color-theme]),
+html[data-color-theme='macos'][data-theme='light'] {
+  color-scheme: light;
+
+  --goblin-surface-canvas: #fbfbfd;
+  --goblin-surface-base: #f2f2f7;
+  --goblin-surface-raised: #ffffff;
+  --goblin-surface-overlay: #ffffff;
+  --goblin-surface-muted: #f1f1f5;
+  --goblin-surface-hover: #e5e5ea;
+  --goblin-surface-control: #ffffff;
+  --goblin-surface-control-hover: #f2f2f7;
+  --goblin-text-primary: #1d1d1f;
+  --goblin-text-secondary-strong: #3c3c43;
+  --goblin-text-secondary: #6e6e73;
+  --goblin-text-selected-secondary: rgb(60 60 67 / 0.68);
+  --goblin-border-subtle: rgb(60 60 67 / 0.14);
+  --goblin-border-default: rgb(60 60 67 / 0.22);
+  --goblin-border-strong: rgb(60 60 67 / 0.26);
+  --goblin-focus-ring: #007aff;
+  --goblin-action-primary: #006ee6;
+  --goblin-action-primary-foreground: #ffffff;
+  --goblin-action-danger: #d70015;
+  --goblin-action-danger-foreground: #ffffff;
+
+  --goblin-accent: #007aff;
+  --goblin-accent-text: #0066cc;
+  /* `*-rgb` tokens are channel values, not standalone colours. Use
+   * them only inside `rgb(var(...) / alpha)` derived tokens. */
+  --goblin-accent-rgb: 0 122 255;
+  --goblin-accent-selection: rgb(var(--goblin-accent-rgb) / 0.12);
+  --goblin-accent-surface: rgb(var(--goblin-accent-rgb) / 0.12);
+  --goblin-accent-border: rgb(var(--goblin-accent-rgb) / 0.35);
+
+  --goblin-status-warning-text: #a45a00;
+  --goblin-status-warning-rgb: 255 149 0;
+  --goblin-status-warning-surface: rgb(var(--goblin-status-warning-rgb) / 0.14);
+  --goblin-status-warning-border: rgb(var(--goblin-status-warning-rgb) / 0.4);
+  --goblin-status-success-text: #1f7f37;
+  --goblin-status-success-rgb: 52 199 89;
+  --goblin-status-success-surface: rgb(var(--goblin-status-success-rgb) / 0.1);
+  --goblin-status-success-border: rgb(var(--goblin-status-success-rgb) / 0.35);
+  --goblin-status-danger-text: var(--goblin-action-danger);
+  --goblin-status-danger-rgb: 215 0 21;
+  --goblin-status-danger-surface: rgb(var(--goblin-status-danger-rgb) / 0.09);
+  --goblin-status-danger-border: rgb(var(--goblin-status-danger-rgb) / 0.4);
+
+  --color-overlay-scrim: rgb(0 0 0 / 0.4);
+  --goblin-shadow-xs: 0 1px 1px rgb(10 10 10 / 0.03);
+  --goblin-shadow-sm: 0 1px 2px rgb(10 10 10 / 0.05);
+  --goblin-shadow-md: 0 8px 24px rgb(10 10 10 / 0.1);
+  --goblin-shadow-lg: 0 18px 48px rgb(10 10 10 / 0.14);
+  --shadow-inset-highlight: inset 0 1px 0 rgb(255 255 255 / 0.25);
+  --shadow-control-inset-highlight: inset 0 1px 0 rgb(255 255 255 / 0.3);
+
+  --color-terminal-background: #fbfbfd;
+  --color-terminal-foreground: #1d1d1f;
+  --color-terminal-cursor: #1d1d1f;
+  --color-terminal-selection-background: rgba(0, 122, 255, 0.22);
+  --color-terminal-ansi-black: #000000;
+  --color-terminal-ansi-red: #d70015;
+  --color-terminal-ansi-green: #1f7f37;
+  --color-terminal-ansi-yellow: #a45a00;
+  --color-terminal-ansi-blue: #0066cc;
+  --color-terminal-ansi-magenta: #af52de;
+  --color-terminal-ansi-cyan: #007c89;
+  --color-terminal-ansi-white: #6e6e73;
+  --color-terminal-ansi-bright-black: #6e6e73;
+  --color-terminal-ansi-bright-red: #ff3b30;
+  --color-terminal-ansi-bright-green: #34c759;
+  --color-terminal-ansi-bright-yellow: #ff9500;
+  --color-terminal-ansi-bright-blue: #007aff;
+  --color-terminal-ansi-bright-magenta: #bf5af2;
+  --color-terminal-ansi-bright-cyan: #32ade6;
+  --color-terminal-ansi-bright-white: #1d1d1f;
+  --color-terminal-search-match: #bf8700;
+  --color-terminal-search-active-match: #fb8f44;
+  --color-terminal-search-active-border: #1d1d1f;
+}
+
+html[data-theme='dark']:not([data-color-theme]),
+html[data-color-theme='macos'][data-theme='dark'] {
+  color-scheme: dark;
+
+  --goblin-surface-canvas: #1c1c1e;
+  --goblin-surface-base: #242426;
+  --goblin-surface-raised: #2c2c2e;
+  --goblin-surface-overlay: #323236;
+  --goblin-surface-muted: #252528;
+  --goblin-surface-hover: #3a3a3c;
+  --goblin-surface-control: #2c2c2e;
+  --goblin-surface-control-hover: #3a3a3c;
+  --goblin-text-primary: #f5f5f7;
+  --goblin-text-secondary-strong: rgb(235 235 245 / 0.86);
+  --goblin-text-secondary: rgb(235 235 245 / 0.6);
+  --goblin-text-selected-secondary: rgb(235 235 245 / 0.72);
+  --goblin-border-subtle: rgb(84 84 88 / 0.42);
+  --goblin-border-default: rgb(84 84 88 / 0.55);
+  --goblin-border-strong: rgb(84 84 88 / 0.65);
+  --goblin-focus-ring: #0a84ff;
+  --goblin-action-primary: #0a84ff;
+  --goblin-action-primary-foreground: #001a33;
+  --goblin-action-danger: #ff453a;
+  --goblin-action-danger-foreground: #1a0606;
+
+  --goblin-accent: #0a84ff;
+  --goblin-accent-text: #409cff;
+  /* `*-rgb` tokens are channel values, not standalone colours. Use
+   * them only inside `rgb(var(...) / alpha)` derived tokens. */
+  --goblin-accent-rgb: 10 132 255;
+  --goblin-accent-selection: rgb(var(--goblin-accent-rgb) / 0.2);
+  --goblin-accent-surface: rgb(var(--goblin-accent-rgb) / 0.18);
+  --goblin-accent-border: rgb(var(--goblin-accent-rgb) / 0.45);
+
+  --goblin-status-warning-text: #ff9f0a;
+  --goblin-status-warning-rgb: 255 159 10;
+  --goblin-status-warning-surface: rgb(var(--goblin-status-warning-rgb) / 0.16);
+  --goblin-status-warning-border: rgb(var(--goblin-status-warning-rgb) / 0.45);
+  --goblin-status-success-text: #30d158;
+  --goblin-status-success-rgb: 48 209 88;
+  --goblin-status-success-surface: rgb(var(--goblin-status-success-rgb) / 0.16);
+  --goblin-status-success-border: rgb(var(--goblin-status-success-rgb) / 0.45);
+  --goblin-status-danger-text: var(--goblin-action-danger);
+  --goblin-status-danger-rgb: 255 69 58;
+  --goblin-status-danger-surface: rgb(var(--goblin-status-danger-rgb) / 0.09);
+  --goblin-status-danger-border: rgb(var(--goblin-status-danger-rgb) / 0.45);
+
+  --color-overlay-scrim: rgb(0 0 0 / 0.48);
+  --goblin-shadow-xs: 0 1px 1px rgb(0 0 0 / 0.22);
+  --goblin-shadow-sm: 0 1px 2px rgb(0 0 0 / 0.3);
+  --goblin-shadow-md: 0 8px 24px rgb(0 0 0 / 0.36);
+  --goblin-shadow-lg: 0 18px 48px rgb(0 0 0 / 0.45);
+  --shadow-inset-highlight: inset 0 1px 0 rgb(255 255 255 / 0.08);
+  --shadow-control-inset-highlight: inset 0 1px 0 rgb(255 255 255 / 0.1);
+
+  --color-terminal-background: #111113;
+  --color-terminal-foreground: #f5f5f7;
+  --color-terminal-cursor: #f5f5f7;
+  --color-terminal-selection-background: rgba(10, 132, 255, 0.32);
+  --color-terminal-ansi-black: #1c1c1e;
+  --color-terminal-ansi-red: #ff453a;
+  --color-terminal-ansi-green: #30d158;
+  --color-terminal-ansi-yellow: #ffd60a;
+  --color-terminal-ansi-blue: #0a84ff;
+  --color-terminal-ansi-magenta: #bf5af2;
+  --color-terminal-ansi-cyan: #64d2ff;
+  --color-terminal-ansi-white: #d1d1d6;
+  --color-terminal-ansi-bright-black: #8e8e93;
+  --color-terminal-ansi-bright-red: #ff6961;
+  --color-terminal-ansi-bright-green: #32d74b;
+  --color-terminal-ansi-bright-yellow: #ffdf5d;
+  --color-terminal-ansi-bright-blue: #409cff;
+  --color-terminal-ansi-bright-magenta: #da8fff;
+  --color-terminal-ansi-bright-cyan: #70d7ff;
+  --color-terminal-ansi-bright-white: #ffffff;
+  --color-terminal-search-match: #facc15;
+  --color-terminal-search-active-match: #fb923c;
+  --color-terminal-search-active-border: #ffffff;
+}

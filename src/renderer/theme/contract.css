@@ -1,0 +1,78 @@
+/* Theme token contract.
+ *
+ * The app keeps three layers separate:
+ * 1. `--goblin-*` foundations: the small set future custom themes should
+ *    override, similar to Slack theme palettes.
+ * 2. `--color-*` semantic aliases: Tailwind v4 / shadcn utility names
+ *    used by components (`bg-background`, `text-muted-foreground`, …).
+ * 3. integration tokens: CSS hooks for surfaces that are not Tailwind
+ *    utilities, currently Electron startup/window chrome and xterm.
+ */
+
+@theme {
+  /* shadcn/ui core */
+  --color-background: var(--goblin-surface-canvas);
+  --color-foreground: var(--goblin-text-primary);
+  --color-card: var(--goblin-surface-raised);
+  --color-card-foreground: var(--goblin-text-primary);
+  --color-popover: var(--goblin-surface-overlay);
+  --color-popover-foreground: var(--goblin-text-primary);
+  --color-primary: var(--goblin-action-primary);
+  --color-primary-foreground: var(--goblin-action-primary-foreground);
+  --color-secondary: var(--goblin-surface-base);
+  --color-secondary-foreground: var(--goblin-text-secondary-strong);
+  --color-muted: var(--goblin-surface-muted);
+  --color-muted-foreground: var(--goblin-text-secondary);
+  --color-accent: var(--goblin-surface-hover);
+  --color-accent-foreground: var(--goblin-text-primary);
+  --color-control: var(--goblin-surface-control, var(--goblin-surface-raised));
+  --color-control-hover: var(--goblin-surface-control-hover, var(--goblin-surface-hover));
+  --color-separator: var(--goblin-border-subtle);
+  --color-border: var(--goblin-border-default);
+  --color-input: var(--goblin-border-strong);
+  --color-ring: var(--goblin-focus-ring);
+  --color-destructive: var(--goblin-action-danger);
+  --color-destructive-foreground: var(--goblin-action-danger-foreground);
+
+  /* Project semantic extras */
+  --color-brand: var(--goblin-accent);
+  --color-brand-text: var(--goblin-accent-text);
+  --color-brand-rgb: var(--goblin-accent-rgb);
+  --color-selected: var(--goblin-accent-selection);
+  --color-selected-foreground: var(--goblin-text-primary);
+  --color-brand-surface: var(--goblin-accent-surface);
+  --color-brand-border: var(--goblin-accent-border);
+  --color-warning: var(--goblin-status-warning-text);
+  --color-warning-rgb: var(--goblin-status-warning-rgb);
+  --color-warning-surface: var(--goblin-status-warning-surface);
+  --color-warning-border: var(--goblin-status-warning-border);
+  --color-attention: var(--goblin-status-warning-text);
+  --color-attention-rgb: var(--goblin-status-warning-rgb);
+  --color-attention-surface: var(--goblin-status-warning-surface);
+  --color-attention-border: var(--goblin-status-warning-border);
+  --color-success: var(--goblin-status-success-text);
+  --color-success-rgb: var(--goblin-status-success-rgb);
+  --color-success-surface: var(--goblin-status-success-surface);
+  --color-success-border: var(--goblin-status-success-border);
+  --color-danger: var(--goblin-status-danger-text);
+  --color-danger-rgb: var(--goblin-status-danger-rgb);
+  --color-danger-surface: var(--goblin-status-danger-surface);
+  --color-danger-border: var(--goblin-status-danger-border);
+  --color-selected-muted-foreground: var(--goblin-text-selected-secondary, var(--goblin-text-secondary));
+
+  /* Type / shadows / radius — shadcn radius scale, project shadow
+   * and font stacks. */
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, 'Segoe WPC', 'Segoe UI', 'PingFang SC', 'Noto Sans SC', system-ui, sans-serif;
+  --font-mono: 'Goblin Mono', monospace;
+
+  --shadow-xs: var(--goblin-shadow-xs, var(--goblin-shadow-sm));
+  --shadow-sm: var(--goblin-shadow-sm);
+  --shadow-md: var(--goblin-shadow-md, var(--goblin-shadow-sm));
+  --shadow-lg: var(--goblin-shadow-lg, var(--goblin-shadow-md, var(--goblin-shadow-sm)));
+
+  --radius: 0.5rem;
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+}

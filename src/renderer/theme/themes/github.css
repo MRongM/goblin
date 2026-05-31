@@ -1,0 +1,155 @@
+html[data-color-theme='github'][data-theme='light'] {
+  color-scheme: light;
+
+  --goblin-surface-canvas: #ffffff;
+  --goblin-surface-base: #f6f8fa;
+  --goblin-surface-raised: #ffffff;
+  --goblin-surface-overlay: #ffffff;
+  --goblin-surface-muted: #f6f8fa;
+  --goblin-surface-hover: #f3f4f6;
+  --goblin-surface-control: #ffffff;
+  --goblin-surface-control-hover: #f6f8fa;
+  --goblin-text-primary: #1f2328;
+  --goblin-text-secondary-strong: #3d444d;
+  --goblin-text-secondary: #59636e;
+  --goblin-text-selected-secondary: #4b535d;
+  --goblin-border-subtle: #d8dee4;
+  --goblin-border-default: #d0d7de;
+  --goblin-border-strong: #afb8c1;
+  --goblin-focus-ring: #0969da;
+  --goblin-action-primary: #0969da;
+  --goblin-action-primary-foreground: #ffffff;
+  --goblin-action-danger: #cf222e;
+  --goblin-action-danger-foreground: #ffffff;
+
+  --goblin-accent: #0969da;
+  --goblin-accent-text: #0969da;
+  --goblin-accent-rgb: 9 105 218;
+  --goblin-accent-selection: rgb(var(--goblin-accent-rgb) / 0.12);
+  --goblin-accent-surface: rgb(var(--goblin-accent-rgb) / 0.08);
+  --goblin-accent-border: rgb(var(--goblin-accent-rgb) / 0.32);
+
+  --goblin-status-warning-text: #9a6700;
+  --goblin-status-warning-rgb: 154 103 0;
+  --goblin-status-warning-surface: #fff8c5;
+  --goblin-status-warning-border: #eac54f;
+  --goblin-status-success-text: #1a7f37;
+  --goblin-status-success-rgb: 26 127 55;
+  --goblin-status-success-surface: #dafbe1;
+  --goblin-status-success-border: #4ac26b;
+  --goblin-status-danger-text: #cf222e;
+  --goblin-status-danger-rgb: 207 34 46;
+  --goblin-status-danger-surface: #ffebe9;
+  --goblin-status-danger-border: #ff8182;
+
+  --color-overlay-scrim: rgb(31 35 40 / 0.4);
+  --goblin-shadow-xs: 0 1px 1px rgb(31 35 40 / 0.04);
+  --goblin-shadow-sm: 0 1px 2px rgb(31 35 40 / 0.06);
+  --goblin-shadow-md: 0 8px 24px rgb(31 35 40 / 0.12);
+  --goblin-shadow-lg: 0 18px 48px rgb(31 35 40 / 0.16);
+  --shadow-inset-highlight: inset 0 1px 0 rgb(255 255 255 / 0.35);
+  --shadow-control-inset-highlight: inset 0 1px 0 rgb(255 255 255 / 0.4);
+  --radius: 0.375rem;
+
+  --color-terminal-background: #ffffff;
+  --color-terminal-foreground: #1f2328;
+  --color-terminal-cursor: #1f2328;
+  --color-terminal-selection-background: rgba(9, 105, 218, 0.18);
+  --color-terminal-ansi-black: #24292f;
+  --color-terminal-ansi-red: #cf222e;
+  --color-terminal-ansi-green: #1a7f37;
+  --color-terminal-ansi-yellow: #9a6700;
+  --color-terminal-ansi-blue: #0969da;
+  --color-terminal-ansi-magenta: #8250df;
+  --color-terminal-ansi-cyan: #1b7c83;
+  --color-terminal-ansi-white: #6e7781;
+  --color-terminal-ansi-bright-black: #57606a;
+  --color-terminal-ansi-bright-red: #a40e26;
+  --color-terminal-ansi-bright-green: #116329;
+  --color-terminal-ansi-bright-yellow: #7d4e00;
+  --color-terminal-ansi-bright-blue: #0550ae;
+  --color-terminal-ansi-bright-magenta: #6639ba;
+  --color-terminal-ansi-bright-cyan: #0a5b61;
+  --color-terminal-ansi-bright-white: #1f2328;
+  --color-terminal-search-match: #bf8700;
+  --color-terminal-search-active-match: #fb8f44;
+  --color-terminal-search-active-border: #1f2328;
+}
+
+html[data-color-theme='github'][data-theme='dark'] {
+  color-scheme: dark;
+
+  --goblin-surface-canvas: #0d1117;
+  --goblin-surface-base: #161b22;
+  --goblin-surface-raised: #161b22;
+  --goblin-surface-overlay: #161b22;
+  --goblin-surface-muted: #21262d;
+  --goblin-surface-hover: #30363d;
+  --goblin-surface-control: #161b22;
+  --goblin-surface-control-hover: #21262d;
+  --goblin-text-primary: #e6edf3;
+  --goblin-text-secondary-strong: #c9d1d9;
+  --goblin-text-secondary: #8b949e;
+  --goblin-text-selected-secondary: #c9d1d9;
+  --goblin-border-subtle: #30363d;
+  --goblin-border-default: #30363d;
+  --goblin-border-strong: #484f58;
+  --goblin-focus-ring: #1f6feb;
+  --goblin-action-primary: #2f81f7;
+  --goblin-action-primary-foreground: #ffffff;
+  --goblin-action-danger: #f85149;
+  --goblin-action-danger-foreground: #ffffff;
+
+  --goblin-accent: #2f81f7;
+  --goblin-accent-text: #58a6ff;
+  --goblin-accent-rgb: 47 129 247;
+  --goblin-accent-selection: rgb(var(--goblin-accent-rgb) / 0.22);
+  --goblin-accent-surface: rgb(var(--goblin-accent-rgb) / 0.14);
+  --goblin-accent-border: rgb(var(--goblin-accent-rgb) / 0.42);
+
+  --goblin-status-warning-text: #d29922;
+  --goblin-status-warning-rgb: 210 153 34;
+  --goblin-status-warning-surface: rgb(var(--goblin-status-warning-rgb) / 0.14);
+  --goblin-status-warning-border: #9e6a03;
+  --goblin-status-success-text: #3fb950;
+  --goblin-status-success-rgb: 63 185 80;
+  --goblin-status-success-surface: rgb(var(--goblin-status-success-rgb) / 0.12);
+  --goblin-status-success-border: #238636;
+  --goblin-status-danger-text: #ff7b72;
+  --goblin-status-danger-rgb: 255 123 114;
+  --goblin-status-danger-surface: rgb(var(--goblin-status-danger-rgb) / 0.12);
+  --goblin-status-danger-border: #da3633;
+
+  --color-overlay-scrim: rgb(1 4 9 / 0.55);
+  --goblin-shadow-xs: 0 1px 1px rgb(1 4 9 / 0.3);
+  --goblin-shadow-sm: 0 1px 2px rgb(1 4 9 / 0.35);
+  --goblin-shadow-md: 0 8px 24px rgb(1 4 9 / 0.42);
+  --goblin-shadow-lg: 0 18px 48px rgb(1 4 9 / 0.5);
+  --shadow-inset-highlight: inset 0 1px 0 rgb(255 255 255 / 0.08);
+  --shadow-control-inset-highlight: inset 0 1px 0 rgb(255 255 255 / 0.08);
+  --radius: 0.375rem;
+
+  --color-terminal-background: #0d1117;
+  --color-terminal-foreground: #e6edf3;
+  --color-terminal-cursor: #e6edf3;
+  --color-terminal-selection-background: rgba(47, 129, 247, 0.28);
+  --color-terminal-ansi-black: #484f58;
+  --color-terminal-ansi-red: #ff7b72;
+  --color-terminal-ansi-green: #3fb950;
+  --color-terminal-ansi-yellow: #d29922;
+  --color-terminal-ansi-blue: #58a6ff;
+  --color-terminal-ansi-magenta: #bc8cff;
+  --color-terminal-ansi-cyan: #39c5cf;
+  --color-terminal-ansi-white: #b1bac4;
+  --color-terminal-ansi-bright-black: #6e7681;
+  --color-terminal-ansi-bright-red: #ffa198;
+  --color-terminal-ansi-bright-green: #56d364;
+  --color-terminal-ansi-bright-yellow: #e3b341;
+  --color-terminal-ansi-bright-blue: #79c0ff;
+  --color-terminal-ansi-bright-magenta: #d2a8ff;
+  --color-terminal-ansi-bright-cyan: #56d4dd;
+  --color-terminal-ansi-bright-white: #f0f6fc;
+  --color-terminal-search-match: #d29922;
+  --color-terminal-search-active-match: #db6d28;
+  --color-terminal-search-active-border: #f0f6fc;
+}
