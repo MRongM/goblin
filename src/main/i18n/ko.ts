@@ -302,6 +302,7 @@ export const ko: Record<DictKey, string> = {
 
   // ---- Repo actions ------------------------------------------------------
   'action.checkout': '체크아웃',
+  'action.checkout-locally': '로컬로 체크아웃',
   'action.pull': '풀',
   'action.push': '푸시',
   'action.fetch': '페치',

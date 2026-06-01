@@ -6,6 +6,7 @@ const abortablePaths = [
   'repo.pull',
   'repo.push',
   'repo.checkout',
+  'repo.checkoutRemoteBranch',
   'repo.createWorktree',
   'repo.deleteBranch',
   'repo.removeWorktree',
@@ -45,6 +46,8 @@ function mutateAbortable(path: AbortablePath, signal: AbortSignal): Promise<unkn
       return rpc.repo.push.mutate(input, { signal })
     case 'repo.checkout':
       return rpc.repo.checkout.mutate(input, { signal })
+    case 'repo.checkoutRemoteBranch':
+      return rpc.repo.checkoutRemoteBranch.mutate(input, { signal })
     case 'repo.createWorktree':
       return rpc.repo.createWorktree.mutate(input, { signal })
     case 'repo.deleteBranch':

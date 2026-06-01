@@ -95,4 +95,26 @@ describe('useBranchActionItems remote visibility', () => {
     expect(ids).not.toContain('terminal')
     expect(ids).not.toContain('removeWorktree')
   })
+
+  test('shows only local checkout action for local remote tracking branches', () => {
+    const repo = emptyRepo('/tmp/repo', 'repo')
+    const ids = visibleIds(
+      repo,
+      createBranch('origin/feature/x', {
+        remoteTracking: true,
+        remoteName: 'origin',
+        localName: 'feature/x',
+      }),
+    )
+
+    expect(ids).toContain('checkoutRemoteBranch')
+    expect(ids).toContain('github')
+    expect(ids).not.toContain('checkout')
+    expect(ids).not.toContain('pull')
+    expect(ids).not.toContain('push')
+    expect(ids).not.toContain('deleteBranch')
+    expect(ids).not.toContain('removeWorktree')
+    expect(ids).not.toContain('terminal')
+    expect(ids).not.toContain('editor')
+  })
 })

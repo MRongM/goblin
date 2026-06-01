@@ -46,6 +46,7 @@ export interface RepoDataState {
 export interface RepoUiState {
   selectedBranch: string | null
   branchViewMode: BranchViewMode
+  branchOrder: string[]
   detailTab: DetailTab
   commitDetail: CommitDetailState
 }
@@ -112,6 +113,7 @@ export interface MissingRepo {
 export interface ReposStore {
   repos: Record<string, RepoState>
   repoCache: Record<string, CachedRepoState>
+  branchOrdersByRepo: Record<string, string[]>
   remotePortConfigsByRepo: Record<string, RemotePortForwardConfig[]>
   order: string[]
   activeId: string | null
@@ -144,6 +146,7 @@ export interface ReposStore {
    *  list closes the gap; later items shift up if `from < to`, down if
    *  `from > to`). No-op if either id is unknown or they're identical. */
   reorderRepos: (fromId: string, toId: string) => void
+  reorderBranches: (id: string, fromBranch: string, toBranch: string) => void
   setDetailTab: (id: string, tab: DetailTab) => void
   dismissExitedTerminalDetail: (id: string, worktreePath: string) => void
   setDetailCollapsed: (collapsed: boolean) => void

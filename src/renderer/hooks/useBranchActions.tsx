@@ -102,6 +102,10 @@ export function useBranchActions(repo: RepoState, branch: BranchInfo) {
     return runRepoAction({ kind: 'checkout', branch: branch.name })
   }
 
+  function checkoutRemoteBranch() {
+    return runRepoAction({ kind: 'checkoutRemoteBranch', remoteBranch: branch.name })
+  }
+
   function pull() {
     return runRepoAction({ kind: 'pull', branch: branch.name, worktreePath: branch.worktreePath })
   }
@@ -204,10 +208,11 @@ export function useBranchActions(repo: RepoState, branch: BranchInfo) {
   }
 
   const isCurrent = branch.name === repo.data.currentBranch
+  const isRemoteTrackingBranch = repo.kind !== 'remote' && branch.remoteTracking === true
   const checkedOutInAnotherWorktree = !!branch.worktreePath && !isCurrent
   const canRemoveWorktree = checkedOutInAnotherWorktree && !branch.worktreeIsPrimary
   const isProtected = PROTECTED_BRANCHES.has(branch.name)
-  const isRegularBranch = !isCurrent && !branch.worktreePath && !isProtected
+  const isRegularBranch = !isRemoteTrackingBranch && !isCurrent && !branch.worktreePath && !isProtected
   const changedStatus = branch.worktreePath ? repo.data.status.find((wt) => wt.path === branch.worktreePath) : null
   const canCopyPatch = !!branch.worktreePath && (changedStatus?.entries.length ?? 0) > 0
   const removeConfirmProtected = removeConfirm ? PROTECTED_BRANCHES.has(removeConfirm.branch) : false
@@ -365,19 +370,21 @@ export function useBranchActions(repo: RepoState, branch: BranchInfo) {
     capabilities: {
       isCurrent,
       checkedOutInAnotherWorktree,
-      canCheckout: !isCurrent && !checkedOutInAnotherWorktree,
+      canCheckout: !isRemoteTrackingBranch && !isCurrent && !checkedOutInAnotherWorktree,
+      canCheckoutRemoteBranch: isRemoteTrackingBranch,
       canRemoveWorktree,
       isRegularBranch,
       canCopyPatch,
-      canPull: !!branch.tracking,
-      canPush: true,
-      canOpenTerminal: !!branch.worktreePath,
-      canOpenEditor: !!branch.worktreePath,
+      canPull: !isRemoteTrackingBranch && !!branch.tracking,
+      canPush: !isRemoteTrackingBranch,
+      canOpenTerminal: !isRemoteTrackingBranch && !!branch.worktreePath,
+      canOpenEditor: !isRemoteTrackingBranch && !!branch.worktreePath,
       canOpenGitHub: true,
     },
     actions: {
       copyPatch,
       checkout,
+      checkoutRemoteBranch,
       pull,
       push,
       openTerminal,

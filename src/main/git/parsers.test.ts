@@ -92,6 +92,28 @@ describe('parseBranches', () => {
     const [b] = parseBranches(line, 'main')
     expect(b?.lastCommitMessage).toBe(subject)
   })
+
+  test('parses remote tracking branch metadata', () => {
+    const line = [
+      'origin/feature/x',
+      'def5678',
+      'remote work',
+      '2026-05-20T10:00:00+08:00',
+      'Bob',
+      '',
+      '',
+    ].join(SEP)
+
+    const [b] = parseBranches(line, 'main', [], { remoteTracking: true })
+
+    expect(b).toMatchObject({
+      name: 'origin/feature/x',
+      isCurrent: false,
+      remoteTracking: true,
+      remoteName: 'origin',
+      localName: 'feature/x',
+    })
+  })
 })
 
 describe('parseLog', () => {

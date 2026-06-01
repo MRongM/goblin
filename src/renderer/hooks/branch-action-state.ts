@@ -6,6 +6,7 @@ import type { BranchInfo } from '#/renderer/types.ts'
 export type BranchActionItemId =
   | 'copyPatch'
   | 'checkout'
+  | 'checkoutRemoteBranch'
   | 'pull'
   | 'push'
   | 'github'
@@ -31,6 +32,8 @@ export function branchActionItemIdFromKind(kind: RepoBranchActionKind | null): B
   switch (kind) {
     case 'checkout':
       return 'checkout'
+    case 'checkoutRemoteBranch':
+      return 'checkoutRemoteBranch'
     case 'pull':
       return 'pull'
     case 'push':

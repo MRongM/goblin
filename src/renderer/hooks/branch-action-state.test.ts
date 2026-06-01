@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest'
 import {
+  branchActionItemIdFromKind,
   branchActionItemIdFromOperation,
   branchActionsAvailable,
   isBranchActionBlocked,
@@ -100,6 +101,10 @@ describe('branchActionItemIdFromOperation', () => {
 
     expect(branchActionItemIdFromOperation(repo, 'feature/a')).toBe('pull')
     expect(branchActionItemIdFromOperation(repo, 'feature/b')).toBeNull()
+  })
+
+  test('maps remote tracking checkout resource kind to checkout locally action item', () => {
+    expect(branchActionItemIdFromKind('checkoutRemoteBranch')).toBe('checkoutRemoteBranch')
   })
 
   test('returns null when idle or when no branch action item owns the operation', () => {

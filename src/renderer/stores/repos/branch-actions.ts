@@ -26,6 +26,7 @@ import { rpc } from '#/renderer/rpc.ts'
 const NETWORK_BRANCH_ACTIONS = new Set<RepoBranchActionKind>(['pull', 'push'])
 const BRANCH_ACTION_REASON_BY_KIND: Record<RepoBranchActionKind, RepoBranchActionReason> = {
   checkout: 'branch:checkout',
+  checkoutRemoteBranch: 'branch:checkoutRemoteBranch',
   pull: 'branch:pull',
   push: 'branch:push',
   createWorktree: 'branch:createWorktree',
@@ -50,6 +51,8 @@ function branchActionReason(action: RepoBranchAction): RepoBranchActionReason {
 function branchActionOperationTarget(action: RepoBranchAction): string | null {
   switch (action.kind) {
     case 'checkout':
+    case 'checkoutRemoteBranch':
+      return action.kind === 'checkoutRemoteBranch' ? action.remoteBranch : action.branch
     case 'pull':
     case 'push':
     case 'deleteBranch':
@@ -88,6 +91,8 @@ function runBranchActionRpc(action: RepoBranchAction, repo: RepoState, signal?: 
     switch (action.kind) {
       case 'checkout':
         return rpc.remote.checkout.mutate({ target: repo.remoteTarget, branch: action.branch }, { signal })
+      case 'checkoutRemoteBranch':
+        return Promise.resolve({ ok: false, message: 'error.invalid-arguments' })
       case 'pull':
         return rpc.remote.pull.mutate(
           { target: repo.remoteTarget, branch: action.branch, worktreePath: action.worktreePath },
@@ -127,6 +132,8 @@ function runBranchActionRpc(action: RepoBranchAction, repo: RepoState, signal?: 
   switch (action.kind) {
     case 'checkout':
       return rpc.repo.checkout.mutate({ cwd: repo.id, branch: action.branch }, { signal })
+    case 'checkoutRemoteBranch':
+      return rpc.repo.checkoutRemoteBranch.mutate({ cwd: repo.id, remoteBranch: action.remoteBranch }, { signal })
     case 'pull':
       return rpc.repo.pull.mutate(
         { cwd: repo.id, branch: action.branch, worktreePath: action.worktreePath },

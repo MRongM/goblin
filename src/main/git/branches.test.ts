@@ -1,11 +1,13 @@
 import { afterEach, describe, expect, test } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import {
   checkoutBranch,
+  checkoutRemoteTrackingBranch,
   deleteBranch,
+  getBranches,
   getLog,
   getUpstream,
   isAncestor,
@@ -161,6 +163,90 @@ describe('branch write operations', () => {
     const result = await isAncestor(repo, 'main', 'HEAD', abortedSignal())
 
     expect(result).toBe(false)
+  })
+})
+
+describe('remote tracking branches', () => {
+  function createRepoWithOrigin(): { repo: string; remote: string } {
+    tmp = mkdtempSync(path.join(os.tmpdir(), 'gbl-remote-branches-test-'))
+    const repo = path.join(tmp, 'repo')
+    const remote = path.join(tmp, 'origin.git')
+    mkdirSync(repo)
+    runGit(tmp, ['init', '--bare', remote])
+    runGit(repo, ['init', '-b', 'main'])
+    runGit(repo, ['config', 'user.email', 'test@example.com'])
+    runGit(repo, ['config', 'user.name', 'Test User'])
+    commitFile(repo, 'README.md', 'initial\n', 'initial', 0)
+    runGit(repo, ['remote', 'add', 'origin', remote])
+    runGit(repo, ['push', '-u', 'origin', 'main'])
+    return { repo, remote }
+  }
+
+  test('includes remote tracking branches that do not have a local branch', async () => {
+    const { repo } = createRepoWithOrigin()
+    runGit(repo, ['switch', '-c', 'feature/x'])
+    commitFile(repo, 'feature.txt', 'feature\n', 'feature work', 1)
+    runGit(repo, ['push', '-u', 'origin', 'feature/x'])
+    runGit(repo, ['switch', 'main'])
+    runGit(repo, ['branch', '-D', 'feature/x'])
+    runGit(repo, ['fetch', 'origin'])
+
+    const branches = await getBranches(repo)
+
+    expect(branches).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: 'origin/feature/x',
+          remoteTracking: true,
+          remoteName: 'origin',
+          localName: 'feature/x',
+        }),
+      ]),
+    )
+  })
+
+  test('hides remote tracking branches that already have a local branch', async () => {
+    const { repo } = createRepoWithOrigin()
+    runGit(repo, ['switch', '-c', 'feature/x'])
+    commitFile(repo, 'feature.txt', 'feature\n', 'feature work', 1)
+    runGit(repo, ['push', '-u', 'origin', 'feature/x'])
+    runGit(repo, ['fetch', 'origin'])
+
+    const branches = await getBranches(repo)
+
+    expect(branches.some((branch) => branch.name === 'origin/feature/x')).toBe(false)
+    expect(branches.some((branch) => branch.name === 'feature/x')).toBe(true)
+  })
+
+  test('checks out a remote tracking branch into a local tracking branch', async () => {
+    const { repo } = createRepoWithOrigin()
+    runGit(repo, ['switch', '-c', 'feature/x'])
+    commitFile(repo, 'feature.txt', 'feature\n', 'feature work', 1)
+    runGit(repo, ['push', '-u', 'origin', 'feature/x'])
+    runGit(repo, ['switch', 'main'])
+    runGit(repo, ['branch', '-D', 'feature/x'])
+    runGit(repo, ['fetch', 'origin'])
+
+    const result = await checkoutRemoteTrackingBranch(repo, 'origin/feature/x')
+
+    expect(result.ok).toBe(true)
+    expect(execFileSync('git', ['branch', '--show-current'], { cwd: repo, encoding: 'utf8' }).trim()).toBe('feature/x')
+    expect(
+      execFileSync('git', ['rev-parse', '--abbrev-ref', 'feature/x@{u}'], { cwd: repo, encoding: 'utf8' }).trim(),
+    ).toBe('origin/feature/x')
+  })
+
+  test('rejects invalid remote tracking branch names', async () => {
+    const { repo } = createRepoWithOrigin()
+
+    await expect(checkoutRemoteTrackingBranch(repo, 'origin/-bad')).resolves.toEqual({
+      ok: false,
+      message: 'error.invalid-arguments',
+    })
+    await expect(checkoutRemoteTrackingBranch(repo, 'main')).resolves.toEqual({
+      ok: false,
+      message: 'error.invalid-arguments',
+    })
   })
 })
 

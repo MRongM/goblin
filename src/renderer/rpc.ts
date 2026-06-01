@@ -9,6 +9,7 @@ const ABORTABLE_REPO_CWD_PATHS = new Set([
   'repo.pull',
   'repo.push',
   'repo.checkout',
+  'repo.checkoutRemoteBranch',
   'repo.createWorktree',
   'repo.deleteBranch',
   'repo.removeWorktree',

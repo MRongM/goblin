@@ -215,6 +215,7 @@ export interface AppRpcHandlers {
     patch: (input: { cwd: string; worktreePath: string }) => Promise<ExecResult>
     commit: (input: { cwd: string; hash: string }) => Promise<CommitDetail | null>
     checkout: (input: { cwd: string; branch: string }) => Promise<ExecResult>
+    checkoutRemoteBranch: (input: { cwd: string; remoteBranch: string }) => Promise<ExecResult>
     deleteBranch: (input: { cwd: string; branch: string; force?: boolean }) => Promise<ExecResult>
     removeWorktree: (input: {
       cwd: string
@@ -451,6 +452,9 @@ export function createAppRouter(handlers: AppRpcHandlers) {
         .input(v.object({ cwd: v.string(), hash: v.string() }))
         .query(({ input }) => handlers.repo.commit(input)),
       checkout: p.input(BranchInput).mutation(({ input }) => handlers.repo.checkout(input)),
+      checkoutRemoteBranch: p
+        .input(v.object({ cwd: v.string(), remoteBranch: v.string() }))
+        .mutation(({ input }) => handlers.repo.checkoutRemoteBranch(input)),
       deleteBranch: p
         .input(v.object({ cwd: v.string(), branch: v.string(), force: v.optional(v.boolean()) }))
         .mutation(({ input }) => handlers.repo.deleteBranch(input)),

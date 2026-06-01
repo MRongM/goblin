@@ -72,10 +72,16 @@ export function markMergedToDefault(
   mergedBranches: Set<string>,
 ): BranchInfo[] {
   if (!defaultBranch) return branches
-  return branches.map((branch) => ({
-    ...branch,
-    mergedToDefault: branch.name === defaultBranch || mergedBranches.has(branch.name),
-  }))
+  return branches.map((branch) => {
+    if (branch.remoteTracking) {
+      const { mergedToDefault: _mergedToDefault, ...rest } = branch
+      return rest
+    }
+    return {
+      ...branch,
+      mergedToDefault: branch.name === defaultBranch || mergedBranches.has(branch.name),
+    }
+  })
 }
 
 async function getMergedBranchNames(
@@ -113,15 +119,24 @@ export async function getBranches(
       '%(upstream:track)',
     ].join(FIELD_SEP)
 
-    const [output, currentBranch, defaultBranch] = await Promise.all([
+    const [output, remoteOutput, currentBranch, defaultBranch] = await Promise.all([
       git(cwd, ['for-each-ref', `--format=${format}`, 'refs/heads/'], { signal: options?.signal }),
+      git(cwd, ['for-each-ref', `--format=${format}`, 'refs/remotes/'], { signal: options?.signal }),
       getCurrentBranch(cwd, { signal: options?.signal }),
       getDefaultBranch(cwd, { signal: options?.signal }),
     ])
     if (options?.signal?.aborted) return []
     const mergedBranchNames = await getMergedBranchNames(cwd, defaultBranch, options?.signal)
     if (options?.signal?.aborted) return []
-    const branches = markDefaultBranch(parseBranches(output, currentBranch, worktrees), defaultBranch)
+    const localBranches = markDefaultBranch(parseBranches(output, currentBranch, worktrees), defaultBranch)
+    const localBranchNames = new Set(localBranches.map((branch) => branch.name))
+    const remoteTrackingBranches = parseBranches(remoteOutput, '', [], { remoteTracking: true }).filter((branch) => {
+      if (!branch.localName || !branch.remoteName) return false
+      if (branch.localName === 'HEAD') return false
+      if (!isSafeBranchName(branch.name) || !isSafeBranchName(branch.localName)) return false
+      return !localBranchNames.has(branch.localName)
+    })
+    const branches = [...localBranches, ...remoteTrackingBranches]
     return prioritizeDefaultBranch(
       mergedBranchNames ? markMergedToDefault(branches, defaultBranch, mergedBranchNames) : branches,
       defaultBranch,
@@ -152,6 +167,27 @@ export async function getLog(
 export async function checkoutBranch(cwd: string, name: string, signal?: AbortSignal): Promise<ExecResult> {
   if (!isSafeBranchName(name)) return { ok: false, message: 'error.invalid-arguments' }
   return gitResultWithOptions(cwd, { signal }, 'switch', '--', name)
+}
+
+function localNameFromRemoteTrackingBranch(remoteBranch: string): string | null {
+  if (!isSafeBranchName(remoteBranch)) return null
+  const slash = remoteBranch.indexOf('/')
+  if (slash <= 0 || slash >= remoteBranch.length - 1) return null
+  const remoteName = remoteBranch.slice(0, slash)
+  const localName = remoteBranch.slice(slash + 1)
+  if (localName === 'HEAD') return null
+  if (!isSafeBranchName(remoteName) || !isSafeBranchName(localName)) return null
+  return localName
+}
+
+export async function checkoutRemoteTrackingBranch(
+  cwd: string,
+  remoteBranch: string,
+  signal?: AbortSignal,
+): Promise<ExecResult> {
+  const localName = localNameFromRemoteTrackingBranch(remoteBranch)
+  if (!localName) return { ok: false, message: 'error.invalid-arguments' }
+  return gitResultWithOptions(cwd, { signal }, 'switch', '-c', localName, '--track', remoteBranch)
 }
 
 export async function deleteBranch(

@@ -200,6 +200,40 @@ describe('setBranchViewMode', () => {
   })
 })
 
+describe('reorderBranches', () => {
+  test('stores a per-repo manual branch order without mutating branch data order', () => {
+    seedRepo({
+      selectedBranch: 'feature/plain',
+      branches: [branch('main'), branch('feature/a'), branch('feature/b')],
+    })
+
+    useReposStore.getState().reorderBranches(REPO_ID, 'feature/b', 'main')
+
+    const repo = useReposStore.getState().repos[REPO_ID]
+    expect(repo?.data.branches.map((item) => item.name)).toEqual(['main', 'feature/a', 'feature/b'])
+    expect(repo?.ui.branchOrder).toEqual(['feature/b', 'main', 'feature/a'])
+    expect(useReposStore.getState().branchOrdersByRepo[REPO_ID]).toEqual(['feature/b', 'main', 'feature/a'])
+  })
+
+  test('reorders only visible worktree branches and merges them back into the shared branch order', () => {
+    seedRepo({
+      selectedBranch: 'main',
+      branches: [
+        branch('main', { worktreePath: '/repo' }),
+        branch('feature/plain'),
+        branch('feature/wt', { worktreePath: '/repo-wt' }),
+      ],
+    })
+    useReposStore.getState().setBranchViewMode(REPO_ID, 'worktrees')
+
+    useReposStore.getState().reorderBranches(REPO_ID, 'feature/wt', 'main')
+
+    const repo = useReposStore.getState().repos[REPO_ID]
+    expect(repo?.ui.branchOrder).toEqual(['feature/wt', 'feature/plain', 'main'])
+    expect(useReposStore.getState().branchOrdersByRepo[REPO_ID]).toEqual(['feature/wt', 'feature/plain', 'main'])
+  })
+})
+
 describe('selectBranch', () => {
   test('refreshes pull request details locally', async () => {
     let resolve!: () => void
@@ -293,6 +327,39 @@ describe('selectBranch', () => {
     expect(repo?.ui.selectedBranch).toBe('feature/plain')
     expect(repo?.ui.detailTab).toBe('status')
     expect(useReposStore.getState().repoCache[REPO_ID]?.ui.detailTab).toBe('status')
+  })
+})
+
+describe('checkoutSelected', () => {
+  test('checks out a selected remote tracking branch locally', async () => {
+    const actions: unknown[] = []
+    seedRepo({
+      selectedBranch: 'origin/feature/x',
+      branches: [
+        branch('main', { worktreePath: '/repo' }),
+        branch('origin/feature/x', {
+          remoteTracking: true,
+          remoteName: 'origin',
+          localName: 'feature/x',
+        }),
+      ],
+    })
+    expect(useReposStore.getState().repos[REPO_ID]?.ui.selectedBranch).toBe('origin/feature/x')
+    expect(useReposStore.getState().repos[REPO_ID]?.data.branches[1]?.remoteTracking).toBe(true)
+    const original = useReposStore.getState().runBranchAction
+    useReposStore.setState({
+      runBranchAction: async (_id, action) => {
+        actions.push(action)
+        return { ok: true, message: 'checked out' }
+      },
+    })
+
+    try {
+      await useReposStore.getState().checkoutSelected()
+      expect(actions).toEqual([{ kind: 'checkoutRemoteBranch', remoteBranch: 'origin/feature/x' }])
+    } finally {
+      useReposStore.setState({ runBranchAction: original })
+    }
   })
 })
 

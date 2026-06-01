@@ -1,5 +1,6 @@
 export type RepoBranchAction =
   | { kind: 'checkout'; branch: string }
+  | { kind: 'checkoutRemoteBranch'; remoteBranch: string }
   | { kind: 'pull'; branch: string; worktreePath?: string }
   | { kind: 'push'; branch: string }
   | { kind: 'createWorktree'; worktreePath: string; newBranch: string; baseBranch: string }

@@ -1,5 +1,9 @@
 import { appendRepoEvent, errorEvent, inFlightFetchById, updateIfFresh } from '#/renderer/stores/repos/helpers.ts'
-import { branchForVisibleLog, selectedBranchForBranchSet } from '#/renderer/stores/repos/branch-view-mode.ts'
+import {
+  branchForVisibleLog,
+  normalizeBranchOrder,
+  selectedBranchForBranchSet,
+} from '#/renderer/stores/repos/branch-view-mode.ts'
 import { runExclusiveOperation, runLatestOperation } from '#/renderer/stores/repos/operation-runner.ts'
 import { persistRepoCache } from '#/renderer/stores/repos/persistence.ts'
 import { runLatestResourceOperation } from '#/renderer/stores/repos/resource-runner.ts'
@@ -264,15 +268,6 @@ export function createRefreshActions(set: ReposSet, get: ReposGet) {
           }
           const validBranches = new Set(snap.branches.map((b) => b.name))
           updateIfFresh(set, id, token, (r) => {
-            // Default selection: current branch on first load. Keep the
-            // user's pick if it still exists, otherwise fall back so the
-            // detail panel never points at a stale name.
-            const selected = selectedBranchForBranchSet({
-              branches: snap.branches,
-              currentBranch: snap.current,
-              selectedBranch: r.ui.selectedBranch,
-              viewMode: r.ui.branchViewMode,
-            })
             const logsByBranch = Object.fromEntries(
               Object.entries(r.data.logsByBranch).filter(([branch]) => validBranches.has(branch)),
             )
@@ -290,6 +285,17 @@ export function createRefreshActions(set: ReposSet, get: ReposGet) {
                 ? { ...branch, pullRequest }
                 : branch
             })
+            const branchOrder = normalizeBranchOrder(branches, r.ui.branchOrder)
+            // Default selection: current branch on first load. Keep the
+            // user's pick if it still exists, otherwise fall back so the
+            // detail panel never points at a stale name.
+            const selected = selectedBranchForBranchSet({
+              branches,
+              currentBranch: snap.current,
+              selectedBranch: r.ui.selectedBranch,
+              viewMode: r.ui.branchViewMode,
+              branchOrder,
+            })
             r.data.branches = branches
             r.data.currentBranch = snap.current
             r.data.logsByBranch = logsByBranch
@@ -300,6 +306,7 @@ export function createRefreshActions(set: ReposSet, get: ReposGet) {
               Object.entries(r.resources.pullRequestsByBranch).filter(([branch]) => validBranches.has(branch)),
             )
             r.ui.selectedBranch = selected
+            r.ui.branchOrder = branchOrder
             if (
               r.ui.detailTab === 'terminal' &&
               (r.kind === 'remote' || !branches.some((branch) => branch.name === selected && branch.worktreePath))

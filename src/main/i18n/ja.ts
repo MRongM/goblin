@@ -309,6 +309,7 @@ export const ja: Record<DictKey, string> = {
 
   // ---- Repo actions ------------------------------------------------------
   'action.checkout': 'チェックアウト',
+  'action.checkout-locally': 'ローカルにチェックアウト',
   'action.pull': 'プル',
   'action.push': 'プッシュ',
   'action.fetch': 'フェッチ',

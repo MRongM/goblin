@@ -19,6 +19,7 @@ import {
 } from '#/shared/rpc.ts'
 import {
   checkoutBranch,
+  checkoutRemoteTrackingBranch,
   deleteBranch,
   getBranches,
   getCurrentBranch,
@@ -383,6 +384,12 @@ function createRpcHandlers(): AppRpcHandlers {
       checkout: async ({ cwd, branch }) => {
         if (!isValidCwd(cwd) || !isValidBranch(branch)) return { ok: false, message: 'error.invalid-arguments' }
         return runCancellable(cwd, 'user', (signal) => checkoutBranch(cwd, branch, signal))
+      },
+      checkoutRemoteBranch: async ({ cwd, remoteBranch }) => {
+        if (!isValidCwd(cwd) || !isValidBranch(remoteBranch) || !remoteBranch.includes('/')) {
+          return { ok: false, message: 'error.invalid-arguments' }
+        }
+        return runCancellable(cwd, 'user', (signal) => checkoutRemoteTrackingBranch(cwd, remoteBranch, signal))
       },
       deleteBranch: async (input) => {
         if (!isValidCwd(input.cwd) || !isValidBranch(input.branch)) {

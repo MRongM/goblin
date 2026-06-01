@@ -1,6 +1,7 @@
 export type RepoOperationPhase = 'idle' | 'queued' | 'running'
 export type RepoBranchActionReason =
   | 'branch:checkout'
+  | 'branch:checkoutRemoteBranch'
   | 'branch:pull'
   | 'branch:push'
   | 'branch:createWorktree'

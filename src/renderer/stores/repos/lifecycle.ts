@@ -1,6 +1,7 @@
 import pLimit from 'p-limit'
 import { lastPathSegment } from '#/renderer/lib/paths.ts'
 import { emptyRepo, inFlightFetchById, updateIfFresh } from '#/renderer/stores/repos/helpers.ts'
+import { normalizeBranchOrder } from '#/renderer/stores/repos/branch-view-mode.ts'
 import { hydrateCachedRepo } from '#/renderer/stores/repos/persistence.ts'
 import { disposeRepoRuntime } from '#/renderer/stores/repos/runtime.ts'
 import { runInitialRepoLoad } from '#/renderer/stores/repos/refresh-workflows.ts'
@@ -60,26 +61,31 @@ function orderedInsert(order: string[], id: string, rankById?: ReadonlyMap<strin
 }
 
 function addResolvedRepo(
-  s: Pick<ReposStore, 'repos' | 'repoCache' | 'order'>,
+  s: Pick<ReposStore, 'repos' | 'repoCache' | 'branchOrdersByRepo' | 'order'>,
   resolvedRepo: ResolvedRepo,
   rankById?: ReadonlyMap<string, number>,
 ): Pick<ReposStore, 'repos' | 'order'> & { changed: boolean } {
   const { id, name } = resolvedRepo
   if (s.repos[id]) return { repos: s.repos, order: s.order, changed: false }
+  const repo = hydrateCachedRepo(emptyRepo(id, name), s.repoCache[id])
+  const branchOrder = s.branchOrdersByRepo[id] ?? []
+  repo.ui.branchOrder =
+    repo.data.branches.length > 0 ? normalizeBranchOrder(repo.data.branches, branchOrder) : branchOrder
   return {
-    repos: { ...s.repos, [id]: hydrateCachedRepo(emptyRepo(id, name), s.repoCache[id]) },
+    repos: { ...s.repos, [id]: repo },
     order: orderedInsert(s.order, id, rankById),
     changed: true,
   }
 }
 
 function addRemoteRepo(
-  s: Pick<ReposStore, 'repos' | 'order' | 'remotePortConfigsByRepo'>,
+  s: Pick<ReposStore, 'repos' | 'branchOrdersByRepo' | 'order' | 'remotePortConfigsByRepo'>,
   target: RemoteRepoTarget,
   rankById?: ReadonlyMap<string, number>,
 ): Pick<ReposStore, 'repos' | 'order'> & { changed: boolean } {
   if (s.repos[target.id]) return { repos: s.repos, order: s.order, changed: false }
   const repo = emptyRepo(target.id, target.displayName, { kind: 'remote', remoteTarget: target })
+  repo.ui.branchOrder = s.branchOrdersByRepo[target.id] ?? []
   repo.remotePorts.configs = s.remotePortConfigsByRepo[target.id] ?? []
   return {
     repos: {

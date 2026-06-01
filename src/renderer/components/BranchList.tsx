@@ -7,11 +7,21 @@
 // name. We avoid tinting the whole row so selection, hover, and status
 // semantics don't compete for background colour.
 
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, type ComponentProps, type RefObject } from 'react'
 import { RefreshCw } from 'lucide-react'
+import {
+  DndContext,
+  type DragEndEvent,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core'
+import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 import { useStoreWithEqualityFn } from 'zustand/traditional'
 import { useReposStore } from '#/renderer/stores/repos/store.ts'
-import { useI18nStore, useT } from '#/renderer/stores/i18n.ts'
+import { useI18nStore, useT, type Lang } from '#/renderer/stores/i18n.ts'
 import { visibleBranches } from '#/renderer/stores/repos/branch-view-mode.ts'
 import { BranchRow } from '#/renderer/components/branch-list/BranchRow.tsx'
 import { EmptyState } from '#/renderer/components/Layout.tsx'
@@ -31,10 +41,12 @@ export function BranchList({ repoId, showActions = true, variant = 'list' }: Pro
   const t = useT()
   const lang = useI18nStore((s) => s.lang)
   const selectBranch = useReposStore((s) => s.selectBranch)
+  const reorderBranches = useReposStore((s) => s.reorderBranches)
   const setDetailTab = useReposStore((s) => s.setDetailTab)
   const setDetailCollapsed = useReposStore((s) => s.setDetailCollapsed)
   const refreshSnapshot = useReposStore((s) => s.refreshSnapshot)
   const selectedRef = useRef<HTMLLIElement | null>(null)
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }))
   const handleSelectBranch = useCallback(
     (branch: string) => {
       selectBranch(repoId, branch)
@@ -48,6 +60,14 @@ export function BranchList({ repoId, showActions = true, variant = 'list' }: Pro
       setDetailCollapsed(false)
     },
     [repoId, handleSelectBranch, setDetailCollapsed, setDetailTab],
+  )
+  const handleDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      const { active, over } = event
+      if (!over || active.id === over.id) return
+      reorderBranches(repoId, String(active.id), String(over.id))
+    },
+    [repoId, reorderBranches],
   )
   const { repo, branches, selected, current } = useStoreWithEqualityFn(
     useReposStore,
@@ -69,6 +89,7 @@ export function BranchList({ repoId, showActions = true, variant = 'list' }: Pro
         a.repo.instanceToken === b.repo.instanceToken &&
         a.repo.data.branches === b.repo.data.branches &&
         a.repo.ui.branchViewMode === b.repo.ui.branchViewMode &&
+        a.repo.ui.branchOrder === b.repo.ui.branchOrder &&
         a.repo.data.status === b.repo.data.status &&
         a.repo.resources.snapshot === b.repo.resources.snapshot &&
         a.repo.resources.branchAction === b.repo.resources.branchAction &&
@@ -90,6 +111,8 @@ export function BranchList({ repoId, showActions = true, variant = 'list' }: Pro
       repo.data.branches.find((branch) => branch.name === selected))
     : null
   const renderedBranches = variant === 'selected-strip' ? (selectedBranch ? [selectedBranch] : []) : branches
+  const renderedBranchIds = renderedBranches.map((branch) => branch.name)
+  const sortable = variant === 'list' && renderedBranches.length > 1
 
   if (renderedBranches.length === 0) {
     if (repo.kind === 'remote' && repo.data.branches.length === 0 && repo.resources.snapshot.error) {
@@ -113,24 +136,36 @@ export function BranchList({ repoId, showActions = true, variant = 'list' }: Pro
       {repo.kind === 'remote' && repo.resources.snapshot.stale && repo.resources.snapshot.error && (
         <RemoteSnapshotStaleNotice repo={repo} />
       )}
-      <ul className="divide-y divide-separator">
-        {renderedBranches.map((branch) => {
-          return (
-            <BranchRow
-              key={branch.name}
+      {sortable ? (
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+          <SortableContext items={renderedBranchIds} strategy={verticalListSortingStrategy}>
+            <BranchRows
               repo={repo}
-              branch={branch}
+              branches={renderedBranches}
               selected={selected}
               current={current}
               lang={lang}
+              selectedRef={selectedRef}
+              showActions={showActions}
               onSelectBranch={handleSelectBranch}
               onOpenBranchStatus={handleOpenBranchStatus}
-              selectedRef={selectedRef}
-              showActions={showActions && branchActionsAvailable(repo, branch)}
+              sortable
             />
-          )
-        })}
-      </ul>
+          </SortableContext>
+        </DndContext>
+      ) : (
+        <BranchRows
+          repo={repo}
+          branches={renderedBranches}
+          selected={selected}
+          current={current}
+          lang={lang}
+          selectedRef={selectedRef}
+          showActions={showActions}
+          onSelectBranch={handleSelectBranch}
+          onOpenBranchStatus={handleOpenBranchStatus}
+        />
+      )}
     </>
   )
 
@@ -142,6 +177,86 @@ export function BranchList({ repoId, showActions = true, variant = 'list' }: Pro
     )
 
   return <ScrollArea className="min-h-0 flex-1">{list}</ScrollArea>
+}
+
+function BranchRows({
+  repo,
+  branches,
+  selected,
+  current,
+  lang,
+  selectedRef,
+  showActions,
+  onSelectBranch,
+  onOpenBranchStatus,
+  sortable = false,
+}: {
+  repo: RepoState
+  branches: ReturnType<typeof visibleBranches>
+  selected: string | null
+  current: string
+  lang: Lang
+  selectedRef: RefObject<HTMLLIElement | null>
+  showActions: boolean
+  onSelectBranch: (branch: string) => void
+  onOpenBranchStatus: (branch: string) => void
+  sortable?: boolean
+}) {
+  return (
+    <ul className="divide-y divide-separator">
+      {branches.map((branch) =>
+        sortable ? (
+          <SortableBranchRow
+            key={branch.name}
+            repo={repo}
+            branch={branch}
+            selected={selected}
+            current={current}
+            lang={lang}
+            selectedRef={selectedRef}
+            showActions={showActions && branchActionsAvailable(repo, branch)}
+            onSelectBranch={onSelectBranch}
+            onOpenBranchStatus={onOpenBranchStatus}
+          />
+        ) : (
+          <BranchRow
+            key={branch.name}
+            repo={repo}
+            branch={branch}
+            selected={selected}
+            current={current}
+            lang={lang}
+            selectedRef={selectedRef}
+            showActions={showActions && branchActionsAvailable(repo, branch)}
+            onSelectBranch={onSelectBranch}
+            onOpenBranchStatus={onOpenBranchStatus}
+          />
+        ),
+      )}
+    </ul>
+  )
+}
+
+function SortableBranchRow(props: Omit<ComponentProps<typeof BranchRow>, 'drag'>) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: props.branch.name,
+  })
+  const stableTransform = transform ? { ...transform, scaleX: 1, scaleY: 1 } : null
+  return (
+    <BranchRow
+      {...props}
+      drag={{
+        attributes,
+        listeners,
+        setNodeRef,
+        style: {
+          transform: CSS.Transform.toString(stableTransform),
+          transition,
+        },
+        isDragging,
+      }}
+    />
+  )
 }
 
 function RemoteSnapshotStaleNotice({ repo }: { repo: RepoState }) {

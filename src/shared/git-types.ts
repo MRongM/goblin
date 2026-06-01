@@ -22,6 +22,9 @@ export interface BranchInfo {
   worktreeLocked?: boolean
   mergedToDefault?: boolean
   pullRequest?: PullRequestInfo
+  remoteTracking?: boolean
+  remoteName?: string
+  localName?: string
 }
 
 export interface PullRequestInfo {

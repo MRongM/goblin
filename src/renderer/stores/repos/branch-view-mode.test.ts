@@ -16,6 +16,7 @@ interface RepoOverrides {
   currentBranch?: string
   selectedBranch?: string | null
   branchViewMode?: BranchViewMode
+  branchOrder?: string[]
 }
 
 function repo(overrides: RepoOverrides = {}): RepoState {
@@ -31,6 +32,7 @@ function repo(overrides: RepoOverrides = {}): RepoState {
       ...base.ui,
       selectedBranch: overrides.selectedBranch ?? base.ui.selectedBranch,
       branchViewMode: overrides.branchViewMode ?? base.ui.branchViewMode,
+      branchOrder: overrides.branchOrder ?? base.ui.branchOrder,
     },
   }
 }
@@ -61,6 +63,38 @@ describe('visibleBranches', () => {
     expect(visibleBranches(repo({ branches, branchViewMode: 'no-worktree' })).map((b) => b.name)).toEqual([
       'feature/plain',
     ])
+  })
+
+  test('applies manual branch order and appends new branches in git order', () => {
+    const branches = [branch('main'), branch('feature/a'), branch('feature/b'), branch('feature/new')]
+
+    expect(
+      visibleBranches(
+        repo({
+          branches,
+          branchViewMode: 'all',
+          branchOrder: ['feature/b', 'main', 'feature/a'],
+        }),
+      ).map((b) => b.name),
+    ).toEqual(['feature/b', 'main', 'feature/a', 'feature/new'])
+  })
+
+  test('keeps manual order when filtering worktree branches', () => {
+    const branches = [
+      branch('main', { worktreePath: '/repo' }),
+      branch('feature/plain'),
+      branch('feature/wt', { worktreePath: '/repo-wt' }),
+    ]
+
+    expect(
+      visibleBranches(
+        repo({
+          branches,
+          branchViewMode: 'worktrees',
+          branchOrder: ['feature/wt', 'feature/plain', 'main'],
+        }),
+      ).map((b) => b.name),
+    ).toEqual(['feature/wt', 'main'])
   })
 })
 

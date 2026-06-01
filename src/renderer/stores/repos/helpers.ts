@@ -43,6 +43,7 @@ export function emptyRepo(
     ui: {
       selectedBranch: null,
       branchViewMode: 'all',
+      branchOrder: [],
       detailTab: 'status',
       commitDetail: { phase: 'idle' },
     },

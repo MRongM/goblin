@@ -1,4 +1,4 @@
-import { type RefObject } from 'react'
+import { type CSSProperties, type HTMLAttributes, type RefObject } from 'react'
 import { ArrowDown, ArrowUp, Check, FolderTree, GitBranch } from 'lucide-react'
 import { useT, type Lang } from '#/renderer/stores/i18n.ts'
 import type { RepoState } from '#/renderer/stores/repos/types.ts'
@@ -6,6 +6,7 @@ import { Badge } from '#/renderer/components/ui/badge.tsx'
 import { BranchActionsMenu } from '#/renderer/components/BranchActionsMenu.tsx'
 import { cn } from '#/renderer/lib/cn.ts'
 import { formatRelativeTime } from '#/renderer/lib/dates.ts'
+import { lastPathSegment } from '#/renderer/lib/paths.ts'
 import type { BranchInfo } from '#/renderer/types.ts'
 
 interface BranchRowProps {
@@ -18,6 +19,13 @@ interface BranchRowProps {
   onOpenBranchStatus: (branch: string) => void
   selectedRef: RefObject<HTMLLIElement | null>
   showActions?: boolean
+  drag?: {
+    attributes?: HTMLAttributes<HTMLElement>
+    listeners?: Record<string, unknown>
+    setNodeRef: (node: HTMLLIElement | null) => void
+    style?: CSSProperties
+    isDragging?: boolean
+  }
 }
 
 function Delta({ direction, count, label }: { direction: 'ahead' | 'behind'; count: number; label: string }) {
@@ -48,37 +56,50 @@ export function BranchRow({
   onOpenBranchStatus,
   selectedRef,
   showActions = true,
+  drag,
 }: BranchRowProps) {
   const t = useT()
   const isSelected = branch.name === selected
   const isCurrent = branch.name === current
   const hasWorktree = !!branch.worktreePath
   const isWorktree = hasWorktree && !isCurrent
+  const worktreeName = branch.worktreePath ? lastPathSegment(branch.worktreePath) || branch.worktreePath : ''
   const commitTime = formatRelativeTime(branch.lastCommitDate, lang)
   const commitMeta = branch.lastCommitAuthor ? `${branch.lastCommitAuthor} · ${commitTime}` : commitTime
   const ariaParts = [
     branch.name,
     isCurrent ? t('branch-status.current') : null,
     branch.isDefault ? t('branches.default') : null,
-    hasWorktree ? t(branch.worktreeDirty ? 'branches.dirty' : 'branches.worktree') : null,
+    hasWorktree ? `${t('branches.worktree')}: ${worktreeName}` : null,
+    branch.worktreeDirty ? t('branches.dirty') : null,
     branch.trackingGone ? t('branches.gone') : null,
     branch.ahead > 0 ? t('branch-status.sync.ahead', { n: branch.ahead }) : null,
     branch.behind > 0 ? t('branch-status.sync.behind', { n: branch.behind }) : null,
     branch.lastCommitMessage || null,
     commitMeta,
   ].filter(Boolean)
+  const setRowRef = (node: HTMLLIElement | null) => {
+    drag?.setNodeRef(node)
+    if (isSelected) {
+      ;(selectedRef as { current: HTMLLIElement | null }).current = node
+    }
+  }
 
   return (
     <li
-      ref={isSelected ? selectedRef : undefined}
+      ref={drag ? setRowRef : isSelected ? selectedRef : undefined}
+      style={drag?.style}
+      {...drag?.attributes}
+      {...drag?.listeners}
       title={ariaParts.join(', ')}
       onClick={() => onSelectBranch(branch.name)}
       onDoubleClick={() => onOpenBranchStatus(branch.name)}
       className={cn(
-        'relative grid items-stretch cursor-pointer',
+        'relative grid touch-none select-none items-stretch cursor-pointer',
         showActions ? 'grid-cols-[minmax(0,1fr)_auto]' : 'grid-cols-1',
         'transition-colors duration-100',
         isSelected ? 'bg-selected text-selected-foreground hover:bg-selected' : 'hover:bg-muted',
+        drag?.isDragging && 'z-10 bg-card shadow-sm',
       )}
     >
       <div className="pointer-events-none relative z-10 grid min-w-0 grid-cols-[1rem_minmax(0,1fr)] items-start gap-2 px-4 py-2">
@@ -100,15 +121,17 @@ export function BranchRow({
                   {t('branches.default')}
                 </Badge>
               )}
-              {hasWorktree && branch.worktreeDirty ? (
-                <Badge variant="attention" className="gap-1 font-mono">
-                  <FolderTree size={10} />
-                  {t('branches.dirty')}
-                </Badge>
-              ) : isWorktree ? (
-                <Badge variant="outline" className="gap-1 font-mono text-muted-foreground">
-                  <FolderTree size={10} />
-                  {t('branches.worktree')}
+              {hasWorktree ? (
+                <Badge
+                  variant={branch.worktreeDirty ? 'attention' : 'outline'}
+                  className={cn(
+                    'max-w-[10rem] gap-1 font-mono',
+                    branch.worktreeDirty ? undefined : 'text-muted-foreground',
+                  )}
+                  title={branch.worktreePath}
+                >
+                  <FolderTree size={10} className="shrink-0" />
+                  <span className="min-w-0 truncate">{worktreeName}</span>
                 </Badge>
               ) : null}
               {branch.trackingGone && (

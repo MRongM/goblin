@@ -17,7 +17,12 @@ export const FIELD_SEP = '\x1f'
  * Fields, in order: refname:short, objectname:short, subject,
  * authordate:iso-strict, authorname, upstream:short, upstream:track.
  */
-export function parseBranches(output: string, currentBranch: string, worktrees: WorktreeInfo[] = []): BranchInfo[] {
+export function parseBranches(
+  output: string,
+  currentBranch: string,
+  worktrees: WorktreeInfo[] = [],
+  options?: { remoteTracking?: boolean },
+): BranchInfo[] {
   if (!output) return []
 
   const worktreeMap = new Map<
@@ -58,13 +63,22 @@ export function parseBranches(output: string, currentBranch: string, worktrees: 
 
     const branchInfo: BranchInfo = {
       name,
-      isCurrent: name === currentBranch,
+      isCurrent: !options?.remoteTracking && name === currentBranch,
       ahead,
       behind,
       lastCommitHash: hash,
       lastCommitMessage: subject,
       lastCommitDate: date,
       lastCommitAuthor: author,
+    }
+
+    if (options?.remoteTracking) {
+      const slash = name.indexOf('/')
+      if (slash > 0 && slash < name.length - 1) {
+        branchInfo.remoteTracking = true
+        branchInfo.remoteName = name.slice(0, slash)
+        branchInfo.localName = name.slice(slash + 1)
+      }
     }
 
     if (upstream) {

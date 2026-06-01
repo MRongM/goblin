@@ -154,6 +154,28 @@ describe('runBranchAction', () => {
     expect(useReposStore.getState().repos[REMOTE_TARGET.id]?.resources.fetch.phase).toBe('idle')
   })
 
+  test('routes local remote tracking checkout through repo RPC and write resources', async () => {
+    const calls: string[] = []
+    installGoblinTestBridge({
+      'repo.checkoutRemoteBranch': async ({ remoteBranch }: { remoteBranch: string }) => {
+        calls.push(remoteBranch)
+        return { ok: true, message: 'checked out' }
+      },
+      'repo.snapshot': async () => ({ branches: [], current: '' }),
+      'repo.status': async () => [],
+      'repo.pullRequests': async () => [],
+    })
+
+    const result = await useReposStore.getState().runBranchAction(REPO_ID, {
+      kind: 'checkoutRemoteBranch',
+      remoteBranch: 'origin/feature/x',
+    })
+
+    expect(result).toEqual({ ok: true, message: 'checked out' })
+    expect(calls).toEqual(['origin/feature/x'])
+    expect(useReposStore.getState().repos[REPO_ID]?.resources.fetch.phase).toBe('idle')
+  })
+
   test('routes remote remove worktree through remote RPC', async () => {
     resetReposStore()
     const remote = emptyRepo(REMOTE_TARGET.id, REMOTE_TARGET.displayName, {

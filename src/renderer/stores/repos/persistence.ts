@@ -143,6 +143,15 @@ export function normalizeRepoCache(value: unknown): Record<string, CachedRepoSta
   return trimRepoCache(Object.fromEntries(entries))
 }
 
+export function normalizeBranchOrdersByRepo(value: unknown): Record<string, string[]> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .map(([id, raw]) => [id, normalizeBranchOrderValue(raw)] as const)
+      .filter((entry): entry is readonly [string, string[]] => entry[1].length > 0),
+  )
+}
+
 function repoCacheEntry(repo: RepoState): CachedRepoState | null {
   if (repo.kind === 'remote') return null
   if (repo.data.branches.length === 0 && !repo.data.statusLoaded) return null
@@ -162,6 +171,18 @@ function repoCacheEntry(repo: RepoState): CachedRepoState | null {
       detailTab: repo.ui.detailTab === 'terminal' ? 'status' : repo.ui.detailTab,
     },
   }
+}
+
+function normalizeBranchOrderValue(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  const seen = new Set<string>()
+  const order: string[] = []
+  for (const item of value) {
+    if (typeof item !== 'string' || item.length === 0 || seen.has(item)) continue
+    seen.add(item)
+    order.push(item)
+  }
+  return order
 }
 
 function trimRepoCache(cache: Record<string, CachedRepoState>): Record<string, CachedRepoState> {

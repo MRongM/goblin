@@ -73,6 +73,16 @@ export function useBranchActionItems(repo: RepoState, branch: BranchInfo): Branc
       onSelect: actions.checkout,
     },
     {
+      id: 'checkoutRemoteBranch',
+      label: t('action.checkout-locally'),
+      disabled,
+      busy: busy('checkoutRemoteBranch'),
+      visible: capabilities.canCheckoutRemoteBranch,
+      shortcut: '↩',
+      icon: createElement(GitBranch),
+      onSelect: actions.checkoutRemoteBranch,
+    },
+    {
       id: 'pull',
       label: t('action.pull'),
       disabled,

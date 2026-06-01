@@ -1,6 +1,6 @@
 import { beforeAll, beforeEach, describe, expect, test, vi } from 'vitest'
 import { dialog, ipcMain } from 'electron'
-import { isAncestor, getCurrentBranch, getUpstream } from '#/main/git/branches.ts'
+import { checkoutRemoteTrackingBranch, isAncestor, getCurrentBranch, getUpstream } from '#/main/git/branches.ts'
 import { getWorktrees } from '#/main/git/worktrees.ts'
 import { getWorkingStatus } from '#/main/git/status.ts'
 import { resolveRemovableWorktree } from '#/main/git/guards.ts'
@@ -52,6 +52,7 @@ vi.mock('electron', () => ({
 
 vi.mock('#/main/git/branches.ts', () => ({
   checkoutBranch: vi.fn(),
+  checkoutRemoteTrackingBranch: vi.fn(() => ({ ok: true, message: 'checked out' })),
   deleteBranch: vi.fn(),
   getBranches: vi.fn(),
   getCurrentBranch: vi.fn(),
@@ -623,6 +624,26 @@ describe('main repo rpc cancellation', () => {
 
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.error.code).toBe('BAD_REQUEST')
+  })
+
+  test('routes local remote tracking checkout through typed repo RPC', async () => {
+    const result = await invokeRpc('repo.checkoutRemoteBranch', {
+      cwd: '/repo',
+      remoteBranch: 'origin/feature/x',
+    })
+
+    expect(result).toEqual({ ok: true, data: { ok: true, message: 'checked out' } })
+    expect(checkoutRemoteTrackingBranch).toHaveBeenCalledWith('/repo', 'origin/feature/x', expect.any(AbortSignal))
+  })
+
+  test('rejects invalid local remote tracking checkout inputs', async () => {
+    const result = await invokeRpc('repo.checkoutRemoteBranch', {
+      cwd: '/repo',
+      remoteBranch: 'origin/bad branch',
+    })
+
+    expect(result).toEqual({ ok: true, data: { ok: false, message: 'error.invalid-arguments' } })
+    expect(checkoutRemoteTrackingBranch).not.toHaveBeenCalledWith('/repo', 'origin/bad branch', expect.anything())
   })
 
   test('opens remote editor and external terminal through typed remote RPC', async () => {

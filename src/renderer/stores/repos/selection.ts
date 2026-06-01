@@ -1,5 +1,9 @@
 import { arrayMove } from '@dnd-kit/sortable'
-import { branchForVisibleLog, selectedBranchForViewMode } from '#/renderer/stores/repos/branch-view-mode.ts'
+import {
+  branchForVisibleLog,
+  reorderedBranchOrder,
+  selectedBranchForViewMode,
+} from '#/renderer/stores/repos/branch-view-mode.ts'
 import { replaceRepo, replaceRepoState } from '#/renderer/stores/repos/helpers.ts'
 import { persistRepoCache } from '#/renderer/stores/repos/persistence.ts'
 import {
@@ -40,6 +44,10 @@ function detailTabForSelection(repo: RepoState, tab: DetailTab, selectedBranch =
   return detailTabForWorktree(tab, branchCanOpenTerminal(repo, selectedBranch))
 }
 
+function sameOrder(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((item, index) => item === b[index])
+}
+
 export function createSelectionActions(set: ReposSet, get: ReposGet) {
   return {
     setActive(id: string) {
@@ -53,6 +61,28 @@ export function createSelectionActions(set: ReposSet, get: ReposGet) {
         const to = s.order.indexOf(toId)
         if (from === -1 || to === -1) return s
         return { order: arrayMove(s.order, from, to) }
+      })
+    },
+
+    reorderBranches(id: string, fromBranch: string, toBranch: string) {
+      if (fromBranch === toBranch) return
+      set((s) => {
+        const repo = s.repos[id]
+        if (!repo) return s
+        const branchOrder = reorderedBranchOrder(
+          repo.data.branches,
+          repo.ui.branchOrder,
+          repo.ui.branchViewMode,
+          fromBranch,
+          toBranch,
+        )
+        if (sameOrder(branchOrder, repo.ui.branchOrder)) return s
+        return {
+          ...replaceRepoState(s, repo, (r) => {
+            r.ui.branchOrder = branchOrder
+          }),
+          branchOrdersByRepo: { ...s.branchOrdersByRepo, [id]: branchOrder },
+        }
       })
     },
 
@@ -298,6 +328,10 @@ export function createSelectionActions(set: ReposSet, get: ReposGet) {
       if (!branch || branch === repo.data.currentBranch) return
       const branchInfo = repo.data.branches.find((b) => b.name === branch)
       if (!branchInfo || branchInfo.worktreePath) return
+      if (branchInfo.remoteTracking) {
+        await get().runBranchAction(id, { kind: 'checkoutRemoteBranch', remoteBranch: branch }, { token })
+        return
+      }
       await get().runBranchAction(id, { kind: 'checkout', branch }, { token })
     },
 
