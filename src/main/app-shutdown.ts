@@ -31,8 +31,8 @@ export function wireAppShutdown(app: ShutdownApp, deps: AppShutdownDeps): void {
 
   let isQuitting = false
   app.on('before-quit', (event) => {
-    event.preventDefault()
     if (isQuitting) return
+    event.preventDefault()
     isQuitting = true
 
     void runQuitCleanup(deps, unregisterShortcutsOnce).finally(() => {

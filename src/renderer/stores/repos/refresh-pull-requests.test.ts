@@ -15,6 +15,92 @@ import {
 beforeEach(resetRefreshTest)
 
 describe('refreshPullRequests', () => {
+  test('snapshot records local-only remote capability and clears stale pull requests', async () => {
+    const stale = pullRequest(1)
+    const token = seedRepo([branch('feature/a', stale)])
+    useReposStore.setState((s) => ({
+      repos: {
+        ...s.repos,
+        [REPO_ID]: replaceRepo(s.repos[REPO_ID]!, (repo) => {
+          repo.remote.fetchFailed = true
+          repo.remote.fetchError = 'previous failure'
+        }),
+      },
+    }))
+    rpcHandlers['repo.snapshot'] = async () => ({
+      branches: [branch('feature/a')],
+      current: 'feature/a',
+      remote: {
+        remotes: [],
+        hasRemotes: false,
+        hasBrowserRemote: false,
+        remoteProviders: {},
+        hasGitHubRemote: false,
+      },
+    })
+
+    await useReposStore.getState().refreshSnapshot(REPO_ID, { token })
+
+    const repo = useReposStore.getState().repos[REPO_ID]
+    expect(repo?.remote).toMatchObject({
+      remotes: [],
+      hasRemotes: false,
+      hasBrowserRemote: false,
+      remoteProviders: {},
+      hasGitHubRemote: false,
+      fetchFailed: false,
+      fetchError: null,
+    })
+    expect(repo?.data.branches[0]?.pullRequest).toBeUndefined()
+  })
+
+  test('skips pull request refresh for local-only repositories', async () => {
+    const token = seedRepo([branch('feature/a')])
+    let callCount = 0
+    useReposStore.setState((s) => ({
+      repos: {
+        ...s.repos,
+        [REPO_ID]: replaceRepo(s.repos[REPO_ID]!, (repo) => {
+          repo.remote.hasRemotes = false
+          repo.remote.hasBrowserRemote = false
+          repo.remote.hasGitHubRemote = false
+        }),
+      },
+    }))
+    rpcHandlers['repo.pullRequests'] = async () => {
+      callCount += 1
+      return []
+    }
+
+    await useReposStore.getState().refreshPullRequests(REPO_ID, ['feature/a'], { token })
+
+    expect(callCount).toBe(0)
+    expect(useReposStore.getState().repos[REPO_ID]?.resources.pullRequests.phase).toBe('idle')
+  })
+
+  test('skips pull request refresh for browser-only remotes', async () => {
+    const token = seedRepo([branch('feature/gitlab')])
+    let callCount = 0
+    useReposStore.setState((s) => ({
+      repos: {
+        ...s.repos,
+        [REPO_ID]: replaceRepo(s.repos[REPO_ID]!, (repo) => {
+          repo.remote.hasBrowserRemote = true
+          repo.remote.hasGitHubRemote = false
+        }),
+      },
+    }))
+    rpcHandlers['repo.pullRequests'] = async () => {
+      callCount += 1
+      return []
+    }
+
+    await useReposStore.getState().refreshPullRequests(REPO_ID, ['feature/gitlab'], { token })
+
+    expect(callCount).toBe(0)
+    expect(useReposStore.getState().repos[REPO_ID]?.resources.pullRequests.phase).toBe('idle')
+  })
+
   test('snapshot refresh writes a durable repo cache entry', async () => {
     const token = seedRepo([])
     rpcHandlers['repo.snapshot'] = async () => ({ branches: [branch('feature/a')], current: 'feature/a' })
@@ -249,6 +335,48 @@ describe('refreshPullRequests', () => {
       { branches: ['feature/a'], mode: 'full', loadingAtStart: true },
       { branches: ['feature/a', 'feature/b'], mode: 'full', loadingAtStart: true },
     ])
+  })
+
+  test('snapshot refresh stops pull request backfill after the first refresh error', async () => {
+    const token = seedRepo([branch('feature/a')])
+    const calls: Array<{ branches?: string[]; mode?: string }> = []
+    rpcHandlers['repo.snapshot'] = async () => ({
+      branches: [branch('feature/a'), branch('feature/b')],
+      current: 'feature/a',
+    })
+    rpcHandlers['repo.pullRequests'] = async ({
+      branches,
+      options,
+    }: {
+      branches?: string[]
+      options?: { mode?: string }
+    }) => {
+      calls.push({ branches, mode: options?.mode })
+      throw new Error('GitHub CLI is not signed in to github.com')
+    }
+
+    await useReposStore.getState().refreshSnapshot(REPO_ID, { token })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(calls).toEqual([{ branches: ['feature/a', 'feature/b'], mode: 'summary' }])
+    expect(useReposStore.getState().repos[REPO_ID]?.events).toEqual([
+      expect.objectContaining({ kind: 'error', message: 'GitHub CLI is not signed in to github.com' }),
+    ])
+  })
+
+  test('snapshot refresh unavailable pull request lookups do not enqueue repo error events', async () => {
+    const token = seedRepo([branch('feature/a')])
+    rpcHandlers['repo.snapshot'] = async () => ({
+      branches: [branch('feature/a'), branch('feature/b')],
+      current: 'feature/a',
+    })
+    rpcHandlers['repo.pullRequests'] = async () => null
+
+    await useReposStore.getState().refreshSnapshot(REPO_ID, { token })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(useReposStore.getState().repos[REPO_ID]?.events).toEqual([])
+    expect(useReposStore.getState().repos[REPO_ID]?.resources.pullRequests.error).toBeNull()
   })
 
   test('ignores stale pull request lookups for the same repo instance', async () => {

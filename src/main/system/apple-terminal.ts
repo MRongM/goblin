@@ -5,6 +5,10 @@ import { buildRemoteTerminalInvocation } from '#/main/ssh/commands.ts'
 import type { RemoteRepoTarget } from '#/shared/remote-repo.ts'
 
 const OPEN_TIMEOUT_MS = 10_000
+export const TERMINAL_APP_CANDIDATES = [
+  '/System/Applications/Utilities/Terminal.app',
+  '/Applications/Utilities/Terminal.app',
+]
 
 function isUsableDirectory(p: string): boolean {
   if (!path.isAbsolute(p) || p.includes('\0')) return false
@@ -71,4 +75,12 @@ function isUsableRemoteDirectory(p: string): boolean {
 function shellQuoteArg(value: string): string {
   if (/^[A-Za-z0-9_@%+=:,./-]+$/.test(value)) return value
   return `'${value.replace(/'/g, `'\\''`)}'`
+}
+
+export function hasAppleTerminalAtKnownPaths(candidates: readonly string[] = TERMINAL_APP_CANDIDATES): boolean {
+  return candidates.some((candidate) => isUsableDirectory(candidate))
+}
+
+export async function isAppleTerminalInstalled(_signal?: AbortSignal): Promise<boolean> {
+  return hasAppleTerminalAtKnownPaths()
 }

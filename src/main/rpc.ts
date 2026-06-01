@@ -7,13 +7,12 @@ import { TRPCError } from '@trpc/server'
 import {
   createAppRouter,
   type AppRpcHandlers,
+  type ExternalAppsSnapshot,
+  type GitHubCliState,
   type NetworkOpKind,
   type RpcRequest,
   type RpcResponse,
   type SessionState,
-  type SettingsSnapshot,
-  type TerminalAppState,
-  type EditorAppState,
   type EditorPref,
   type TerminalPref,
 } from '#/shared/rpc.ts'
@@ -21,6 +20,7 @@ import {
   checkoutBranch,
   checkoutRemoteTrackingBranch,
   deleteBranch,
+  deleteUpstreamBranch,
   getBranches,
   getCurrentBranch,
   getDefaultBranch,
@@ -31,7 +31,15 @@ import {
   isAncestor,
   isGitRepo,
 } from '#/main/git/branches.ts'
-import { fetchAll, getGitHubUrl, getPullRequestUrl, pullBranch, pushBranch } from '#/main/git/remote.ts'
+import {
+  fetchAll,
+  getBrowserRemoteUrl,
+  getNewPullRequestUrl,
+  getRemoteInfo,
+  getUpstreamParts,
+  pullBranch,
+  pushBranch,
+} from '#/main/git/remote.ts'
 import { getWorkingStatus } from '#/main/git/status.ts'
 import { getWorktreePatch } from '#/main/git/patch.ts'
 import { resolveKnownWorktree, resolveRemovableWorktree } from '#/main/git/guards.ts'
@@ -48,8 +56,15 @@ import {
 } from '#/shared/git-types.ts'
 import { isReservedGlobalShortcut, parseGlobalShortcut } from '#/shared/accelerator.ts'
 import { checkGitAvailable } from '#/main/git/helper.ts'
-import { isValidAbsolutePath, isValidBranch, isValidCwd, isValidOptionalBranch } from '#/main/ipc/validation.ts'
-import { getMainWindow } from '#/main/window.ts'
+import {
+  isValidAbsolutePath,
+  isValidBranch,
+  isValidCwd,
+  isValidOptionalBranch,
+  toSafeSessionPath,
+} from '#/main/ipc/validation.ts'
+import { applyMainWindowChromeTheme, getMainWindow } from '#/main/window.ts'
+import { allRegisteredSurfacesWithCapability, focusedRegisteredSurface } from '#/main/window-registry.ts'
 import { getTheme, setColorTheme, setThemePref, subscribeTheme } from '#/main/theme.ts'
 import {
   addRecentRepo,
@@ -59,9 +74,13 @@ import {
   onSettingsWriteError,
   setFetchInterval,
   setGlobalShortcut,
+  setGlobalShortcutDisabled,
+  setSwapCloseShortcuts,
+  setToggleDetailOnActionBarBlankClick,
   setSession,
   setShortcutsDisabled,
   setTerminalApp,
+  setTerminalNotificationsEnabled,
   getTerminalApp,
   setEditorApp,
   getEditorApp,
@@ -75,8 +94,10 @@ import { normalizeRemoteTarget, type RemoteRepoTarget, type RepoSessionEntry } f
 import { isGlobalShortcutRegistered, replaceGlobalShortcut, syncGlobalShortcuts } from '#/main/shortcuts.ts'
 import { buildAppMenu, setMenuWorkspaceLayout } from '#/main/menu.ts'
 import { applyLangPref, getCurrentLang, getDictionary } from '#/main/i18n/index.ts'
-import { getResolvedTerminalApp, openInPreferredTerminal, openRemoteInPreferredTerminal } from '#/main/system/terminals.ts'
-import { getResolvedEditorApp, openInPreferredEditor, openRemoteInPreferredEditor } from '#/main/system/editors.ts'
+import { openInPreferredTerminal, openRemoteInPreferredTerminal } from '#/main/system/terminals.ts'
+import { openInPreferredEditor, openRemoteInPreferredEditor } from '#/main/system/editors.ts'
+import { probeEditorApps, probeExternalApps, probeTerminalApps } from '#/main/system/external-apps.ts'
+import { probeGitHubCli } from '#/main/system/github-cli.ts'
 import { broadcastRpcEvent } from '#/main/events.ts'
 import { closeWorktreeSession } from '#/main/terminal.ts'
 import { openHttpExternal, openHttpsExternal } from '#/main/external-url.ts'
@@ -102,6 +123,8 @@ import {
 import { getRemoteHome, listRemoteDirectory } from '#/main/ssh/path-picker.ts'
 import { remotePortForwardManager } from '#/main/ssh/port-forward.ts'
 import { initializeSshAccess, prepareSshInit, trustSshHostKey } from '#/main/ssh/initialization.ts'
+import { consumeExternalOpenPaths } from '#/main/external-open.ts'
+import { applySettingsWindowChromeTheme, openSettingsWindow } from '#/main/settings-window.ts'
 
 const PROJECT_GITHUB_URL = 'https://github.com/nano-props/goblin'
 const PATCH_TIMEOUT_MS = 90_000
@@ -131,11 +154,9 @@ const activeOpControllers = new Map<string, ActiveNetworkOp>()
 const activeCloneControllers = new Map<string, ActiveCloneOp>()
 const activeRpcControllers = new Map<string, AbortController>()
 const rpcSignalStorage = new AsyncLocalStorage<AbortSignal>()
+const rpcWindowStorage = new AsyncLocalStorage<BrowserWindow | null>()
 
 let wired = false
-
-type TerminalAppSnapshot = Pick<SettingsSnapshot, 'terminalApp' | 'resolvedTerminalApp' | 'terminalAvailable'>
-type EditorAppSnapshot = Pick<SettingsSnapshot, 'editorApp' | 'resolvedEditorApp' | 'editorAvailable'>
 
 export function wireRpcIpc(): void {
   if (wired) return
@@ -164,12 +185,20 @@ export function wireRpcIpc(): void {
       if (typeof procedure !== 'function') {
         throw new TRPCError({ code: 'NOT_FOUND', message: `Unknown RPC procedure: ${request.path}` })
       }
+      const runInRpcContext = <T>(fn: () => Promise<T>): Promise<T> => {
+        const rpcWindow = BrowserWindow.fromWebContents(event.sender) ?? null
+        // Keep the originating BrowserWindow alongside the AbortSignal for the
+        // lifetime of the RPC. Main-side helpers such as native dialogs can
+        // then parent themselves to the real caller instead of guessing from
+        // current focus, which is brittle once multiple renderer windows exist.
+        return rpcWindowStorage.run(rpcWindow, fn)
+      }
       const requestId = request.requestId
-      if (!isValidRpcRequestId(requestId)) return { ok: true, data: await procedure(request.input) }
+      if (!isValidRpcRequestId(requestId)) return { ok: true, data: await runInRpcContext(() => procedure(request.input)) }
       const ctrl = new AbortController()
       activeRpcControllers.set(requestId, ctrl)
       try {
-        const data = await rpcSignalStorage.run(ctrl.signal, () => procedure(request.input))
+        const data = await runInRpcContext(() => rpcSignalStorage.run(ctrl.signal, () => procedure(request.input)))
         return { ok: true, data }
       } finally {
         if (activeRpcControllers.get(requestId) === ctrl) activeRpcControllers.delete(requestId)
@@ -180,9 +209,11 @@ export function wireRpcIpc(): void {
   })
 
   subscribeTheme((state) => {
-    for (const win of BrowserWindow.getAllWindows()) {
+    for (const { window: win } of allRegisteredSurfacesWithCapability('themeSync')) {
       if (!win.isDestroyed()) win.setBackgroundColor(WINDOW_BACKGROUND_BY_COLOR_THEME[state.colorTheme][state.resolved])
     }
+    applyMainWindowChromeTheme(state.resolved)
+    applySettingsWindowChromeTheme(state.resolved)
     buildAppMenu()
     broadcastRpcEvent({ type: 'theme-changed', state })
   })
@@ -228,6 +259,10 @@ function currentRpcSignal(): AbortSignal | undefined {
   return rpcSignalStorage.getStore()
 }
 
+function currentRpcWindow(): BrowserWindow | null {
+  return rpcWindowStorage.getStore() ?? null
+}
+
 function resolveRpcPathSegment(target: unknown, segment: string): unknown {
   if (FORBIDDEN_RPC_PATH_SEGMENTS.has(segment)) return undefined
   if (!target || (typeof target !== 'object' && typeof target !== 'function')) return undefined
@@ -240,32 +275,22 @@ function toRpcError(err: unknown): Extract<RpcResponse, { ok: false }>['error'] 
   return { message: String(err) }
 }
 
-function terminalAppState(pref: TerminalPref): TerminalAppState {
-  const resolved = getResolvedTerminalApp(pref)
-  return { pref, resolved, available: resolved !== null }
+async function externalAppsState(terminalPref: TerminalPref, editorPref: EditorPref): Promise<ExternalAppsSnapshot> {
+  const state = await probeExternalApps(terminalPref, editorPref, currentRpcSignal())
+  return { terminal: state.terminals, editor: state.editors }
 }
 
-function editorAppState(pref: EditorPref): EditorAppState {
-  const resolved = getResolvedEditorApp(pref)
-  return { pref, resolved, available: resolved !== null }
+function broadcastExternalAppsState(state: ExternalAppsSnapshot): void {
+  broadcastRpcEvent({ type: 'terminal-app-changed', ...state.terminal })
+  broadcastRpcEvent({ type: 'editor-app-changed', ...state.editor })
 }
 
-function terminalAppSnapshot(pref: TerminalPref): TerminalAppSnapshot {
-  const state = terminalAppState(pref)
-  return {
-    terminalApp: state.pref,
-    resolvedTerminalApp: state.resolved,
-    terminalAvailable: state.available,
-  }
+async function githubCliState(hosts?: string[]): Promise<GitHubCliState> {
+  return probeGitHubCli(currentRpcSignal(), hosts)
 }
 
-function editorAppSnapshot(pref: EditorPref): EditorAppSnapshot {
-  const state = editorAppState(pref)
-  return {
-    editorApp: state.pref,
-    resolvedEditorApp: state.resolved,
-    editorAvailable: state.available,
-  }
+function broadcastGitHubCliState(state: GitHubCliState): void {
+  broadcastRpcEvent({ type: 'github-cli-changed', state })
 }
 
 function normalizedRemoteTargetOrThrow(target: RemoteRepoTarget): RemoteRepoTarget {
@@ -291,9 +316,13 @@ function createRpcHandlers(): AppRpcHandlers {
         if (!(await openHttpExternal(url))) return { ok: false, message: 'error.invalid-url' }
         return { ok: true, message: url }
       },
+      openSettingsWindow: async (input) => {
+        await openSettingsWindow(input?.page ?? 'general')
+      },
     },
     repo: {
       openDialog: openRepoDialog,
+      consumeExternalOpenPaths: async () => consumeExternalOpenPaths(),
       cloneParentDialog: () => openDirectoryDialog('Choose Clone Destination'),
       probe: async ({ cwd }) => {
         if (!isValidCwd(cwd)) return { ok: false, message: 'error.invalid-path' }
@@ -328,13 +357,17 @@ function createRpcHandlers(): AppRpcHandlers {
         if (!isValidCwd(cwd)) return null
         const signal = currentRpcSignal()
         try {
+          const available = await probeGitRepository(cwd)
+          if (!available.ok) throw new Error(available.message)
           const worktrees = await getWorktrees(cwd, { signal })
           if (signal?.aborted) return null
           const branches = await getBranches(cwd, worktrees, { signal })
           if (signal?.aborted) return null
           const current = await getCurrentBranch(cwd, { signal })
           if (signal?.aborted) return null
-          return { branches, current }
+          const remote = await getRemoteInfo(cwd, signal)
+          if (signal?.aborted) return null
+          return { branches, current, remote }
         } catch (err) {
           if (signal?.aborted) return null
           throw err
@@ -370,6 +403,8 @@ function createRpcHandlers(): AppRpcHandlers {
       },
       status: async ({ cwd }) => {
         if (!isValidCwd(cwd)) return []
+        const available = await probeGitRepository(cwd)
+        if (!available.ok) throw new Error(available.message)
         const signal = currentRpcSignal()
         const status = await getWorkingStatus(cwd, { signal })
         return signal?.aborted ? [] : status
@@ -432,8 +467,10 @@ function createRpcHandlers(): AppRpcHandlers {
               if (signal.aborted) return { ok: false, message: 'cancelled' }
               throw err
             }
+            if (signal.aborted) return { ok: false, message: 'cancelled' }
             const target = resolveKnownWorktree(worktrees, worktreePath, branch)
             if (!target.ok) return target
+            if (signal.aborted) return { ok: false, message: 'cancelled' }
             targetPath = target.path
           }
           return pullBranch(cwd, branch, targetPath, signal)
@@ -445,6 +482,8 @@ function createRpcHandlers(): AppRpcHandlers {
       },
       fetch: async ({ cwd, kind }) => {
         if (!isValidCwd(cwd)) return { ok: false, message: 'error.invalid-arguments' }
+        const available = await probeGitRepository(cwd)
+        if (!available.ok) return available
         return runCancellable(cwd, kind === 'background' ? 'background' : 'user', (signal) => fetchAll(cwd, signal))
       },
       abort: async ({ cwd }) => {
@@ -454,7 +493,7 @@ function createRpcHandlers(): AppRpcHandlers {
         ctrl.ctrl.abort()
         return true
       },
-      openGitHub: openRepoGitHub,
+      openRemote: openRepoRemote,
       openInFinder: async ({ path: p }) => {
         if (!isValidAbsolutePath(p)) return { ok: false, message: 'error.invalid-path' }
         shell.showItemInFolder(p)
@@ -466,7 +505,7 @@ function createRpcHandlers(): AppRpcHandlers {
       },
       openEditor: async ({ path: p }) => {
         if (!isValidAbsolutePath(p)) return { ok: false, message: 'error.invalid-path' }
-        return openInPreferredEditor(p, getEditorApp()) ?? { ok: false, message: 'error.editor-not-installed' }
+        return openInPreferredEditor(p, getEditorApp())
       },
     },
     remote: {
@@ -622,11 +661,15 @@ function createRpcHandlers(): AppRpcHandlers {
           theme: s.theme,
           colorTheme: s.colorTheme,
           fetchIntervalSec: s.fetchIntervalSec,
+          terminalNotificationsEnabled: s.terminalNotificationsEnabled,
           shortcutsDisabled: s.shortcutsDisabled,
+          globalShortcutDisabled: s.globalShortcutDisabled,
+          swapCloseShortcuts: s.swapCloseShortcuts,
+          toggleDetailOnActionBarBlankClick: s.toggleDetailOnActionBarBlankClick,
           globalShortcut: s.globalShortcut,
           globalShortcutRegistered: isGlobalShortcutRegistered(),
-          ...terminalAppSnapshot(s.terminalApp),
-          ...editorAppSnapshot(s.editorApp),
+          terminalApp: s.terminalApp,
+          editorApp: s.editorApp,
           session: s.session,
           recentRepos: s.recentRepos,
         }
@@ -636,22 +679,43 @@ function createRpcHandlers(): AppRpcHandlers {
         const clamped = await setFetchInterval(sec)
         broadcastRpcEvent({ type: 'fetch-interval-changed', sec: clamped })
       },
+      setTerminalNotificationsEnabled: async ({ enabled }) => {
+        if (typeof enabled !== 'boolean') return
+        const saved = await setTerminalNotificationsEnabled(enabled)
+        broadcastRpcEvent({ type: 'terminal-notifications-changed', enabled: saved })
+      },
       setShortcutsDisabled: async ({ disabled }) => {
         if (typeof disabled !== 'boolean') return
         const saved = await setShortcutsDisabled(disabled)
-        const s = await loadSettings()
-        syncGlobalShortcuts(saved, s.globalShortcut)
         buildAppMenu()
         broadcastRpcEvent({ type: 'shortcuts-disabled-changed', disabled: saved })
+      },
+      setGlobalShortcutDisabled: async ({ disabled }) => {
+        if (typeof disabled !== 'boolean') return
+        const saved = await setGlobalShortcutDisabled(disabled)
+        const s = await loadSettings()
+        syncGlobalShortcuts(saved, s.globalShortcut)
+        broadcastRpcEvent({ type: 'global-shortcut-disabled-changed', disabled: saved })
         broadcastRpcEvent({ type: 'global-shortcut-changed', state: globalShortcutPayload(s.globalShortcut) })
+      },
+      setSwapCloseShortcuts: async ({ swapped }) => {
+        if (typeof swapped !== 'boolean') return
+        const saved = await setSwapCloseShortcuts(swapped)
+        buildAppMenu()
+        broadcastRpcEvent({ type: 'swap-close-shortcuts-changed', swapped: saved })
+      },
+      setToggleDetailOnActionBarBlankClick: async ({ enabled }) => {
+        if (typeof enabled !== 'boolean') return
+        const saved = await setToggleDetailOnActionBarBlankClick(enabled)
+        broadcastRpcEvent({ type: 'toggle-detail-on-action-bar-blank-click-changed', enabled: saved })
       },
       setGlobalShortcut: async ({ accelerator }) => {
         const parsed = parseGlobalShortcut(accelerator)
         const s = await loadSettings()
         if (!parsed) return globalShortcutPayload(s.globalShortcut)
         if (isReservedGlobalShortcut(parsed)) return globalShortcutPayload(s.globalShortcut)
-        const registered = s.shortcutsDisabled || replaceGlobalShortcut(false, s.globalShortcut, parsed)
-        if (!registered && !s.shortcutsDisabled) return globalShortcutPayload(s.globalShortcut)
+        const registered = s.globalShortcutDisabled || replaceGlobalShortcut(false, s.globalShortcut, parsed)
+        if (!registered && !s.globalShortcutDisabled) return globalShortcutPayload(s.globalShortcut)
         const saved = await setGlobalShortcut(parsed)
         const payload = globalShortcutPayload(saved)
         broadcastRpcEvent({ type: 'global-shortcut-changed', state: payload })
@@ -659,26 +723,48 @@ function createRpcHandlers(): AppRpcHandlers {
       },
       setTerminalApp: async ({ pref }) => {
         const saved = await setTerminalApp(pref)
-        const payload = terminalAppState(saved)
+        const payload = await probeTerminalApps(saved, currentRpcSignal())
         broadcastRpcEvent({ type: 'terminal-app-changed', ...payload })
         return payload
       },
       setEditorApp: async ({ pref }) => {
         const saved = await setEditorApp(pref)
-        const payload = editorAppState(saved)
+        const payload = probeEditorApps(saved)
         broadcastRpcEvent({ type: 'editor-app-changed', ...payload })
         return payload
       },
       saveSession: async ({ session }) => saveSession(session),
       addRecentRepo: async ({ repoPath }) => {
-        if (typeof repoPath !== 'string') return []
-        const recentRepos = await addRecentRepo(repoPath)
+        const safePath = toSafeSessionPath(repoPath)
+        if (!safePath) return []
+        const recentRepos = await addRecentRepo(safePath)
         buildAppMenu()
         return recentRepos
       },
       clearRecentRepos: async () => {
         await clearRecentRepos()
         buildAppMenu()
+        return
+      },
+    },
+    externalApps: {
+      get: async () => {
+        const s = await loadSettings()
+        return externalAppsState(s.terminalApp, s.editorApp)
+      },
+      refresh: async () => {
+        const s = await loadSettings()
+        const state = await externalAppsState(s.terminalApp, s.editorApp)
+        broadcastExternalAppsState(state)
+        return state
+      },
+    },
+    githubCli: {
+      get: async (input) => githubCliState(input?.hosts),
+      refresh: async (input) => {
+        const state = await probeGitHubCli(currentRpcSignal(), input?.hosts, { force: true })
+        broadcastGitHubCliState(state)
+        return state
       },
     },
     i18n: {
@@ -707,7 +793,10 @@ async function openRepoDialog(): Promise<string | null> {
 }
 
 async function openDirectoryDialog(title: string): Promise<string | null> {
-  const win = getMainWindow() ?? BrowserWindow.getFocusedWindow()
+  // Prefer the actual RPC caller, then fall back to focus, then the main
+  // window. This keeps dialogs attached to the window that initiated the
+  // action without breaking older call sites that predate multi-window RPC.
+  const win = currentRpcWindow() ?? focusedRegisteredSurface()?.window ?? getMainWindow() ?? null
   const opts: Electron.OpenDialogOptions = {
     properties: ['openDirectory'],
     title,
@@ -735,10 +824,12 @@ async function deleteRepoBranch(
     cwd,
     branch,
     force,
+    alsoDeleteUpstream,
   }: {
     cwd: string
     branch: string
     force?: boolean
+    alsoDeleteUpstream?: boolean
   },
   signal?: AbortSignal,
 ): Promise<ExecResult> {
@@ -758,7 +849,21 @@ async function deleteRepoBranch(
   if (!safelyDeletable) {
     return { ok: false, message: 'error.branch-not-fully-merged' }
   }
-  return deleteBranch(cwd, branch, { force: shouldForce, signal })
+  // Read upstream config BEFORE deleting the local branch — git branch -d
+  // removes the [branch "…"] section from .git/config, so the info would
+  // be gone after deletion.
+  const upstream = alsoDeleteUpstream ? await getUpstreamParts(cwd, branch, signal) : null
+  if (signal?.aborted) return { ok: false, message: 'cancelled' }
+  const delResult = await deleteBranch(cwd, branch, { force: shouldForce, signal })
+  if (!delResult.ok) return delResult
+  if (upstream && upstream.remote !== '.') {
+    if (signal?.aborted) return { ok: false, message: 'cancelled' }
+    const upstreamResult = await deleteUpstreamBranch(cwd, upstream.remote, upstream.branch, signal)
+    if (!upstreamResult.ok) {
+      return { ok: false, message: 'error.upstream-delete-failed' }
+    }
+  }
+  return delResult
 }
 
 async function removeRepoWorktree(
@@ -768,12 +873,14 @@ async function removeRepoWorktree(
     worktreePath,
     alsoDeleteBranch,
     forceDeleteBranch,
+    alsoDeleteUpstream,
   }: {
     cwd: string
     branch: string
     worktreePath: string
     alsoDeleteBranch: boolean
     forceDeleteBranch?: boolean
+    alsoDeleteUpstream?: boolean
   },
   signal?: AbortSignal,
 ): Promise<ExecResult> {
@@ -809,7 +916,11 @@ async function removeRepoWorktree(
     }
   }
 
+  // Read upstream config BEFORE deleting the local branch — git branch -d
+  // removes the [branch "…"] section from .git/config.
+  const upstream = alsoDeleteBranch && alsoDeleteUpstream ? await getUpstreamParts(cwd, branch, signal) : null
   if (signal?.aborted) return { ok: false, message: 'cancelled' }
+
   const removeResult = await removeWorktree(cwd, target.path, signal)
   if (!removeResult.ok) return removeResult
   closeWorktreeSession(root, target.path)
@@ -817,6 +928,13 @@ async function removeRepoWorktree(
     if (signal?.aborted) return { ok: false, message: 'cancelled' }
     const delResult = await deleteBranch(cwd, branch, { force: shouldForceDeleteBranch, signal })
     if (!delResult.ok) return delResult
+    if (upstream && upstream.remote !== '.') {
+      if (signal?.aborted) return { ok: false, message: 'cancelled' }
+      const upstreamResult = await deleteUpstreamBranch(cwd, upstream.remote, upstream.branch, signal)
+      if (!upstreamResult.ok) {
+        return { ok: false, message: 'error.upstream-delete-failed' }
+      }
+    }
   }
   return removeResult
 }
@@ -824,18 +942,22 @@ async function removeRepoWorktree(
 async function createPatch({ cwd, worktreePath }: { cwd: string; worktreePath: string }): Promise<ExecResult> {
   if (!isValidCwd(cwd) || !isValidAbsolutePath(worktreePath))
     return { ok: false, message: 'error.invalid-worktree-path' }
+  const rpcSignal = currentRpcSignal()
+  if (rpcSignal?.aborted) return { ok: false, message: 'cancelled' }
   const ctrl = new AbortController()
   let timedOut = false
+  const abortPatch = () => ctrl.abort()
+  rpcSignal?.addEventListener('abort', abortPatch, { once: true })
   const timeout = setTimeout(() => {
     timedOut = true
     ctrl.abort()
   }, PATCH_TIMEOUT_MS)
   if ('unref' in timeout && typeof timeout.unref === 'function') timeout.unref()
   try {
-    const target = resolveKnownWorktree(
-      await getWorktrees(cwd, { includeStatus: false, signal: ctrl.signal }),
-      worktreePath,
-    )
+    const worktrees = await getWorktrees(cwd, { includeStatus: false, signal: ctrl.signal })
+    if (timedOut) return { ok: false, message: `git timed out after ${PATCH_TIMEOUT_MS / 1000}s` }
+    if (ctrl.signal.aborted) return { ok: false, message: 'cancelled' }
+    const target = resolveKnownWorktree(worktrees, worktreePath)
     if (!target.ok) return target
     const patch = await getWorktreePatch(target.path, { signal: ctrl.signal })
     if (timedOut) return { ok: false, message: `git timed out after ${PATCH_TIMEOUT_MS / 1000}s` }
@@ -850,18 +972,23 @@ async function createPatch({ cwd, worktreePath }: { cwd: string; worktreePath: s
     const msg = (typeof e.stderr === 'string' && e.stderr.trim()) || e.message || 'error.unknown'
     return { ok: false, message: msg }
   } finally {
+    rpcSignal?.removeEventListener('abort', abortPatch)
     clearTimeout(timeout)
   }
 }
 
-async function openRepoGitHub({ cwd, branch }: { cwd: string; branch?: string }): Promise<ExecResult> {
+async function openRepoRemote({ cwd, branch }: { cwd: string; branch?: string }): Promise<ExecResult> {
   if (!isValidCwd(cwd) || !isValidOptionalBranch(branch)) return { ok: false, message: 'error.invalid-arguments' }
+  const signal = currentRpcSignal()
+  const signalOptions = signal ? { signal } : undefined
   // Only branch opens need the default branch: it tells us whether a PR is a
   // reverse/default-branch PR that should not be opened from the default row.
-  const defaultBranch = branch ? await getDefaultBranch(cwd) : ''
+  const defaultBranch = branch ? await getDefaultBranch(cwd, signalOptions) : ''
+  if (signal?.aborted) return { ok: false, message: 'cancelled' }
   const isDefaultBranch = !!defaultBranch && branch === defaultBranch
   if (branch) {
-    const detectedPr = await getBranchPullRequest(cwd, branch)
+    const detectedPr = await getBranchPullRequest(cwd, branch, signalOptions)
+    if (signal?.aborted) return { ok: false, message: 'cancelled' }
     if (
       detectedPr?.url &&
       branchPullRequestBelongsToBranch({ name: branch, isDefault: isDefaultBranch }, detectedPr) &&
@@ -871,11 +998,13 @@ async function openRepoGitHub({ cwd, branch }: { cwd: string; branch?: string })
     }
   }
   if (typeof branch === 'string' && branch && !isDefaultBranch) {
-    const prUrl = await getPullRequestUrl(cwd, branch)
+    const prUrl = await getNewPullRequestUrl(cwd, branch, signalOptions)
+    if (signal?.aborted) return { ok: false, message: 'cancelled' }
     if (prUrl && (await openHttpsExternal(prUrl))) return { ok: true, message: prUrl }
   }
-  const url = await getGitHubUrl(cwd)
-  if (!url) return { ok: false, message: 'error.open-github-no-origin' }
+  const url = await getBrowserRemoteUrl(cwd, signal ? { branch, signal } : { branch })
+  if (signal?.aborted) return { ok: false, message: 'cancelled' }
+  if (!url) return { ok: false, message: 'error.open-remote-unavailable' }
   if (!(await openHttpsExternal(url))) return { ok: false, message: 'error.invalid-url' }
   return { ok: true, message: url }
 }
@@ -967,6 +1096,14 @@ async function probeReadableDirectory(cwd: string): Promise<{ ok: true } | { ok:
     if (code === 'EACCES' || code === 'EPERM') return { ok: false, message: 'error.path-permission-denied' }
     return { ok: false, message: err instanceof Error ? err.message : 'error.failed-read-repo' }
   }
+}
+
+async function probeGitRepository(cwd: string): Promise<{ ok: true } | { ok: false; message: string }> {
+  const ok = await isGitRepo(cwd)
+  if (ok) return { ok: true }
+  const readable = await probeReadableDirectory(cwd)
+  if (!readable.ok) return readable
+  return { ok: false, message: 'error.not-git-repo' }
 }
 
 async function probeWritableDirectory(cwd: string): Promise<{ ok: true } | { ok: false; message: string }> {
@@ -1066,11 +1203,6 @@ function normalizeActiveSessionRepo(value: unknown, openRepos: RepoSessionEntry[
   const localPath = toSafeSessionPath(value)
   const activeId = localPath ?? value
   return openRepos.some((entry) => entry.id === activeId) ? activeId : null
-}
-
-function toSafeSessionPath(p: unknown): string | null {
-  if (typeof p !== 'string' || p.length === 0 || p.includes('\0') || !path.isAbsolute(p)) return null
-  return path.normalize(p)
 }
 
 function globalShortcutPayload(accelerator: string): { accelerator: string; registered: boolean } {

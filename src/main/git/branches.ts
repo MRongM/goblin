@@ -1,7 +1,7 @@
-import { git, gitResultWithOptions } from '#/main/git/helper.ts'
+import { git, gitResultWithOptions, NETWORK_TIMEOUT_MS } from '#/main/git/helper.ts'
 import { FIELD_SEP, parseBranches, parseLog } from '#/main/git/parsers.ts'
 import { isSafeBranchName } from '#/shared/refnames.ts'
-import type { BranchInfo, ExecResult, LogEntry, WorktreeInfo } from '#/shared/git-types.ts'
+import type { BranchSnapshotInfo, ExecResult, LogEntry, WorktreeInfo } from '#/shared/git-types.ts'
 
 export async function isGitRepo(cwd: string): Promise<boolean> {
   try {
@@ -49,14 +49,14 @@ export async function getDefaultBranch(cwd: string, options?: { signal?: AbortSi
   }
 }
 
-export function prioritizeDefaultBranch(branches: BranchInfo[], defaultBranch: string): BranchInfo[] {
+export function prioritizeDefaultBranch(branches: BranchSnapshotInfo[], defaultBranch: string): BranchSnapshotInfo[] {
   if (!defaultBranch) return branches
   const idx = branches.findIndex((branch) => branch.name === defaultBranch)
   if (idx <= 0) return branches
   return [branches[idx]!, ...branches.slice(0, idx), ...branches.slice(idx + 1)]
 }
 
-export function markDefaultBranch(branches: BranchInfo[], defaultBranch: string): BranchInfo[] {
+export function markDefaultBranch(branches: BranchSnapshotInfo[], defaultBranch: string): BranchSnapshotInfo[] {
   if (!defaultBranch && !branches.some((branch) => branch.isDefault)) return branches
   return branches.map((branch) => {
     if (branch.name === defaultBranch) return branch.isDefault ? branch : { ...branch, isDefault: true }
@@ -67,10 +67,10 @@ export function markDefaultBranch(branches: BranchInfo[], defaultBranch: string)
 }
 
 export function markMergedToDefault(
-  branches: BranchInfo[],
+  branches: BranchSnapshotInfo[],
   defaultBranch: string,
   mergedBranches: Set<string>,
-): BranchInfo[] {
+): BranchSnapshotInfo[] {
   if (!defaultBranch) return branches
   return branches.map((branch) => {
     if (branch.remoteTracking) {
@@ -107,7 +107,7 @@ export async function getBranches(
   cwd: string,
   worktrees?: WorktreeInfo[],
   options?: { signal?: AbortSignal },
-): Promise<BranchInfo[]> {
+): Promise<BranchSnapshotInfo[]> {
   try {
     const format = [
       '%(refname:short)',
@@ -197,6 +197,16 @@ export async function deleteBranch(
 ): Promise<ExecResult> {
   if (!isSafeBranchName(name)) return { ok: false, message: 'error.invalid-arguments' }
   return gitResultWithOptions(cwd, { signal: options?.signal }, 'branch', options?.force ? '-D' : '-d', '--', name)
+}
+
+export async function deleteUpstreamBranch(
+  cwd: string,
+  remote: string,
+  branch: string,
+  signal?: AbortSignal,
+): Promise<ExecResult> {
+  if (!isSafeBranchName(branch)) return { ok: false, message: 'error.invalid-arguments' }
+  return gitResultWithOptions(cwd, { timeoutMs: NETWORK_TIMEOUT_MS, signal }, 'push', '--delete', '--', remote, branch)
 }
 
 /** Resolve `branch`'s upstream short ref (e.g. "origin/feat") or null

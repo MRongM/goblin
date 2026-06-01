@@ -3,11 +3,22 @@
 // manual mirror copy.
 
 export type {
-  BranchInfo,
+  BranchSnapshotInfo,
+  GitRemoteInfo,
   StatusEntry,
   WorktreeStatus,
   LogEntry,
   ExecResult,
   PullRequestInfo,
   PullRequestFetchMode,
+  BrowserRemoteProvider,
 } from '#/shared/git-types.ts'
+
+import type { BranchSnapshotInfo } from '#/shared/git-types.ts'
+
+export type BranchInfo = BranchSnapshotInfo & {
+  worktreePath?: string
+  worktreeDirty?: boolean
+  worktreeChangeCount?: number
+  worktreeIsPrimary?: boolean
+}

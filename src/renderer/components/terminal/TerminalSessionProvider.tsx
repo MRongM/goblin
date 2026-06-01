@@ -4,6 +4,7 @@ import { setTerminalFocused } from '#/renderer/terminal-focus.ts'
 import { useReposStore } from '#/renderer/stores/repos/store.ts'
 import { terminalBridge } from '#/renderer/terminal.ts'
 import { ManagedTerminalSession } from '#/renderer/components/terminal/ManagedTerminalSession.ts'
+import { createTerminalBellController } from '#/renderer/components/terminal/terminal-bell-controller.ts'
 import {
   isTerminalDescriptorLive,
   terminalDescriptor,
@@ -22,6 +23,10 @@ interface TerminalSessionProviderProps {
   children: ReactNode
 }
 
+function syncDockBadge(count: number): void {
+  terminalBridge.setBadge(count)
+}
+
 export function TerminalSessionProvider({ children }: TerminalSessionProviderProps) {
   const repos = useReposStore((s) => s.repos)
   const parkingRootRef = useRef<HTMLDivElement | null>(null)
@@ -30,12 +35,16 @@ export function TerminalSessionProvider({ children }: TerminalSessionProviderPro
   const nextIndexByGroupRef = useRef(new Map<string, number>())
   const [version, setVersion] = useState(0)
   const notify = useCallback(() => setVersion((current) => current + 1), [])
+  const bellControllerRef = useRef<ReturnType<typeof createTerminalBellController> | null>(null)
+  if (!bellControllerRef.current) bellControllerRef.current = createTerminalBellController(notify, syncDockBadge)
+  const bellController = bellControllerRef.current
 
   function removeSession(key: string, options: { dispose: boolean }): boolean {
     const session = sessionsRef.current.get(key)
     if (!session) return false
     const groupKey = session.descriptor.groupKey
     sessionsRef.current.delete(key)
+    bellController.remove(key)
     if (options.dispose) session.dispose()
     if (activeKeyByGroupRef.current.get(groupKey) === key) {
       const next = Array.from(sessionsRef.current.values())
@@ -47,6 +56,50 @@ export function TerminalSessionProvider({ children }: TerminalSessionProviderPro
     return true
   }
 
+  const sessionSummaries = useCallback((groupKey: string): TerminalSessionSummary[] => {
+    const activeKey = activeKeyByGroupRef.current.get(groupKey) ?? null
+    return Array.from(sessionsRef.current.values())
+      .filter((session) => session.descriptor.groupKey === groupKey)
+      .sort((a, b) => a.descriptor.index - b.descriptor.index)
+      .map((session) => {
+        const snapshot = session.snapshot()
+        return {
+          key: session.descriptor.key,
+          groupKey,
+          terminalId: session.descriptor.terminalId,
+          index: session.descriptor.index,
+          title: snapshot.processName || `terminal ${session.descriptor.index}`,
+          phase: snapshot.phase,
+          active: session.descriptor.key === activeKey,
+          hasBell: bellController.hasBell(session.descriptor.key),
+        }
+      })
+  }, [])
+
+  const closeTerminal = useCallback(
+    (key: string): TerminalSessionSummary[] => {
+      const groupKey = sessionsRef.current.get(key)?.descriptor.groupKey
+      if (!removeSession(key, { dispose: true })) return groupKey ? sessionSummaries(groupKey) : []
+      notify()
+      return groupKey ? sessionSummaries(groupKey) : []
+    },
+    [notify, sessionSummaries],
+  )
+
+  const closeTerminalAndDismissDetailIfLast = useCallback(
+    (key: string, base: TerminalSessionBase): TerminalSessionSummary[] => {
+      const session = sessionsRef.current.get(key)
+      if (!session || session.descriptor.groupKey !== terminalSessionGroupKey(terminalSessionScope(base))) return []
+      const remaining = closeTerminal(key)
+      if (remaining.length === 0) {
+        const repoId = base.kind === 'remote' ? base.repoId : base.repoRoot
+        useReposStore.getState().dismissExitedTerminalDetail(repoId, base.worktreePath)
+      }
+      return remaining
+    },
+    [closeTerminal],
+  )
+
   useEffect(() => {
     const offOutput = terminalBridge.onOutput((event) => {
       for (const session of sessionsRef.current.values()) session.handleOutput(event)
@@ -54,11 +107,7 @@ export function TerminalSessionProvider({ children }: TerminalSessionProviderPro
     const offExit = terminalBridge.onExit((event) => {
       for (const [key, session] of Array.from(sessionsRef.current.entries())) {
         if (!session.handleExit(event)) continue
-        const repoId = terminalDescriptorRepoId(session.descriptor)
-        const { worktreePath } = session.descriptor
-        removeSession(key, { dispose: true })
-        useReposStore.getState().dismissExitedTerminalDetail(repoId, worktreePath)
-        notify()
+        closeTerminalAndDismissDetailIfLast(key, session.descriptor)
         break
       }
     })
@@ -66,7 +115,7 @@ export function TerminalSessionProvider({ children }: TerminalSessionProviderPro
       offOutput()
       offExit()
     }
-  }, [notify])
+  }, [closeTerminalAndDismissDetailIfLast])
 
   useEffect(() => {
     const sessions = sessionsRef.current
@@ -76,6 +125,7 @@ export function TerminalSessionProvider({ children }: TerminalSessionProviderPro
       sessions.clear()
       activeKeyByGroupRef.current.clear()
       nextIndexByGroupRef.current.clear()
+      bellController.reset()
     }
   }, [])
 
@@ -104,7 +154,7 @@ export function TerminalSessionProvider({ children }: TerminalSessionProviderPro
         current.updateDescriptor(descriptor)
         return current
       }
-      const session = new ManagedTerminalSession(descriptor, notify)
+      const session = new ManagedTerminalSession(descriptor, notify, bellController.handleBell)
       sessionsRef.current.set(descriptor.key, session)
       if (!activeKeyByGroupRef.current.has(descriptor.groupKey)) {
         activeKeyByGroupRef.current.set(descriptor.groupKey, descriptor.key)
@@ -164,44 +214,23 @@ export function TerminalSessionProvider({ children }: TerminalSessionProviderPro
     return activeKey ? (sessionsRef.current.get(activeKey)?.descriptor ?? null) : null
   }, [])
 
-  const sessionSummaries = useCallback((groupKey: string): TerminalSessionSummary[] => {
-    const activeKey = activeKeyByGroupRef.current.get(groupKey) ?? null
-    return Array.from(sessionsRef.current.values())
-      .filter((session) => session.descriptor.groupKey === groupKey)
-      .sort((a, b) => a.descriptor.index - b.descriptor.index)
-      .map((session) => {
-        const snapshot = session.snapshot()
-        return {
-          key: session.descriptor.key,
-          groupKey,
-          terminalId: session.descriptor.terminalId,
-          index: session.descriptor.index,
-          title: snapshot.processName || `terminal ${session.descriptor.index}`,
-          phase: snapshot.phase,
-          active: session.descriptor.key === activeKey,
-        }
-      })
-  }, [])
-
   const setActive = useCallback(
     (groupKey: string, key: string) => {
       const session = sessionsRef.current.get(key)
       if (!session || session.descriptor.groupKey !== groupKey) return
+      const wasActive = activeKeyByGroupRef.current.get(groupKey) === key
+      const hadBell = bellController.hasBell(key)
+      if (wasActive && !hadBell) return
       activeKeyByGroupRef.current.set(groupKey, key)
-      notify()
+      bellController.clear(key)
+      if (!hadBell) notify()
     },
-    [notify],
+    [bellController, notify],
   )
 
-  const closeTerminal = useCallback(
-    (key: string): TerminalSessionSummary[] => {
-      const groupKey = sessionsRef.current.get(key)?.descriptor.groupKey
-      if (!removeSession(key, { dispose: true })) return groupKey ? sessionSummaries(groupKey) : []
-      notify()
-      return groupKey ? sessionSummaries(groupKey) : []
-    },
-    [notify, sessionSummaries],
-  )
+  const clearBell = useCallback((key: string) => {
+    return bellController.clear(key)
+  }, [bellController])
 
   const restart = useCallback((key: string) => {
     sessionsRef.current.get(key)?.restart()
@@ -231,6 +260,10 @@ export function TerminalSessionProvider({ children }: TerminalSessionProviderPro
     sessionsRef.current.get(key)?.clearSearch()
   }, [])
 
+  const writeInput = useCallback((key: string, data: string) => {
+    sessionsRef.current.get(key)?.writeInput(data)
+  }, [])
+
   const serialize = useCallback((key: string) => {
     return sessionsRef.current.get(key)?.serialize() ?? ''
   }, [])
@@ -243,7 +276,8 @@ export function TerminalSessionProvider({ children }: TerminalSessionProviderPro
       activeDescriptor,
       sessionSummaries,
       setActive,
-      closeTerminal,
+      clearBell,
+      closeTerminalAndDismissDetailIfLast,
       attach,
       detach,
       restart,
@@ -252,13 +286,14 @@ export function TerminalSessionProvider({ children }: TerminalSessionProviderPro
       findNext,
       findPrevious,
       clearSearch,
+      writeInput,
       serialize,
     }),
     [
       activeDescriptor,
       attach,
       clearSearch,
-      closeTerminal,
+      closeTerminalAndDismissDetailIfLast,
       createTerminal,
       detach,
       ensureDefault,
@@ -269,8 +304,10 @@ export function TerminalSessionProvider({ children }: TerminalSessionProviderPro
       serialize,
       sessionSummaries,
       setActive,
+      clearBell,
       snapshot,
       version,
+      writeInput,
     ],
   )
 

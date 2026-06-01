@@ -1,9 +1,9 @@
 // Git domain types shared by main (which produces them) and renderer
 // (which consumes them via IPC). Putting these in `src/shared/` keeps
 // main/renderer bundles independent — neither side has to import the
-// other's module graph just to know what a `BranchInfo` looks like.
+// other's module graph just to know what a `BranchSnapshotInfo` looks like.
 
-export interface BranchInfo {
+export interface BranchSnapshotInfo {
   name: string
   isCurrent: boolean
   isDefault?: boolean
@@ -15,16 +15,24 @@ export interface BranchInfo {
   lastCommitMessage: string
   lastCommitDate: string
   lastCommitAuthor: string
-  worktreePath?: string
-  worktreeDirty?: boolean
-  worktreeIsPrimary?: boolean
-  worktreeChangeCount?: number
-  worktreeLocked?: boolean
+  worktree?: BranchWorktreeSnapshot
   mergedToDefault?: boolean
   pullRequest?: PullRequestInfo
   remoteTracking?: boolean
   remoteName?: string
   localName?: string
+}
+
+export interface BranchWorktreeSnapshot {
+  path: string
+  isPrimary?: boolean
+  isLocked?: boolean
+  summary?: BranchWorktreeSnapshotSummary
+}
+
+export interface BranchWorktreeSnapshotSummary {
+  dirty?: boolean
+  changeCount?: number
 }
 
 export interface PullRequestInfo {
@@ -50,14 +58,15 @@ export interface PullRequestInfo {
 }
 
 export function branchPullRequestBelongsToBranch(
-  branch: Pick<BranchInfo, 'name' | 'isDefault'>,
+  branch: Pick<BranchSnapshotInfo, 'name' | 'isDefault'>,
   pullRequest: PullRequestInfo,
 ): boolean {
   if (branch.isDefault === true) {
     return pullRequest.headRefName === branch.name && pullRequest.baseRefName === branch.name
   }
-  // PR rows are keyed by head branch. Tolerate missing headRefName for
-  // legacy cached PRs, but never attach an explicit head mismatch.
+  // Refresh results are already keyed by the branch they were requested for.
+  // If a PR omits headRefName, keep it attached for regular branches, but
+  // never allow an explicit head mismatch.
   if (pullRequest.headRefName && pullRequest.headRefName !== branch.name) return false
   return true
 }
@@ -97,6 +106,23 @@ export interface LogEntry {
   message: string
   author: string
   date: string
+}
+
+export interface GitRemoteInfo {
+  name: string
+  fetchUrl: string
+  pushUrl: string
+}
+
+export type BrowserRemoteProvider = 'github' | 'gitlab' | 'external'
+
+export interface RepoRemoteInfo {
+  remotes: GitRemoteInfo[]
+  hasRemotes: boolean
+  hasBrowserRemote: boolean
+  browserRemoteProvider?: BrowserRemoteProvider
+  remoteProviders: Record<string, BrowserRemoteProvider>
+  hasGitHubRemote: boolean
 }
 
 export const GIT_HASH_RE = /^[0-9a-fA-F]{7,64}$/

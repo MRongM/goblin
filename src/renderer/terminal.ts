@@ -1,6 +1,7 @@
 import type {
   TerminalExitEvent,
   TerminalMutationResult,
+  TerminalNotifyBellInput,
   TerminalOpenInput,
   TerminalOpenResult,
   TerminalOutputEvent,
@@ -35,6 +36,15 @@ export const terminalBridge = {
   },
   pruneRepo(input: TerminalPruneRepoInput): Promise<TerminalMutationResult> {
     return getTerminalBridge().pruneRepo(input)
+  },
+  notifyBell(input: TerminalNotifyBellInput): Promise<TerminalMutationResult> {
+    return getTerminalBridge().notifyBell(input)
+  },
+  sendTestNotification(): Promise<boolean> {
+    return getTerminalBridge().sendTestNotification()
+  },
+  setBadge(count: number): void {
+    getTerminalBridge().setBadge(count)
   },
   onOutput(cb: (event: TerminalOutputEvent) => void): () => void {
     return getTerminalBridge().onOutput(cb)

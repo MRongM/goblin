@@ -10,6 +10,7 @@ import { useI18nStore, useT } from '#/renderer/stores/i18n.ts'
 import { formatRelativeTime } from '#/renderer/lib/dates.ts'
 import { FilePathText } from '#/renderer/components/FilePathText.tsx'
 import { ScrollArea } from '#/renderer/components/ui/scroll-area.tsx'
+import { Button } from '#/renderer/components/ui/button.tsx'
 import { isShortcutBlockingLayerOpen } from '#/renderer/lib/layers.ts'
 import type { CommitDetail as CommitDetailType } from '#/shared/rpc.ts'
 
@@ -45,15 +46,17 @@ export function CommitDetail({ repoId, detail }: Props) {
   return (
     <ScrollArea className="min-h-0 flex-1">
       <div className="flex items-start gap-3 border-b border-separator bg-muted px-4 py-3">
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="icon-xs"
           onClick={() => closeCommit(repoId)}
-          className="mt-0.5 shrink-0 cursor-pointer text-muted-foreground hover:text-foreground transition-colors duration-100"
+          className="mt-0.5 shrink-0 text-muted-foreground hover:bg-transparent hover:text-foreground"
           aria-label={t('error.back')}
           title={t('error.back')}
         >
-          <ArrowLeft size={16} />
-        </button>
+          <ArrowLeft className="size-4" />
+        </Button>
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-2 flex-wrap">
             <span className="font-mono text-xs text-brand-text shrink-0">{meta.shortHash}</span>
@@ -94,10 +97,10 @@ export function CommitDetail({ repoId, detail }: Props) {
                 {f.binary ? <FileWarning size={14} /> : <FileText size={14} />}
               </span>
               <FilePathText path={f.path} />
-              <span className="shrink-0 font-mono text-xs">
-                {f.binary ? (
-                  <span className="text-muted-foreground">{t('commit.binary')}</span>
-                ) : (
+              {f.binary ? (
+                <span className="shrink-0 text-xs text-muted-foreground">{t('commit.binary')}</span>
+              ) : (
+                <span className="shrink-0 font-mono text-xs">
                   <>
                     <span className="text-success">+{f.added}</span> <span className="text-danger">−{f.deleted}</span>
                     <span
@@ -110,8 +113,8 @@ export function CommitDetail({ repoId, detail }: Props) {
                       }}
                     />
                   </>
-                )}
-              </span>
+                </span>
+              )}
             </li>
           ))}
         </ul>

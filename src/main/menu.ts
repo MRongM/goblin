@@ -12,30 +12,41 @@
 // language whenever `setCurrentLang` fires (the i18n IPC handler
 // rebuilds this menu on lang change).
 
-import { app, Menu, shell, dialog, type MenuItemConstructorOptions, BrowserWindow } from 'electron'
+import { app, Menu, shell, dialog, type MenuItemConstructorOptions } from 'electron'
 import { promises as fs } from 'node:fs'
-import { getMainWindow } from '#/main/window.ts'
+import { activateMainWindow, getMainWindow } from '#/main/window.ts'
 import { applyLangPref, t } from '#/main/i18n/index.ts'
-import { clearRecentRepos, getLangPref, getRecentRepos, getSession, getShortcutsDisabled } from '#/main/settings.ts'
+import {
+  clearRecentRepos,
+  getLangPref,
+  getRecentRepos,
+  getSession,
+  getShortcutsDisabled,
+  getSwapCloseShortcuts,
+} from '#/main/settings.ts'
 import { broadcastRpcEvent, sendRpcEvent } from '#/main/events.ts'
 import { getTheme, setThemePref } from '#/main/theme.ts'
+import { openSettingsWindow } from '#/main/settings-window.ts'
 import { normalizeWorkspaceLayout, type WorkspaceLayout } from '#/shared/workspace-layout.ts'
+import { tildifyPath } from '#/shared/paths.ts'
 import type { LangPref, MenuAction, ThemePref } from '#/shared/rpc.ts'
+import { focusedRegisteredSurface } from '#/main/window-registry.ts'
 
 interface AppMenuState {
   isMac: boolean
   name: string
   recentRepos: string[]
   shortcutsDisabled: boolean
+  swapCloseShortcuts: boolean
   themePref: ThemePref
   langPref: LangPref
   workspaceLayout: WorkspaceLayout
 }
 
-const THEME_MENU_OPTIONS = [
-  { pref: 'auto', labelKey: 'settings.theme.auto' },
-  { pref: 'light', labelKey: 'settings.theme.light' },
-  { pref: 'dark', labelKey: 'settings.theme.dark' },
+const APPEARANCE_MENU_OPTIONS = [
+  { pref: 'auto', labelKey: 'settings.appearance.auto' },
+  { pref: 'light', labelKey: 'settings.appearance.light' },
+  { pref: 'dark', labelKey: 'settings.appearance.dark' },
 ] as const
 
 const LANGUAGE_MENU_OPTIONS = [
@@ -58,8 +69,16 @@ const WORKSPACE_LAYOUT_MENU_OPTIONS = [
 let menuWorkspaceLayout: WorkspaceLayout | null = null
 
 function send(action: MenuAction): void {
-  const win = getMainWindow() ?? BrowserWindow.getFocusedWindow()
-  sendRpcEvent(win, { type: 'menu-action', action })
+  void sendMenuAction(action)
+}
+
+async function sendMenuAction(action: MenuAction): Promise<void> {
+  try {
+    const win = getMainWindow() ?? focusedRegisteredSurface()?.window ?? (await activateMainWindow())
+    sendRpcEvent(win, { type: 'menu-action', action })
+  } catch (err) {
+    console.warn('[menu] failed to send menu action', err)
+  }
 }
 
 function separator(): MenuItemConstructorOptions {
@@ -83,6 +102,7 @@ function readMenuState(): AppMenuState {
     name: app.name,
     recentRepos: getRecentRepos(),
     shortcutsDisabled: getShortcutsDisabled(),
+    swapCloseShortcuts: getSwapCloseShortcuts(),
     themePref: getTheme().pref,
     langPref: getLangPref(),
     workspaceLayout: normalizeWorkspaceLayout(menuWorkspaceLayout ?? getSession().workspaceLayout),
@@ -96,7 +116,7 @@ function createAppMenuTemplate(state: AppMenuState): MenuItemConstructorOptions[
     createEditMenu(),
     createViewMenu(state),
     createWindowMenu(state),
-    createHelpMenu(state),
+    createHelpMenu(),
   ]
 }
 
@@ -104,9 +124,9 @@ function createMacAppMenu(state: AppMenuState): MenuItemConstructorOptions {
   return {
     label: state.name,
     submenu: [
-      { role: 'about', label: t('menu.app.about', { name: state.name }) },
+      { label: t('menu.app.about', { name: state.name }), click: () => void openSettingsWindow('about') },
       separator(),
-      { label: t('menu.app.settings'), accelerator: accelerator(state, 'Cmd+,'), click: () => send('open-settings') },
+      { label: t('menu.app.settings'), accelerator: accelerator(state, 'Cmd+,'), click: () => void openSettingsWindow('general') },
       createAppearanceMenu(state.themePref),
       createLanguageMenu(state.langPref),
       separator(),
@@ -126,9 +146,13 @@ function createFileMenu(state: AppMenuState): MenuItemConstructorOptions {
     label: t('menu.file'),
     submenu: [
       {
-        label: t('menu.file.open-repo'),
+        label: t('menu.file.open-local-repo'),
         accelerator: accelerator(state, 'CmdOrCtrl+O'),
         click: () => send('open-repo'),
+      },
+      {
+        label: t('menu.file.open-local-repo-path'),
+        click: () => send('open-repo-path'),
       },
       {
         label: t('menu.file.clone-repo'),
@@ -137,16 +161,20 @@ function createFileMenu(state: AppMenuState): MenuItemConstructorOptions {
       },
       { label: t('menu.file.open-recent'), submenu: createRecentReposMenu(state.recentRepos) },
       { label: t('menu.file.open-data-folder'), click: () => void openDataFolder() },
-      // ⌘W is the standard OS shortcut for closing the window — keep
-      // the `role: 'close'` accelerator there when shortcuts are enabled
-      // so it still works even if the renderer hasn't subscribed to menu
-      // actions yet (e.g. hung renderer). Closing a repo tab moves to ⌘⇧W.
+      // Close-window uses Electron's `role: 'close'` so it works even
+      // when the renderer is hung. The swap setting flips which shortcut
+      // closes the window vs. the tab. Default: ⌘W = close window,
+      // ⌘⇧W = close tab. Swapped: ⌘W = close tab, ⌘⇧W = close window.
       state.shortcutsDisabled
-        ? { label: t('menu.file.close-window'), click: () => BrowserWindow.getFocusedWindow()?.close() }
-        : { role: 'close', label: t('menu.file.close-window'), accelerator: 'CmdOrCtrl+W' },
+        ? { label: t('menu.file.close-window'), click: () => focusedRegisteredSurface()?.window.close() }
+        : {
+            role: 'close',
+            label: t('menu.file.close-window'),
+            accelerator: state.swapCloseShortcuts ? 'CmdOrCtrl+Shift+W' : 'CmdOrCtrl+W',
+          },
       {
         label: t('menu.file.close-tab'),
-        accelerator: accelerator(state, 'CmdOrCtrl+Shift+W'),
+        accelerator: accelerator(state, state.swapCloseShortcuts ? 'CmdOrCtrl+W' : 'CmdOrCtrl+Shift+W'),
         click: () => send('close-repo'),
       },
       ...(state.isMac
@@ -156,7 +184,7 @@ function createFileMenu(state: AppMenuState): MenuItemConstructorOptions {
             {
               label: t('menu.file.settings'),
               accelerator: accelerator(state, 'Ctrl+,'),
-              click: () => send('open-settings'),
+              click: () => void openSettingsWindow('general'),
             },
             separator(),
             { role: 'quit' as const, label: t('menu.file.quit') },
@@ -166,10 +194,11 @@ function createFileMenu(state: AppMenuState): MenuItemConstructorOptions {
 }
 
 function createRecentReposMenu(recentRepos: string[]): MenuItemConstructorOptions[] {
+  const home = app.getPath('home')
   return recentRepos.length > 0
     ? [
         ...recentRepos.map((repoPath) => ({
-          label: tildify(repoPath),
+          label: tildifyPath(repoPath, home),
           click: () => send({ type: 'open-recent-repo', path: repoPath }),
         })),
         separator(),
@@ -220,7 +249,7 @@ function createViewMenu(state: AppMenuState): MenuItemConstructorOptions {
       state.shortcutsDisabled
         ? {
             label: t('menu.view.toggle-dev-tools'),
-            click: () => BrowserWindow.getFocusedWindow()?.webContents.toggleDevTools(),
+            click: () => focusedRegisteredSurface()?.window.webContents.toggleDevTools(),
           }
         : {
             role: 'toggleDevTools',
@@ -255,13 +284,13 @@ function createWindowMenu(state: AppMenuState): MenuItemConstructorOptions {
   }
 }
 
-function createHelpMenu(state: AppMenuState): MenuItemConstructorOptions {
+function createHelpMenu(): MenuItemConstructorOptions {
   return {
     label: t('menu.help'),
     // No menu accelerator: Electron requires a modifier on accelerators,
     // and bare `?` is rejected at registration. The renderer's keyboard
     // hook handles `?` directly so the binding still works.
-    submenu: [{ label: t('menu.help.shortcuts'), enabled: !state.shortcutsDisabled, click: () => send('show-help') }],
+    submenu: [{ label: t('menu.help.shortcuts'), click: () => void openSettingsWindow('shortcuts') }],
   }
 }
 
@@ -280,7 +309,7 @@ function createWorkspaceLayoutMenu(workspaceLayout: WorkspaceLayout): MenuItemCo
 function createAppearanceMenu(themePref: ThemePref): MenuItemConstructorOptions {
   return {
     label: t('settings.appearance'),
-    submenu: THEME_MENU_OPTIONS.map(({ pref, labelKey }) => ({
+    submenu: APPEARANCE_MENU_OPTIONS.map(({ pref, labelKey }) => ({
       type: 'radio' as const,
       label: t(labelKey),
       checked: themePref === pref,
@@ -349,10 +378,4 @@ function reportOpenDataFolderError(err: unknown): void {
   const message = err instanceof Error ? err.message : String(err)
   console.warn('[menu] failed to open data folder', err)
   dialog.showErrorBox(t('menu.file.open-data-folder'), message)
-}
-
-function tildify(p: string): string {
-  const home = app.getPath('home')
-  if (!home || p === home) return p === home ? '~' : p
-  return p.startsWith(home + '/') ? `~${p.slice(home.length)}` : p
 }

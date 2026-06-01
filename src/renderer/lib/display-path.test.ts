@@ -1,36 +1,58 @@
 import { describe, expect, test } from 'vitest'
-import { ellipsizeLeftPath } from '#/renderer/lib/display-path.ts'
+import { ellipsizeLeftPathByWidth, ellipsizeLeftTextByWidth } from '#/renderer/lib/display-path.ts'
 
-describe('ellipsizeLeftPath', () => {
-  test('keeps paths that fit unchanged', () => {
-    expect(ellipsizeLeftPath('apps/web/src/App.tsx', 20)).toBe('apps/web/src/App.tsx')
-  })
+function measureMonospace(text: string): number {
+  return text.length * 10
+}
 
-  test('keeps the longest fitting suffix', () => {
-    expect(ellipsizeLeftPath('a/b/c/d/file.ts', 14)).toBe('…/c/d/file.ts')
-  })
-
-  test('drops left prefixes for deeply nested project paths', () => {
-    expect(
-      ellipsizeLeftPath(
-        'seller_promotion_platform/seller-promotion-platform/seller-promotion-platform-frontend/free-exposure-promotion/src/ui/i18n/m-en.yaml',
-        60,
-      ),
-    ).toBe('…/free-exposure-promotion/src/ui/i18n/m-en.yaml')
-  })
-
-  test('falls back to left ellipsis for long filenames', () => {
-    expect(ellipsizeLeftPath('very-long-filename.component.tsx', 12)).toBe('…mponent.tsx')
-  })
-
-  test('never exceeds the requested character budget for tiny widths', () => {
-    for (let maxChars = 0; maxChars <= 3; maxChars += 1) {
-      expect(ellipsizeLeftPath('apps/web/src/App.tsx', maxChars).length).toBeLessThanOrEqual(maxChars)
+function measureVariableWidth(text: string): number {
+  let width = 0
+  for (const char of text) {
+    if (char === '/') {
+      width += 4
+      continue
     }
+    if (char === 'i') {
+      width += 5
+      continue
+    }
+    if (char === 'W') {
+      width += 13
+      continue
+    }
+    if (char === '…') {
+      width += 9
+      continue
+    }
+    width += 10
+  }
+  return width
+}
+
+describe('ellipsizeLeftTextByWidth', () => {
+  test('keeps the longest suffix that fits the measured width', () => {
+    expect(ellipsizeLeftTextByWidth('WWWWiiii', 38, measureVariableWidth)).toBe('…iiii')
   })
 
-  test('normalizes invalid and fractional character budgets', () => {
-    expect(ellipsizeLeftPath('apps/web/src/App.tsx', Number.NaN)).toBe('')
-    expect(ellipsizeLeftPath('apps/web/src/App.tsx', 14.9)).toBe('…/src/App.tsx')
+  test('returns empty when even the ellipsis does not fit', () => {
+    expect(ellipsizeLeftTextByWidth('example', 8, measureVariableWidth)).toBe('')
+  })
+})
+
+describe('ellipsizeLeftPathByWidth', () => {
+  test('returns the full path when it already fits', () => {
+    expect(ellipsizeLeftPathByWidth('src/example/file.ts', 300, measureMonospace)).toBe('src/example/file.ts')
+  })
+
+  test('prefers the longest path suffix that fits the available width', () => {
+    expect(ellipsizeLeftPathByWidth('src/example/deeply/nested/file.ts', 240, measureMonospace)).toBe('…/deeply/nested/file.ts')
+  })
+
+  test('falls back to truncating the filename tail when no full segment suffix fits', () => {
+    expect(ellipsizeLeftPathByWidth('src/example/deeply/nested/file.ts', 70, measureMonospace)).toBe('…ile.ts')
+  })
+
+  test('uses actual measured widths rather than character count heuristics', () => {
+    expect(ellipsizeLeftPathByWidth('src/example/WideWide/iiiiiiii.ts', 103, measureVariableWidth)).toBe('…/iiiiiiii.ts')
   })
 })

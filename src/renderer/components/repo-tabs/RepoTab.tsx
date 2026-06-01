@@ -1,8 +1,9 @@
-import { FolderGit2, Server, X } from 'lucide-react'
+import { AlertCircle, FolderGit2, Server, X } from 'lucide-react'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { cn } from '#/renderer/lib/cn.ts'
 import { Badge } from '#/renderer/components/ui/badge.tsx'
+import { compositeFocusRing } from '#/renderer/components/ui/focus.ts'
+import { cn } from '#/renderer/lib/cn.ts'
 import type { RepoTabConnectionStatus, RepoTabSummary } from '#/renderer/components/repo-tabs/types.ts'
 
 interface RepoTabProps {
@@ -14,6 +15,7 @@ interface RepoTabProps {
   onClose: (id: string) => void
   onKeyboardNavigate: (id: string, direction: 'prev' | 'next' | 'first' | 'last') => void
   closeLabel: string
+  unavailableLabel?: string
 }
 
 function remoteHealthDotClass(status: RepoTabConnectionStatus | undefined): string {
@@ -38,6 +40,7 @@ export function RepoTab({
   onClose,
   onKeyboardNavigate,
   closeLabel,
+  unavailableLabel = 'unavailable',
 }: RepoTabProps) {
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({
     id: repo.id,
@@ -48,7 +51,8 @@ export function RepoTab({
     transform: CSS.Transform.toString(chromeLikeTransform),
     transition,
   }
-  const title = repo.targetLabel ? `${repo.name} - ${repo.targetLabel}` : repo.name
+  const targetLabel = repo.targetLabel ?? undefined
+  const title = targetLabel ? `${repo.name} - ${targetLabel}` : repo.unavailable ? `${repo.name} - ${unavailableLabel}` : repo.name
   const RepoIcon = repo.kind === 'remote' ? Server : FolderGit2
   const remoteStatus = repo.kind === 'remote' ? (repo.diagnosticStatus ?? 'unknown') : undefined
   const remoteStatusTitle = repo.diagnosticMessage ?? repo.diagnosticCategory
@@ -58,14 +62,16 @@ export function RepoTab({
       ref={setNodeRef}
       style={style}
       data-interactive
+      data-repo-tab-tooltip-id={repo.id}
       role="presentation"
       onPointerEnter={() => onHoverChange(repo.id)}
       onPointerLeave={() => onHoverChange(null)}
       className={cn(
-        'group relative flex h-8 min-w-36 max-w-56 shrink-0 touch-none select-none items-center gap-1.5 rounded-md border px-2 text-xs transition-colors duration-100 [&:has(:focus-visible)]:outline-2 [&:has(:focus-visible)]:-outline-offset-2 [&:has(:focus-visible)]:outline-ring',
+        'group relative flex h-8 min-w-36 max-w-56 shrink-0 touch-none select-none items-center gap-1.5 rounded-md border px-2 text-xs transition-colors duration-100',
+        compositeFocusRing,
         isActive
           ? 'border-input bg-card text-foreground'
-          : 'border-transparent text-foreground/65 hover:bg-accent/70 hover:text-foreground',
+          : 'border-transparent text-muted-foreground hover:bg-accent/70 hover:text-foreground',
         isDragging && 'z-10 cursor-grabbing bg-card text-foreground',
       )}
       title={title}
@@ -91,12 +97,6 @@ export function RepoTab({
               repo.id,
               e.key === 'ArrowLeft' ? 'prev' : e.key === 'ArrowRight' ? 'next' : e.key === 'Home' ? 'first' : 'last',
             )
-            return
-          }
-          if (e.key === 'Enter') {
-            e.preventDefault()
-            onActivate(repo.id)
-            return
           }
         }}
         className="flex h-full min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-sm border-0 bg-transparent p-0 text-left text-inherit outline-none"
@@ -117,6 +117,7 @@ export function RepoTab({
             remote
           </Badge>
         )}
+        {repo.unavailable && <AlertCircle size={12} className="shrink-0 text-warning" aria-hidden />}
       </button>
       <button
         type="button"

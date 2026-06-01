@@ -1,24 +1,26 @@
 import { execa } from 'execa'
-import { git } from '#/main/git/helper.ts'
+import { getRemotes, getUpstreamParts, pickPreferredRemote } from '#/main/git/remote.ts'
+import { isGitHubHost, parseGitRemoteUrl } from '#/main/git/remote-url.ts'
 import {
   enqueueGitHubApiRequest,
   GITHUB_API_CONCURRENCY,
   GITHUB_API_INTERVAL_CAP,
   GITHUB_API_INTERVAL_MS,
 } from '#/main/github/queue.ts'
+import { buildGitHubCliPath } from '#/main/system/github-cli.ts'
 
 export const GITHUB_API_TIMEOUT_MS = 17_000
 export { GITHUB_API_CONCURRENCY, GITHUB_API_INTERVAL_CAP, GITHUB_API_INTERVAL_MS }
-
-const GH_PATH = ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin'].join(':')
-const TOKEN_CACHE_TTL_MS = 30_000
-const TOKEN_MISS_CACHE_TTL_MS = 5_000
-const tokenCache = new Map<string, { expiresAt: number; token: string | null }>()
 
 export interface GitHubRepoRef {
   host: string
   owner: string
   name: string
+}
+
+export interface GitHubRepoRefOptions {
+  branch?: string
+  signal?: AbortSignal
 }
 
 interface GraphqlEnvelope<TData> {
@@ -55,73 +57,52 @@ export type GraphqlRequestResult<TData> =
       error: GraphqlRequestError
     }
 
-const TOKEN_ENV_KEYS = ['GH_TOKEN', 'GITHUB_TOKEN', 'GH_ENTERPRISE_TOKEN', 'GITHUB_ENTERPRISE_TOKEN'] as const
-
-function gh(cwd: string, args: string[], signal?: AbortSignal): Promise<string> {
-  const env: NodeJS.ProcessEnv = {
-    ...process.env,
-    GH_PROMPT_DISABLED: '1',
-    PATH: [process.env.PATH, GH_PATH].filter(Boolean).join(':'),
-  }
-  for (const key of TOKEN_ENV_KEYS) delete env[key]
-  return execa('gh', args, {
-    cwd,
-    timeout: GITHUB_API_TIMEOUT_MS,
-    forceKillAfterDelay: 500,
-    cancelSignal: signal,
-    maxBuffer: 1024 * 1024,
-    env,
-  }).then(({ stdout }) => stdout.trimEnd())
-}
-
 export function parseGitHubRemoteUrl(url: string): GitHubRepoRef | null {
-  const sshUrl = url.match(/^ssh:\/\/(?:[^@]+@)?([^:/]+)(?::\d+)?\/(.+?)(?:\.git)?\/?$/)
-  const httpsUrl = url.match(/^https?:\/\/(?:[^@/]+@)?([^/]+)\/(.+?)(?:\.git)?\/?$/)
-  const scpUrl = url.match(/^(?:[^@]+@)?([^:/\s]+):([^/].*?)(?:\.git)?\/?$/)
-  const match = sshUrl ?? httpsUrl ?? scpUrl
-  if (!match) return null
-  const path = match[2]?.replace(/\.git$/, '').replace(/\/$/, '') ?? ''
-  const parts = path.split('/').filter(Boolean)
-  if (parts.length !== 2 || !match[1]) return null
-  return { host: match[1].toLowerCase(), owner: parts[0]!, name: parts[1]! }
+  const parsed = parseGitRemoteUrl(url)
+  if (!parsed || !isGitHubHost(parsed.host)) return null
+  const parts = parsed.path.split('/').filter(Boolean)
+  if (parts.length !== 2) return null
+  return { host: parsed.host, owner: parts[0]!, name: parts[1]! }
 }
 
-export function githubGraphqlEndpoint(host: string): string {
-  return host === 'github.com' ? 'https://api.github.com/graphql' : `https://${host}/api/graphql`
+function isAbortSignal(value: unknown): value is AbortSignal {
+  return (
+    !!value &&
+    typeof value === 'object' &&
+    'aborted' in value &&
+    'addEventListener' in value &&
+    typeof (value as { addEventListener?: unknown }).addEventListener === 'function'
+  )
 }
 
-export function tokenFromEnv(host: string): string | null {
-  const publicGitHubHost = host === 'github.com' || host.endsWith('.ghe.com')
-  const candidates = publicGitHubHost
-    ? [process.env.GH_TOKEN, process.env.GITHUB_TOKEN]
-    : [process.env.GH_ENTERPRISE_TOKEN, process.env.GITHUB_ENTERPRISE_TOKEN]
-  return candidates.find((token): token is string => typeof token === 'string' && token.length > 0) ?? null
+function normalizeRepoRefOptions(options?: AbortSignal | GitHubRepoRefOptions): GitHubRepoRefOptions {
+  if (!options) return {}
+  return isAbortSignal(options) ? { signal: options } : options
 }
 
-export async function getGitHubRepoRef(cwd: string, signal?: AbortSignal): Promise<GitHubRepoRef | null> {
+function pickGitHubRepoRef(
+  remotes: Array<{ name: string; repo: GitHubRepoRef }>,
+  upstream?: { remote: string; branch: string } | null,
+): GitHubRepoRef | null {
+  return pickPreferredRemote(remotes, upstream)?.repo ?? null
+}
+
+export async function getGitHubRepoRef(
+  cwd: string,
+  options?: AbortSignal | GitHubRepoRefOptions,
+): Promise<GitHubRepoRef | null> {
+  const { branch, signal } = normalizeRepoRefOptions(options)
   try {
-    return parseGitHubRemoteUrl(await git(cwd, ['remote', 'get-url', 'origin'], { signal }))
+    const [allRemotes, upstream] = await Promise.all([
+      getRemotes(cwd, signal),
+      branch ? getUpstreamParts(cwd, branch, signal) : Promise.resolve(null),
+    ])
+    const remotes = allRemotes
+      .map((remote) => ({ name: remote.name, repo: parseGitHubRemoteUrl(remote.fetchUrl) }))
+      .filter((remote): remote is { name: string; repo: GitHubRepoRef } => remote.repo !== null)
+    return pickGitHubRepoRef(remotes, upstream)
   } catch (err) {
     if (signal?.aborted || isAbortError(err)) return null
-    return null
-  }
-}
-
-async function getAuthToken(cwd: string, host: string, signal?: AbortSignal): Promise<string | null> {
-  const envToken = tokenFromEnv(host)
-  if (envToken) return envToken
-
-  const cached = tokenCache.get(host)
-  if (cached && cached.expiresAt > Date.now()) return cached.token
-
-  try {
-    const token = await gh(cwd, ['auth', 'token', '--hostname', host], signal)
-    const value = token.trim() || null
-    tokenCache.set(host, { expiresAt: Date.now() + TOKEN_CACHE_TTL_MS, token: value })
-    return value
-  } catch (err) {
-    if (signal?.aborted || isAbortError(err)) return null
-    tokenCache.set(host, { expiresAt: Date.now() + TOKEN_MISS_CACHE_TTL_MS, token: null })
     return null
   }
 }
@@ -157,20 +138,119 @@ function graphqlErrorMessage(errors: unknown[]): string {
   return 'GitHub GraphQL returned errors'
 }
 
-function httpErrorCode(response: Response): { code: GraphqlErrorCode; retryable: boolean } {
-  if (response.status === 401) return { code: 'UNAUTHORIZED', retryable: false }
-  if (response.status === 403 && response.headers.get('x-ratelimit-remaining') === '0') {
-    return { code: 'RATE_LIMITED', retryable: true }
-  }
-  if (response.status === 403) return { code: 'FORBIDDEN', retryable: false }
-  if (response.status === 429) return { code: 'RATE_LIMITED', retryable: true }
-  return { code: 'HTTP_ERROR', retryable: response.status >= 500 }
-}
-
 function isAbortError(err: unknown): boolean {
   return err instanceof DOMException
     ? err.name === 'AbortError'
     : err instanceof Error && (err.name === 'AbortError' || err.message === 'The operation was aborted.')
+}
+
+function ghErrorText(err: unknown): string {
+  if (!err || typeof err !== 'object') return String(err)
+  const parts = [
+    typeof (err as { shortMessage?: unknown }).shortMessage === 'string' ? (err as { shortMessage: string }).shortMessage : '',
+    typeof (err as { stderr?: unknown }).stderr === 'string' ? (err as { stderr: string }).stderr : '',
+    typeof (err as { stdout?: unknown }).stdout === 'string' ? (err as { stdout: string }).stdout : '',
+    err instanceof Error ? err.message : String(err),
+  ]
+  return parts
+    .map((part) => part.trim())
+    .filter((part, index, array) => part.length > 0 && array.indexOf(part) === index)
+    .join('\n')
+}
+
+function ghErrorStatus(message: string): number | undefined {
+  const match = message.match(/\bHTTP\s+(\d{3})\b/i)
+  if (!match) return undefined
+  const status = Number(match[1])
+  return Number.isFinite(status) ? status : undefined
+}
+
+function ghErrorDetails(message: string): { code: GraphqlErrorCode; retryable: boolean; status?: number } {
+  const status = ghErrorStatus(message)
+  if (/rate limit/i.test(message)) return { code: 'RATE_LIMITED', retryable: true, status }
+  if (/not logged in|authentication required|authenticate with|run:\s*gh auth login|set the gh_token/i.test(message)) {
+    return { code: 'NO_AUTH_TOKEN', retryable: false, status }
+  }
+  if (status === 401) return { code: 'UNAUTHORIZED', retryable: false, status }
+  if (status === 403) return { code: 'FORBIDDEN', retryable: false, status }
+  if (status !== undefined) return { code: 'HTTP_ERROR', retryable: status >= 500, status }
+  return { code: 'NETWORK_ERROR', retryable: true }
+}
+
+async function ghGraphqlRequest<TData>(
+  cwd: string,
+  repo: GitHubRepoRef,
+  query: string,
+  variables: Record<string, unknown>,
+  operationName: string,
+  signal?: AbortSignal,
+): Promise<GraphqlRequestResult<TData>> {
+  try {
+    const { stdout } = await execa(
+      'gh',
+      ['api', 'graphql', '--hostname', repo.host, '--method', 'POST', '--input', '-'],
+      {
+        cwd,
+        input: JSON.stringify({
+          query,
+          variables: compactVariables(variables),
+          operationName,
+        }),
+        timeout: GITHUB_API_TIMEOUT_MS,
+        forceKillAfterDelay: 500,
+        cancelSignal: signal,
+        maxBuffer: 1024 * 1024,
+        env: {
+          ...process.env,
+          GH_PROMPT_DISABLED: '1',
+          PATH: buildGitHubCliPath(),
+        },
+      },
+    )
+    let payload: GraphqlEnvelope<TData>
+    try {
+      payload = JSON.parse(stdout) as GraphqlEnvelope<TData>
+    } catch (err) {
+      return {
+        ok: false,
+        error: graphqlError(repo, operationName, 'INVALID_JSON', err instanceof Error ? err.message : String(err), {
+          retryable: true,
+        }),
+      }
+    }
+    if (payload.errors?.length) {
+      const message = graphqlErrorMessage(payload.errors)
+      return {
+        ok: false,
+        error: graphqlError(repo, operationName, 'GRAPHQL_ERROR', message, {
+          retryable: /rate limit|timeout|temporar|try again/i.test(message),
+          graphqlErrors: payload.errors,
+        }),
+      }
+    }
+    if (payload.data === undefined || payload.data === null) {
+      return {
+        ok: false,
+        error: graphqlError(repo, operationName, 'NO_DATA', 'GitHub GraphQL returned no data'),
+      }
+    }
+    return { ok: true, data: payload.data }
+  } catch (err) {
+    if (isAbortError(err)) {
+      return {
+        ok: false,
+        error: graphqlError(repo, operationName, 'TIMEOUT', err instanceof Error ? err.message : 'The operation was aborted.', {
+          retryable: true,
+        }),
+      }
+    }
+    const message = ghErrorText(err)
+    const { code, retryable, status } = ghErrorDetails(message)
+    return {
+      ok: false,
+      error: graphqlError(repo, operationName, code, message, { retryable, status }),
+    }
+  }
 }
 
 export function formatGraphqlError(error: GraphqlRequestError): string {
@@ -187,14 +267,6 @@ export async function graphqlRequestResult<TData>(
   operationName: string,
   signal?: AbortSignal,
 ): Promise<GraphqlRequestResult<TData>> {
-  const token = await getAuthToken(cwd, repo.host, signal)
-  if (!token) {
-    return {
-      ok: false,
-      error: graphqlError(repo, operationName, 'NO_AUTH_TOKEN', `No GitHub token available for ${repo.host}`),
-    }
-  }
-
   return enqueueGitHubApiRequest(
     async (): Promise<GraphqlRequestResult<TData>> => {
       if (signal?.aborted) {
@@ -203,79 +275,7 @@ export async function graphqlRequestResult<TData>(
           error: graphqlError(repo, operationName, 'TIMEOUT', 'The operation was aborted.', { retryable: true }),
         }
       }
-      const controller = new AbortController()
-      const timer = setTimeout(() => controller.abort(), GITHUB_API_TIMEOUT_MS)
-      const abort = () => controller.abort()
-      signal?.addEventListener('abort', abort, { once: true })
-      try {
-        const response = await fetch(githubGraphqlEndpoint(repo.host), {
-          method: 'POST',
-          signal: controller.signal,
-          headers: {
-            Accept: 'application/vnd.github+json',
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json',
-            'User-Agent': 'Goblin',
-          },
-          body: JSON.stringify({ query, variables: compactVariables(variables), operationName }),
-        })
-        if (!response.ok) {
-          const { code, retryable } = httpErrorCode(response)
-          return {
-            ok: false,
-            error: graphqlError(repo, operationName, code, response.statusText || `HTTP ${response.status}`, {
-              retryable,
-              status: response.status,
-            }),
-          }
-        }
-
-        let payload: GraphqlEnvelope<TData>
-        try {
-          payload = (await response.json()) as GraphqlEnvelope<TData>
-        } catch (err) {
-          return {
-            ok: false,
-            error: graphqlError(repo, operationName, 'INVALID_JSON', err instanceof Error ? err.message : String(err), {
-              retryable: true,
-            }),
-          }
-        }
-
-        if (payload.errors?.length) {
-          const message = graphqlErrorMessage(payload.errors)
-          return {
-            ok: false,
-            error: graphqlError(repo, operationName, 'GRAPHQL_ERROR', message, {
-              retryable: /rate limit|timeout|temporar|try again/i.test(message),
-              graphqlErrors: payload.errors,
-            }),
-          }
-        }
-
-        if (payload.data === undefined || payload.data === null) {
-          return {
-            ok: false,
-            error: graphqlError(repo, operationName, 'NO_DATA', 'GitHub GraphQL returned no data'),
-          }
-        }
-
-        return { ok: true, data: payload.data }
-      } catch (err) {
-        return {
-          ok: false,
-          error: graphqlError(
-            repo,
-            operationName,
-            isAbortError(err) ? 'TIMEOUT' : 'NETWORK_ERROR',
-            err instanceof Error ? err.message : String(err),
-            { retryable: true },
-          ),
-        }
-      } finally {
-        signal?.removeEventListener('abort', abort)
-        clearTimeout(timer)
-      }
+      return ghGraphqlRequest<TData>(cwd, repo, query, variables, operationName, signal)
     },
     { signal },
   ).catch((err): GraphqlRequestResult<TData> => {

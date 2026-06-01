@@ -6,15 +6,15 @@ import { useSettingsStore } from '#/renderer/stores/settings.ts'
 import { useT } from '#/renderer/stores/i18n.ts'
 import { Badge } from '#/renderer/components/ui/badge.tsx'
 import { Button } from '#/renderer/components/ui/button.tsx'
-import { BranchActionBar } from '#/renderer/components/BranchActionBar.tsx'
+import { BranchActionControls } from '#/renderer/components/BranchActionBar.tsx'
 import { Toolbar } from '#/renderer/components/Layout.tsx'
 import { detailTabNavigationKey, navigatedDetailTab, visibleDetailTabs } from '#/renderer/lib/detail-tabs.ts'
 import { cn } from '#/renderer/lib/cn.ts'
 import { repoWorkspaceBehavior } from '#/renderer/lib/workspace-layout.ts'
 import { terminalSessionGroupKey } from '#/renderer/components/terminal/terminal-session-utils.ts'
 import { useTerminalSessionContext } from '#/renderer/components/terminal/terminal-session-context.ts'
-import { branchActionsAvailable } from '#/renderer/hooks/branch-action-state.ts'
 import type { SelectedBranchDetailPresentation } from '#/renderer/components/branch-detail/model.ts'
+import type { BranchActionItemGroups } from '#/renderer/hooks/useBranchActionItems.ts'
 
 interface Props {
   repo: RepoState
@@ -24,19 +24,30 @@ interface Props {
   collapsed: boolean
   focusMode: boolean
   layout: RepoWorkspaceLayout
+  branchActions?: BranchActionItemGroups
 }
 
-export function BranchDetailToolbar({ repo, detail, detailId, contentId, collapsed, focusMode, layout }: Props) {
+export function BranchDetailToolbar({
+  repo,
+  detail,
+  detailId,
+  contentId,
+  collapsed,
+  focusMode,
+  layout,
+  branchActions,
+}: Props) {
   const t = useT()
   const setDetailTab = useReposStore((s) => s.setDetailTab)
   const setDetailCollapsed = useReposStore((s) => s.setDetailCollapsed)
   const toggleDetailCollapsed = useReposStore((s) => s.toggleDetailCollapsed)
   const toggleDetailFocusMode = useReposStore((s) => s.toggleDetailFocusMode)
   const shortcutsDisabled = useSettingsStore((s) => s.shortcutsDisabled)
+  const toggleDetailOnActionBarBlankClick = useSettingsStore((s) => s.toggleDetailOnActionBarBlankClick)
   const terminalContext = useTerminalSessionContext()
   const behavior = repoWorkspaceBehavior(layout, collapsed, focusMode)
-  const canOpenTerminal = !!detail.branch?.worktreePath && (repo.kind !== 'remote' || !!repo.remoteTarget)
-  const terminalWorktreePath = canOpenTerminal ? detail.branch?.worktreePath : null
+  const canOpenTerminal = !!detail.branch?.worktree?.path && (repo.kind !== 'remote' || !!repo.remoteTarget)
+  const terminalWorktreePath = canOpenTerminal ? detail.branch?.worktree?.path : null
   const tabs = visibleDetailTabs(!!terminalWorktreePath)
   const terminalScope = terminalWorktreePath
     ? repo.kind === 'remote'
@@ -61,96 +72,100 @@ export function BranchDetailToolbar({ repo, detail, detailId, contentId, collaps
     window.requestAnimationFrame(() => document.getElementById(`${detailId}-${nextTab}-tab`)?.focus())
   }
 
+  const detailToggleTitle = t(
+    shortcutsDisabled
+      ? collapsed
+        ? 'branch-detail.expand'
+        : 'branch-detail.collapse'
+      : collapsed
+        ? 'branch-detail.expand-title'
+        : 'branch-detail.collapse-title',
+  )
+
   return (
     <Toolbar variant="detail">
-      {behavior.detailCollapseAllowed && (
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={toggleDetailCollapsed}
-          aria-label={t(collapsed ? 'branch-detail.expand' : 'branch-detail.collapse')}
-          title={t(
-            shortcutsDisabled
-              ? collapsed
-                ? 'branch-detail.expand'
-                : 'branch-detail.collapse'
-              : collapsed
-                ? 'branch-detail.expand-title'
-                : 'branch-detail.collapse-title',
-          )}
-          aria-expanded={!collapsed}
-          aria-controls={collapsed ? undefined : contentId}
-          className="size-7"
-        >
-          <ChevronDown className={cn(collapsed && '-rotate-90')} />
-        </Button>
-      )}
-      {behavior.detailFocusAllowed && (
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={toggleDetailFocusMode}
-          aria-label={t(behavior.detailFocusMode ? 'branch-detail.exit-focus' : 'branch-detail.focus')}
-          // No accelerator is registered for focus mode, so the title intentionally omits shortcut text.
-          title={t(behavior.detailFocusMode ? 'branch-detail.exit-focus-title' : 'branch-detail.focus-title')}
-          aria-pressed={behavior.detailFocusMode}
-          className={cn(
-            'size-7',
-            behavior.detailFocusMode &&
-              'bg-accent text-accent-foreground shadow-xs hover:bg-accent hover:text-accent-foreground',
-          )}
-        >
-          {behavior.detailFocusMode ? <Minimize2 /> : <Maximize2 />}
-        </Button>
-      )}
-      <div className="flex shrink-0" role="tablist" aria-label={t('tab.branch-detail')}>
-        {tabs.map((tab) => {
-          const selected = repo.ui.detailTab === tab.id
-          const visuallySelected = !collapsed && selected
-          return (
-            <button
-              key={tab.id}
-              id={`${detailId}-${tab.id}-tab`}
-              type="button"
-              role="tab"
-              aria-selected={selected}
-              aria-controls={collapsed ? undefined : `${detailId}-${tab.id}-panel`}
-              tabIndex={selected ? 0 : -1}
-              onClick={() => {
-                setDetailTab(repo.id, tab.id)
-                setDetailCollapsed(false)
-              }}
-              onKeyDown={(e) => handleTabKeyDown(e, tab.id)}
-              className={cn(
-                'inline-flex h-9 items-center gap-1.5 px-3 text-sm border-b-2 -mb-px cursor-pointer transition-colors duration-100',
-                visuallySelected
-                  ? 'border-brand text-foreground'
-                  : 'border-transparent text-muted-foreground hover:text-foreground',
-              )}
-            >
-              {t(tab.labelKey)}
-              {tab.id === 'changes' && detail.statusCount > 0 && (
-                <Badge variant="attention" className="font-mono tabular-nums">
-                  {detail.statusCount}
-                </Badge>
-              )}
-              {tab.id === 'terminal' && terminalCount > 0 && (
-                <Badge variant="outline" className="font-mono tabular-nums text-muted-foreground">
-                  {terminalCount}
-                </Badge>
-              )}
-            </button>
-          )
-        })}
+      <div className="flex shrink-0 items-center gap-1">
+        {behavior.detailCollapseAllowed && (
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={toggleDetailCollapsed}
+            aria-label={t(collapsed ? 'branch-detail.expand' : 'branch-detail.collapse')}
+            title={detailToggleTitle}
+            aria-expanded={!collapsed}
+            aria-controls={collapsed ? undefined : contentId}
+          >
+            <ChevronDown className={cn(collapsed && '-rotate-90')} />
+          </Button>
+        )}
+        {behavior.detailFocusAllowed && (
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={toggleDetailFocusMode}
+            aria-label={t(behavior.detailFocusMode ? 'branch-detail.exit-focus' : 'branch-detail.focus')}
+            // No accelerator is registered for focus mode, so the title intentionally omits shortcut text.
+            title={t(behavior.detailFocusMode ? 'branch-detail.exit-focus-title' : 'branch-detail.focus-title')}
+            aria-pressed={behavior.detailFocusMode}
+            className={cn(
+              behavior.detailFocusMode &&
+                'bg-accent text-accent-foreground shadow-xs hover:bg-accent hover:text-accent-foreground',
+            )}
+          >
+            {behavior.detailFocusMode ? <Minimize2 /> : <Maximize2 />}
+          </Button>
+        )}
+        <div className="flex shrink-0 gap-1" role="tablist" aria-label={t('tab.branch-detail')}>
+          {tabs.map((tab) => {
+            const selected = repo.ui.detailTab === tab.id
+            const visuallySelected = !collapsed && selected
+            return (
+              <Button
+                key={tab.id}
+                id={`${detailId}-${tab.id}-tab`}
+                type="button"
+                variant="ghost"
+                role="tab"
+                aria-selected={selected}
+                aria-expanded={selected ? !collapsed : undefined}
+                aria-controls={collapsed ? undefined : `${detailId}-${tab.id}-panel`}
+                tabIndex={selected ? 0 : -1}
+                onClick={() => {
+                  setDetailTab(repo.id, tab.id)
+                  setDetailCollapsed(false)
+                }}
+                onKeyDown={(e) => handleTabKeyDown(e, tab.id)}
+                className={cn(
+                  'h-7 gap-1.5 px-2.5 text-sm font-normal',
+                  visuallySelected
+                    ? 'bg-selected text-selected-foreground'
+                    : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground',
+                )}
+              >
+                {t(tab.labelKey)}
+                {tab.id === 'changes' && detail.statusCount > 0 && (
+                  <Badge variant="attention" className="font-normal font-mono tabular-nums">
+                    {detail.statusCount}
+                  </Badge>
+                )}
+                {tab.id === 'terminal' && terminalCount > 0 && (
+                  <Badge variant="outline" className="font-normal font-mono tabular-nums text-muted-foreground">
+                    {terminalCount}
+                  </Badge>
+                )}
+              </Button>
+            )
+          })}
+        </div>
       </div>
-      {branchActionsAvailable(repo, detail.branch) && (
-        <BranchActionBar
-          key={`${repo.id}:${detail.branch.name}`}
-          repo={repo}
-          branch={detail.branch}
-          variant={behavior.detailActionVariant}
+      {behavior.detailCollapseAllowed && (
+        <div
+          aria-hidden="true"
+          className="min-w-2 flex-1 self-stretch"
+          onClick={toggleDetailOnActionBarBlankClick ? toggleDetailCollapsed : undefined}
         />
       )}
+      {branchActions && <BranchActionControls actions={branchActions} variant={behavior.detailActionVariant} />}
     </Toolbar>
   )
 }

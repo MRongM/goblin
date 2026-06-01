@@ -24,6 +24,21 @@ const config: Configuration = {
   asarUnpack: ['node_modules/node-pty/prebuilds/**/*'],
   mac: {
     category: 'public.app-category.developer-tools',
+    extendInfo: {
+      // Required for macOS to show Goblin in System Settings → Notifications
+      // and to allow Banner/Alert style notifications. Without this key the
+      // app either won't appear in the notification list at all, or will be
+      // locked to the silent "None" style with no user-visible controls.
+      NSUserNotificationAlertStyle: 'alert',
+      CFBundleDocumentTypes: [
+        {
+          CFBundleTypeName: 'Folder',
+          CFBundleTypeRole: 'Viewer',
+          LSHandlerRank: 'Alternate',
+          LSItemContentTypes: ['public.folder'],
+        },
+      ],
+    },
     // electron-builder organizes builds by arch, so any `dir` here would be
     // emitted for every arch declared on dmg. `build.ts install` picks the
     // host-arch directory out of `release/mac*/` itself.

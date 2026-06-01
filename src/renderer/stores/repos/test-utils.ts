@@ -1,8 +1,12 @@
 import { useReposStore } from '#/renderer/stores/repos/store.ts'
 import { emptyRepo } from '#/renderer/stores/repos/helpers.ts'
 import { disposeAllRepoRuntimes } from '#/renderer/stores/repos/runtime.ts'
-import type { BranchInfo, PullRequestInfo, WorktreeStatus } from '#/renderer/types.ts'
-import type { DetailTab, RepoState } from '#/renderer/stores/repos/types.ts'
+import {
+  stripBranchWorktreeMetadata,
+  worktreeStatesFromBranches,
+} from '#/renderer/stores/repos/worktree-state.ts'
+import type { BranchSnapshotInfo, PullRequestInfo, WorktreeStatus } from '#/renderer/types.ts'
+import type { DetailTab, RepoBranchState, RepoState } from '#/renderer/stores/repos/types.ts'
 import type { CommitDetail } from '#/shared/rpc.ts'
 import {
   DEFAULT_DETAIL_COLLAPSED,
@@ -12,7 +16,35 @@ import {
 
 export type RpcTestHandler = (input: any) => unknown
 
-export function createBranch(name: string, options: Partial<BranchInfo> = {}): BranchInfo {
+type LegacyBranchOptions = {
+  worktreePath?: string
+  worktreeDirty?: boolean
+  worktreeChangeCount?: number
+  worktreeIsPrimary?: boolean
+}
+
+function normalizeBranchOptions<T extends Partial<BranchSnapshotInfo> & LegacyBranchOptions>(
+  options: T,
+): Partial<BranchSnapshotInfo> {
+  const { worktreePath, worktreeDirty, worktreeChangeCount, worktreeIsPrimary, ...rest } = options
+  if (!worktreePath) return rest
+  return {
+    ...rest,
+    worktree: rest.worktree ?? {
+      path: worktreePath,
+      isPrimary: worktreeIsPrimary,
+      summary:
+        worktreeDirty === undefined && worktreeChangeCount === undefined
+          ? undefined
+          : { dirty: worktreeDirty, changeCount: worktreeChangeCount },
+    },
+  }
+}
+
+export function createBranchSnapshot(
+  name: string,
+  options: (Partial<BranchSnapshotInfo> & LegacyBranchOptions) = {},
+): BranchSnapshotInfo {
   return {
     name,
     isCurrent: false,
@@ -22,9 +54,18 @@ export function createBranch(name: string, options: Partial<BranchInfo> = {}): B
     lastCommitMessage: '',
     lastCommitDate: '',
     lastCommitAuthor: '',
-    ...options,
+    ...normalizeBranchOptions(options),
   }
 }
+
+export function createRepoBranch(
+  name: string,
+  options: (Partial<RepoBranchState> & LegacyBranchOptions) = {},
+): RepoBranchState {
+  return stripBranchWorktreeMetadata([createBranchSnapshot(name, options)])[0]!
+}
+
+export const createBranch = createRepoBranch
 
 export function createPullRequest(number: number, options: Partial<PullRequestInfo> = {}): PullRequestInfo {
   return {
@@ -62,7 +103,7 @@ export function resetReposStore(): void {
     order: [],
     activeId: null,
     sessionReady: false,
-    missingFromSession: [],
+    branchSearchQueries: {},
     detailCollapsed: DEFAULT_DETAIL_COLLAPSED,
     detailFocusMode: false,
     workspaceLayout: DEFAULT_WORKSPACE_LAYOUT,
@@ -102,7 +143,8 @@ export function installGoblinTestBridge(handlers: Record<string, RpcTestHandler>
 export function seedRepoState(options: {
   id: string
   name?: string
-  branches?: BranchInfo[]
+  branches?: RepoBranchState[]
+  branchSnapshots?: BranchSnapshotInfo[]
   currentBranch?: string
   selectedBranch?: string | null
   detailTab?: DetailTab
@@ -110,23 +152,35 @@ export function seedRepoState(options: {
   instanceToken?: number
   status?: WorktreeStatus[]
   statusLoaded?: boolean
+  worktreesByPath?: RepoState['data']['worktreesByPath']
+  remote?: Partial<RepoState['remote']>
 }): RepoState {
   const base = emptyRepo(options.id, options.name ?? 'repo')
+  const branchesWithSnapshotWorktreeMetadata = options.branchSnapshots ?? options.branches ?? base.data.branches
+  const branches = options.branches ?? stripBranchWorktreeMetadata(branchesWithSnapshotWorktreeMetadata)
+  const status = options.status ?? base.data.status
   const repo: RepoState = {
     ...base,
     instanceToken: options.instanceToken ?? base.instanceToken,
     data: {
       ...base.data,
-      branches: options.branches ?? base.data.branches,
+      branches,
       currentBranch: options.currentBranch ?? base.data.currentBranch,
-      status: options.status ?? base.data.status,
+      status,
       statusLoaded: options.statusLoaded ?? base.data.statusLoaded,
+      worktreesByPath:
+        options.worktreesByPath ??
+        worktreeStatesFromBranches(branchesWithSnapshotWorktreeMetadata, base.data.worktreesByPath, status),
     },
     ui: {
       ...base.ui,
       selectedBranch: options.selectedBranch ?? base.ui.selectedBranch,
       detailTab: options.detailTab ?? base.ui.detailTab,
       commitDetail: options.openCommit ? { phase: 'open', detail: options.openCommit } : base.ui.commitDetail,
+    },
+    remote: {
+      ...base.remote,
+      ...options.remote,
     },
   }
   useReposStore.setState({
@@ -137,7 +191,7 @@ export function seedRepoState(options: {
     order: [options.id],
     activeId: options.id,
     sessionReady: true,
-    missingFromSession: [],
+    branchSearchQueries: {},
     detailCollapsed: DEFAULT_DETAIL_COLLAPSED,
     detailFocusMode: false,
     workspaceLayout: DEFAULT_WORKSPACE_LAYOUT,

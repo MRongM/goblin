@@ -17,14 +17,40 @@ const REMOTE_TARGET = {
   displayName: 'prod:goblin',
 }
 
+// showNotificationWithResult() races 'show' vs 'failed' events rather than
+// treating show() as a synchronous success. The mock must honour the same
+// contract: register listeners via once(), then fire the right event inside
+// show() so the promise resolves synchronously in tests.
+//
+// vi.hoisted() ensures this is evaluated before vi.mock() factory functions,
+// which are hoisted to the top of the file by vitest's transformer.
+const { mockNotificationEmitting } = vi.hoisted(() => ({
+  mockNotificationEmitting(emitEvent: 'show' | 'failed') {
+    return function MockNotification(
+      this: { show: ReturnType<typeof vi.fn>; once: ReturnType<typeof vi.fn> },
+    ) {
+      const listeners = new Map<string, () => void>()
+      this.once = vi.fn((event: string, cb: () => void) => { listeners.set(event, cb) })
+      this.show = vi.fn(() => { listeners.get(emitEvent)?.() })
+    }
+  },
+}))
+
 vi.mock('electron', () => ({
   ipcMain: {
     handle: vi.fn((channel: string, handler: (_event: unknown, input: any) => unknown) => {
       ipcHandlers.set(channel, handler)
     }),
+    on: vi.fn((channel: string, handler: (_event: unknown, input: any) => unknown) => {
+      ipcHandlers.set(channel, handler)
+    }),
   },
-  BrowserWindow: { getAllWindows: () => [] },
-  app: { on: vi.fn() },
+  BrowserWindow: { getAllWindows: () => [], fromWebContents: vi.fn(() => ({ isDestroyed: () => false, isFocused: () => false, flashFrame: vi.fn() })) },
+  Notification: Object.assign(
+    vi.fn(mockNotificationEmitting('show')),
+    { isSupported: vi.fn(() => true) },
+  ),
+  app: { on: vi.fn(), getAppPath: vi.fn(() => '/app'), dock: { bounce: vi.fn() } },
 }))
 
 vi.mock('#/main/git/worktrees.ts', () => ({
@@ -75,6 +101,7 @@ describe('terminal IPC', () => {
     expect(ipcHandlers.has('goblin:terminal-restart')).toBe(true)
     expect(ipcHandlers.has('goblin:terminal-close')).toBe(true)
     expect(ipcHandlers.has('goblin:terminal-prune-repo')).toBe(true)
+    expect(ipcHandlers.has('goblin:terminal-notify-bell')).toBe(true)
     expect(ipcHandlers.has('goblin:terminal-close-repo')).toBe(false)
     expect(ipcHandlers.has('goblin:terminal-close-worktree')).toBe(false)
   })
@@ -282,6 +309,57 @@ describe('terminal IPC', () => {
       }),
     ).toBe(true)
   })
+
+  test('shows a system notification for trusted bell requests', async () => {
+    const { BrowserWindow, Notification, app } = await import('electron')
+    const flashFrame = vi.fn()
+    vi.mocked(BrowserWindow.fromWebContents).mockReturnValueOnce({
+      isDestroyed: () => false,
+      isFocused: () => false,
+      flashFrame,
+    } as any)
+
+    await expect(
+      invoke('goblin:terminal-notify-bell', { title: 'Terminal bell', body: 'zsh needs attention in feature', repoRoot: '/tmp/repo' }),
+    ).resolves.toBe(true)
+    expect(flashFrame).toHaveBeenCalledWith(true)
+    expect(app.dock?.bounce).toHaveBeenCalledWith('informational')
+    expect(Notification).toHaveBeenCalledWith({
+      title: 'Terminal bell',
+      body: 'zsh needs attention in feature',
+      silent: true,
+    })
+  })
+
+  test('returns false when the notification emits a failed event', async () => {
+    const { BrowserWindow, Notification } = await import('electron')
+    vi.mocked(BrowserWindow.fromWebContents).mockReturnValueOnce({
+      isDestroyed: () => false,
+      isFocused: () => true,
+      flashFrame: vi.fn(),
+    } as any)
+    vi.mocked(Notification).mockImplementationOnce(mockNotificationEmitting('failed') as any)
+
+    await expect(
+      invoke('goblin:terminal-notify-bell', { title: 'Terminal bell', body: 'zsh needs attention', repoRoot: '/tmp/repo' }),
+    ).resolves.toBe(false)
+  })
+
+  test('returns true when Notification.isSupported() is false (flashFrame/bounce already fired)', async () => {
+    const { BrowserWindow, Notification } = await import('electron')
+    const flashFrame = vi.fn()
+    vi.mocked(BrowserWindow.fromWebContents).mockReturnValueOnce({
+      isDestroyed: () => false,
+      isFocused: () => false,
+      flashFrame,
+    } as any)
+    vi.mocked(Notification.isSupported).mockReturnValueOnce(false)
+
+    await expect(
+      invoke('goblin:terminal-notify-bell', { title: 'Terminal bell', body: 'zsh needs attention', repoRoot: '/tmp/repo' }),
+    ).resolves.toBe(true)
+    expect(flashFrame).toHaveBeenCalledWith(true)
+  })
 })
 
 describe('terminal session cleanup helpers', () => {
@@ -297,13 +375,13 @@ describe('terminal session cleanup helpers', () => {
 })
 
 function invoke<TInput>(channel: string, input: TInput): unknown {
-  return invokeWithSender(channel, input, { id: 1, once: vi.fn() })
+  return invokeWithSender(channel, input, { id: 1, once: vi.fn(), isDestroyed: () => false })
 }
 
 function invokeWithSender<TInput>(
   channel: string,
   input: TInput,
-  sender: { id: number; once: ReturnType<typeof vi.fn> },
+  sender: { id: number; once: ReturnType<typeof vi.fn>; isDestroyed?: () => boolean },
 ): unknown {
   return invokeWithEvent(channel, input, {
     sender,

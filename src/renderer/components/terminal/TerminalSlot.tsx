@@ -5,13 +5,15 @@ import {
   useMemo,
   useRef,
   useState,
+  type DragEvent,
   type FocusEvent,
   type KeyboardEvent,
 } from 'react'
 import { Button } from '#/renderer/components/ui/button.tsx'
+import { cn } from '#/renderer/lib/cn.ts'
 import { setTerminalFocused } from '#/renderer/terminal-focus.ts'
+import { goblin } from '#/renderer/rpc.ts'
 import { useT } from '#/renderer/stores/i18n.ts'
-import { useReposStore } from '#/renderer/stores/repos/store.ts'
 import { terminalSessionGroupKey, terminalSessionScope } from '#/renderer/components/terminal/terminal-session-utils.ts'
 import { useTerminalSessionContext } from '#/renderer/components/terminal/terminal-session-context.ts'
 import { TerminalSwitcher } from '#/renderer/components/terminal/TerminalSwitcher.tsx'
@@ -35,7 +37,8 @@ export function TerminalSlot({ base }: TerminalSlotProps) {
     activeDescriptor,
     sessionSummaries,
     setActive,
-    closeTerminal,
+    clearBell,
+    closeTerminalAndDismissDetailIfLast,
     attach,
     detach,
     isTerminalFocusTarget,
@@ -44,10 +47,9 @@ export function TerminalSlot({ base }: TerminalSlotProps) {
     findNext,
     findPrevious,
     clearSearch,
+    writeInput,
   } = context
   const groupKey = terminalSessionGroupKey(terminalSessionScope(base))
-  const repoId = base.kind === 'remote' ? base.repoId : base.repoRoot
-  const { worktreePath } = base
   const descriptor = useMemo(() => activeDescriptor(groupKey), [activeDescriptor, groupKey, version])
   const key = descriptor?.key ?? null
   const summaries = useMemo(() => sessionSummaries(groupKey), [groupKey, sessionSummaries, version])
@@ -70,6 +72,18 @@ export function TerminalSlot({ base }: TerminalSlotProps) {
   }, [attach, descriptor, detach])
 
   useEffect(() => {
+    if (!key || typeof document === 'undefined' || !document.hasFocus()) return
+    clearBell(key)
+  }, [clearBell, key, version])
+
+  useEffect(() => {
+    if (!key) return
+    const handleFocus = () => clearBell(key)
+    window.addEventListener('focus', handleFocus)
+    return () => window.removeEventListener('focus', handleFocus)
+  }, [clearBell, key])
+
+  useEffect(() => {
     if (searchOpen) searchInputRef.current?.focus({ preventScroll: true })
   }, [searchOpen])
 
@@ -86,10 +100,9 @@ export function TerminalSlot({ base }: TerminalSlotProps) {
   const newTerminal = useCallback(() => createTerminal(base), [base, createTerminal])
   const closeTerminalKey = useCallback(
     (terminalKey: string) => {
-      const remaining = closeTerminal(terminalKey)
-      if (remaining.length === 0) useReposStore.getState().dismissExitedTerminalDetail(repoId, worktreePath)
+      closeTerminalAndDismissDetailIfLast(terminalKey, base)
     },
-    [closeTerminal, repoId, worktreePath],
+    [base, closeTerminalAndDismissDetailIfLast],
   )
   const closeSearch = useCallback(() => {
     setSearchOpen(false)
@@ -158,6 +171,42 @@ export function TerminalSlot({ base }: TerminalSlotProps) {
         : t('terminal.search-no-results')
       : ''
 
+  const [dragOver, setDragOver] = useState(false)
+  const handleDragEnter = useCallback((event: DragEvent<HTMLDivElement>) => {
+    if (!event.dataTransfer.types.includes('Files')) return
+    event.preventDefault()
+    setDragOver(true)
+  }, [])
+  const handleDragOver = useCallback((event: DragEvent<HTMLDivElement>) => {
+    if (!event.dataTransfer.types.includes('Files')) return
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'copy'
+  }, [])
+  const handleDragLeave = useCallback((event: DragEvent<HTMLDivElement>) => {
+    if (!event.dataTransfer.types.includes('Files')) return
+    const relatedTarget = event.relatedTarget
+    if (!(relatedTarget instanceof Node) || !event.currentTarget.contains(relatedTarget)) setDragOver(false)
+  }, [])
+  const handleDrop = useCallback(
+    (event: DragEvent<HTMLDivElement>) => {
+      if (!event.dataTransfer.types.includes('Files')) return
+      event.preventDefault()
+      setDragOver(false)
+      if (!key) return
+      const paths = Array.from(event.dataTransfer.files)
+        .map((file) => goblin.pathForFile(file))
+        .filter((path) => path.length > 0)
+      if (paths.length === 0) return
+      const escaped = paths.map(shellEscapePath).join(' ')
+      writeInput(key, escaped)
+    },
+    [key, writeInput],
+  )
+
+  const progress = snapshot.progress
+  const progressVariant =
+    progress?.state === 2 ? 'error' : progress?.state === 4 ? 'warning' : progress?.state === 3 ? 'indeterminate' : ''
+
   return (
     <div
       className="goblin-terminal-slot"
@@ -165,7 +214,26 @@ export function TerminalSlot({ base }: TerminalSlotProps) {
       onFocusCapture={handleFocus}
       onBlurCapture={handleBlur}
       onKeyDownCapture={handleKeyDownCapture}
+      onDragEnter={handleDragEnter}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
     >
+      {progress && (
+        <div
+          className={cn('goblin-terminal-progress', progressVariant && `goblin-terminal-progress--${progressVariant}`)}
+          role="progressbar"
+          aria-label={t('terminal.progress')}
+          aria-valuenow={progress.state === 3 ? undefined : progress.value}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-busy={progress.state === 3 ? true : undefined}
+        >
+          {progress.state !== 3 && (
+            <div className="goblin-terminal-progress__bar" style={{ width: `${progress.value}%` }} />
+          )}
+        </div>
+      )}
       <div ref={hostRef} className="goblin-terminal-slot__host" />
       <TerminalSwitcher
         groupKey={groupKey}
@@ -210,6 +278,11 @@ export function TerminalSlot({ base }: TerminalSlotProps) {
           <span>{t(snapshot.message ?? 'error.unknown')}</span>
         </div>
       )}
+      {dragOver && (
+        <div className="goblin-terminal-slot__drop-overlay">
+          <span>{t('terminal.drop-hint')}</span>
+        </div>
+      )}
     </div>
   )
 }
@@ -217,4 +290,10 @@ export function TerminalSlot({ base }: TerminalSlotProps) {
 function isTerminalSearchShortcut(event: KeyboardEvent<HTMLDivElement>): boolean {
   if (event.altKey || event.key.toLowerCase() !== 'f') return false
   return event.metaKey || (event.ctrlKey && event.shiftKey)
+}
+
+function shellEscapePath(path: string): string {
+  if (path.length === 0) return "''"
+  if (/^[A-Za-z0-9_@%+=:,./-]+$/.test(path)) return path
+  return "'" + path.replace(/'/g, "'\\''") + "'"
 }

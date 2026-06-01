@@ -13,11 +13,15 @@ const xtermMocks = vi.hoisted(() => {
   const serializeAddons: any[] = []
   const unicodeAddons: any[] = []
   const webLinkAddons: any[] = []
+  const imageAddons: any[] = []
+  const progressAddons: any[] = []
   const addonFailures = {
     search: false,
     serialize: false,
     unicode: false,
     webLinks: false,
+    image: false,
+    progress: false,
   }
 
   class MockTerminal {
@@ -25,34 +29,60 @@ const xtermMocks = vi.hoisted(() => {
     rows: number
     unicode = { activeVersion: '6' }
     options: {
+      allowProposedApi?: boolean
       cursorBlink?: boolean
+      fontFamily?: string
+      fontSize?: number
+      lineHeight?: number
+      macOptionIsMeta?: boolean
       minimumContrastRatio?: number
+      rescaleOverlappingGlyphs?: boolean
       theme?: { background?: string; foreground?: string }
       scrollOnUserInput?: boolean
     }
     element: HTMLDivElement | null = null
+    modes = { applicationCursorKeysMode: false }
+    refresh = vi.fn()
     write = vi.fn()
     reset = vi.fn()
     dispose = vi.fn()
     focus = vi.fn(() => this.textarea?.focus())
+    customKeyEventHandler: ((event: KeyboardEvent) => boolean) | null = null
+    _core = {
+      _charSizeService: { measure: vi.fn() },
+      _renderService: { clear: vi.fn() },
+    }
     private textarea: HTMLTextAreaElement | null = null
     private resizeHandlers: Array<(size: { cols: number; rows: number }) => void> = []
     private dataHandlers: Array<(data: string) => void> = []
     private binaryHandlers: Array<(data: string) => void> = []
+    private bellHandlers: Array<() => void> = []
 
     constructor(options: {
+      allowProposedApi?: boolean
       cols: number
       rows: number
       cursorBlink?: boolean
+      fontFamily?: string
+      fontSize?: number
+      lineHeight?: number
+      macOptionIsMeta?: boolean
       minimumContrastRatio?: number
+      rescaleOverlappingGlyphs?: boolean
       theme?: { background?: string; foreground?: string }
       scrollOnUserInput?: boolean
     }) {
       this.cols = options.cols
       this.rows = options.rows
       this.options = {
+        allowProposedApi: options.allowProposedApi,
         cursorBlink: options.cursorBlink,
+        fontFamily: options.fontFamily,
+        fontSize: options.fontSize,
+        lineHeight: options.lineHeight,
+        macOptionIsMeta: options.macOptionIsMeta,
         minimumContrastRatio: options.minimumContrastRatio,
+        rescaleOverlappingGlyphs: options.rescaleOverlappingGlyphs,
         theme: options.theme,
         scrollOnUserInput: options.scrollOnUserInput,
       }
@@ -86,6 +116,15 @@ const xtermMocks = vi.hoisted(() => {
       return { dispose: vi.fn(() => (this.resizeHandlers = this.resizeHandlers.filter((handler) => handler !== cb))) }
     }
 
+    onBell(cb: () => void) {
+      this.bellHandlers.push(cb)
+      return { dispose: vi.fn(() => (this.bellHandlers = this.bellHandlers.filter((handler) => handler !== cb))) }
+    }
+
+    attachCustomKeyEventHandler(cb: (event: KeyboardEvent) => boolean) {
+      this.customKeyEventHandler = cb
+    }
+
     resize(cols: number, rows: number) {
       this.cols = cols
       this.rows = rows
@@ -94,6 +133,10 @@ const xtermMocks = vi.hoisted(() => {
 
     emitData(data: string) {
       for (const handler of this.dataHandlers) handler(data)
+    }
+
+    emitBell() {
+      for (const handler of this.bellHandlers) handler()
     }
   }
 
@@ -191,6 +234,42 @@ const xtermMocks = vi.hoisted(() => {
     }
   }
 
+  class MockImageAddon {
+    term: MockTerminal | null = null
+
+    constructor() {
+      if (addonFailures.image) throw new Error('image addon failed')
+      imageAddons.push(this)
+    }
+
+    activate(term: MockTerminal) {
+      this.term = term
+    }
+  }
+
+  class MockProgressAddon {
+    term: MockTerminal | null = null
+    private changeHandlers: Array<(state: { state: number; value: number }) => void> = []
+
+    constructor() {
+      if (addonFailures.progress) throw new Error('progress addon failed')
+      progressAddons.push(this)
+    }
+
+    activate(term: MockTerminal) {
+      this.term = term
+    }
+
+    onChange(cb: (state: { state: number; value: number }) => void) {
+      this.changeHandlers.push(cb)
+      return { dispose: vi.fn(() => (this.changeHandlers = this.changeHandlers.filter((h) => h !== cb))) }
+    }
+
+    emitProgress(state: number, value: number) {
+      for (const handler of this.changeHandlers) handler({ state, value })
+    }
+  }
+
   return {
     terminals,
     fitAddons,
@@ -198,6 +277,8 @@ const xtermMocks = vi.hoisted(() => {
     serializeAddons,
     unicodeAddons,
     webLinkAddons,
+    imageAddons,
+    progressAddons,
     addonFailures,
     MockTerminal,
     MockFitAddon,
@@ -205,11 +286,15 @@ const xtermMocks = vi.hoisted(() => {
     MockSerializeAddon,
     MockUnicode11Addon,
     MockWebLinksAddon,
+    MockImageAddon,
+    MockProgressAddon,
   }
 })
 
 vi.mock('@xterm/xterm', () => ({ Terminal: xtermMocks.MockTerminal }))
 vi.mock('@xterm/addon-fit', () => ({ FitAddon: xtermMocks.MockFitAddon }))
+vi.mock('@xterm/addon-image', () => ({ ImageAddon: xtermMocks.MockImageAddon }))
+vi.mock('@xterm/addon-progress', () => ({ ProgressAddon: xtermMocks.MockProgressAddon }))
 vi.mock('@xterm/addon-search', () => ({ SearchAddon: xtermMocks.MockSearchAddon }))
 vi.mock('@xterm/addon-serialize', () => ({ SerializeAddon: xtermMocks.MockSerializeAddon }))
 vi.mock('@xterm/addon-unicode11', () => ({ Unicode11Addon: xtermMocks.MockUnicode11Addon }))
@@ -225,14 +310,55 @@ class MockResizeObserver {
   }
 }
 
+class MockFontFaceSet {
+  private readonly loadingDoneHandlers = new Set<() => void>()
+  private readonly handlerMap = new Map<EventListenerOrEventListenerObject, () => void>()
+  private readyDeferred = deferred<void>()
+  ready = this.readyDeferred.promise
+
+  reset(): void {
+    this.loadingDoneHandlers.clear()
+    this.handlerMap.clear()
+    this.readyDeferred = deferred<void>()
+    this.ready = this.readyDeferred.promise
+  }
+
+  addEventListener(event: string, listener: EventListenerOrEventListenerObject): void {
+    if (event !== 'loadingdone') return
+    const handler =
+      typeof listener === 'function' ? () => listener(new Event('loadingdone')) : () => listener.handleEvent(new Event('loadingdone'))
+    this.handlerMap.set(listener, handler)
+    this.loadingDoneHandlers.add(handler)
+  }
+
+  removeEventListener(event: string, listener: EventListenerOrEventListenerObject): void {
+    if (event !== 'loadingdone') return
+    const handler = this.handlerMap.get(listener)
+    if (!handler) return
+    this.handlerMap.delete(listener)
+    this.loadingDoneHandlers.delete(handler)
+  }
+
+  resolveReady(): void {
+    this.readyDeferred.resolve()
+  }
+
+  emitLoadingDone(): void {
+    for (const handler of this.loadingDoneHandlers) handler()
+  }
+}
+
 const terminalCalls = {
   open: vi.fn<Window['goblin']['terminal']['open']>(),
   restart: vi.fn<Window['goblin']['terminal']['restart']>(),
   write: vi.fn<Window['goblin']['terminal']['write']>(),
   resize: vi.fn<Window['goblin']['terminal']['resize']>(),
   close: vi.fn<Window['goblin']['terminal']['close']>(),
+  notifyBell: vi.fn<Window['goblin']['terminal']['notifyBell']>(),
+  setBadge: vi.fn<Window['goblin']['terminal']['setBadge']>(),
 }
 const invokeRpc = vi.fn<Window['goblin']['invokeRpc']>()
+const mockFonts = new MockFontFaceSet()
 
 const descriptor = {
   key: 'local\0/repo\0/worktree\0terminal-1',
@@ -261,12 +387,19 @@ beforeEach(() => {
   xtermMocks.serializeAddons.length = 0
   xtermMocks.unicodeAddons.length = 0
   xtermMocks.webLinkAddons.length = 0
-  Object.assign(xtermMocks.addonFailures, { search: false, serialize: false, unicode: false, webLinks: false })
+  xtermMocks.imageAddons.length = 0
+  xtermMocks.progressAddons.length = 0
+  Object.assign(xtermMocks.addonFailures, {
+    search: false, serialize: false, unicode: false, webLinks: false,
+    image: false, progress: false,
+  })
   MockResizeObserver.instances.length = 0
   vi.clearAllMocks()
   installTerminalThemeStyles()
   document.documentElement.setAttribute('data-theme', 'light')
+  mockFonts.reset()
   Object.defineProperty(globalThis, 'ResizeObserver', { configurable: true, value: MockResizeObserver })
+  Object.defineProperty(document, 'fonts', { configurable: true, value: mockFonts })
   Object.defineProperty(globalThis, 'requestAnimationFrame', {
     configurable: true,
     value: (cb: FrameRequestCallback) => window.setTimeout(() => cb(performance.now()), 0),
@@ -299,6 +432,7 @@ beforeEach(() => {
         write: terminalCalls.write.mockResolvedValue(true),
         resize: terminalCalls.resize.mockResolvedValue(true),
         close: terminalCalls.close.mockResolvedValue(true),
+        notifyBell: terminalCalls.notifyBell.mockResolvedValue(true),
         pruneRepo: vi.fn(),
         onOutput: vi.fn(),
         onExit: vi.fn(),
@@ -328,6 +462,9 @@ describe('ManagedTerminalSession', () => {
       rows: 30,
     })
     expect(xtermMocks.terminals[0]!.options.minimumContrastRatio).toBe(4.5)
+    expect(xtermMocks.terminals[0]!.options.allowProposedApi).toBe(true)
+    expect(xtermMocks.terminals[0]!.options.fontFamily).toContain('Goblin Mono')
+    expect(xtermMocks.terminals[0]!.options.rescaleOverlappingGlyphs).toBe(true)
     expect(terminalCalls.restart).not.toHaveBeenCalled()
     expect(session.snapshot().phase).toBe('open')
   })
@@ -362,6 +499,44 @@ describe('ManagedTerminalSession', () => {
     })
   })
 
+  test('remeasures and refits after fonts finish loading', async () => {
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const session = new ManagedTerminalSession(descriptor, vi.fn())
+
+    session.attach(host)
+    await flushTerminalStart()
+    await flushUntil(() => session.snapshot().phase === 'open')
+
+    const term = xtermMocks.terminals[0]!
+    const fitAddon = xtermMocks.fitAddons[0]!
+    term._core._charSizeService.measure.mockClear()
+    term._core._renderService.clear.mockClear()
+    term.refresh.mockClear()
+    fitAddon.fit.mockClear()
+
+    mockFonts.resolveReady()
+    await flushFontRefit()
+
+    expect(term._core._charSizeService.measure).toHaveBeenCalledTimes(1)
+    expect(term._core._renderService.clear).toHaveBeenCalledTimes(1)
+    expect(fitAddon.fit).toHaveBeenCalledTimes(1)
+    expect(term.refresh).toHaveBeenCalledWith(0, term.rows - 1)
+
+    term._core._charSizeService.measure.mockClear()
+    term._core._renderService.clear.mockClear()
+    term.refresh.mockClear()
+    fitAddon.fit.mockClear()
+
+    mockFonts.emitLoadingDone()
+    await flushFontRefit()
+
+    expect(term._core._charSizeService.measure).toHaveBeenCalledTimes(1)
+    expect(term._core._renderService.clear).toHaveBeenCalledTimes(1)
+    expect(fitAddon.fit).toHaveBeenCalledTimes(1)
+    expect(term.refresh).toHaveBeenCalledWith(0, term.rows - 1)
+  })
+
   test('loads terminal addons and exposes search and serialization', async () => {
     const host = document.createElement('div')
     document.body.appendChild(host)
@@ -387,6 +562,41 @@ describe('ManagedTerminalSession', () => {
     session.clearSearch()
     expect(xtermMocks.searchAddons[0]!.clearDecorations).toHaveBeenCalled()
     expect(session.snapshot().search).toBeUndefined()
+  })
+
+  test('handles mac option arrows with VS Code-like terminal input', async () => {
+    const savedPlatform = navigator.platform
+    Object.defineProperty(window.navigator, 'platform', { configurable: true, value: 'MacIntel' })
+    try {
+      const host = document.createElement('div')
+      document.body.appendChild(host)
+      const session = new ManagedTerminalSession(descriptor, vi.fn())
+
+      session.attach(host)
+      await flushTerminalStart()
+      await flushUntil(() => session.snapshot().phase === 'open')
+
+      const term = xtermMocks.terminals[0]!
+      expect(term.options.macOptionIsMeta).toBe(true)
+      expect(term.customKeyEventHandler).toBeTypeOf('function')
+
+      expect(term.customKeyEventHandler?.(optionArrow('ArrowLeft'))).toBe(false)
+      expect(term.customKeyEventHandler?.(optionArrow('ArrowRight'))).toBe(false)
+      expect(term.customKeyEventHandler?.(optionArrow('ArrowUp'))).toBe(false)
+      expect(term.customKeyEventHandler?.(optionArrow('ArrowDown'))).toBe(false)
+      await Promise.resolve()
+
+      expect(terminalCalls.write).toHaveBeenNthCalledWith(1, { sessionId: 'session-1', data: '\x1bb' })
+      expect(terminalCalls.write).toHaveBeenNthCalledWith(2, { sessionId: 'session-1', data: '\x1bf' })
+      expect(terminalCalls.write).toHaveBeenNthCalledWith(3, { sessionId: 'session-1', data: '\x1b[A' })
+      expect(terminalCalls.write).toHaveBeenNthCalledWith(4, { sessionId: 'session-1', data: '\x1b[B' })
+
+      term.modes.applicationCursorKeysMode = true
+      expect(term.customKeyEventHandler?.(optionArrow('ArrowLeft'))).toBe(true)
+      expect(terminalCalls.write).toHaveBeenCalledTimes(4)
+    } finally {
+      Object.defineProperty(window.navigator, 'platform', { configurable: true, value: savedPlatform })
+    }
   })
 
   test('opens web links through the safe app rpc', async () => {
@@ -424,7 +634,10 @@ describe('ManagedTerminalSession', () => {
   })
 
   test('opens terminal when optional addon setup fails', async () => {
-    Object.assign(xtermMocks.addonFailures, { search: true, serialize: true, unicode: true, webLinks: true })
+    Object.assign(xtermMocks.addonFailures, {
+      search: true, serialize: true, unicode: true, webLinks: true,
+      image: true, progress: true,
+    })
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const host = document.createElement('div')
     document.body.appendChild(host)
@@ -442,6 +655,9 @@ describe('ManagedTerminalSession', () => {
     expect(warnSpy).toHaveBeenCalledWith('[terminal] failed to load web links addon', expect.any(Error))
     expect(warnSpy).toHaveBeenCalledWith('[terminal] failed to load search addon', expect.any(Error))
     expect(warnSpy).toHaveBeenCalledWith('[terminal] failed to load serialize addon', expect.any(Error))
+    expect(warnSpy).toHaveBeenCalledWith('[terminal] failed to load image addon', expect.any(Error))
+    expect(warnSpy).toHaveBeenCalledWith('[terminal] failed to load progress addon', expect.any(Error))
+    expect(session.snapshot().progress).toBeUndefined()
     warnSpy.mockRestore()
   })
 
@@ -668,6 +884,107 @@ describe('ManagedTerminalSession', () => {
         ?.style.getPropertyValue('--goblin-terminal-background'),
     ).toBe('#111113')
   })
+
+  test('loads image and progress addons', async () => {
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const session = new ManagedTerminalSession(descriptor, vi.fn())
+
+    session.attach(host)
+    await flushTerminalStart()
+    await flushUntil(() => session.snapshot().phase === 'open')
+
+    expect(xtermMocks.imageAddons).toHaveLength(1)
+    expect(xtermMocks.progressAddons).toHaveLength(1)
+  })
+
+  test('emits bell events for provider-level policy handling', async () => {
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const notify = vi.fn()
+    const onBell = vi.fn()
+    const session = new ManagedTerminalSession(descriptor, notify, onBell)
+
+    session.attach(host)
+    await flushTerminalStart()
+    await flushUntil(() => session.snapshot().phase === 'open')
+
+    xtermMocks.terminals[0]!.emitBell()
+    expect(onBell).toHaveBeenCalledWith(descriptor, { processName: 'zsh', visible: true })
+  })
+
+  test('progress state appears in snapshot and clears on state 0', async () => {
+    const notify = vi.fn()
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const session = new ManagedTerminalSession(descriptor, notify)
+
+    session.attach(host)
+    await flushTerminalStart()
+    await flushUntil(() => session.snapshot().phase === 'open')
+    notify.mockClear()
+
+    xtermMocks.progressAddons[0]!.emitProgress(1, 75)
+    expect(session.snapshot().progress).toEqual({ state: 1, value: 75 })
+    expect(notify).toHaveBeenCalledTimes(1)
+
+    xtermMocks.progressAddons[0]!.emitProgress(1, 100)
+    expect(session.snapshot().progress).toEqual({ state: 1, value: 100 })
+
+    xtermMocks.progressAddons[0]!.emitProgress(0, 0)
+    expect(session.snapshot().progress).toBeUndefined()
+  })
+
+  test('progress error and indeterminate states', async () => {
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const session = new ManagedTerminalSession(descriptor, vi.fn())
+
+    session.attach(host)
+    await flushTerminalStart()
+    await flushUntil(() => session.snapshot().phase === 'open')
+
+    xtermMocks.progressAddons[0]!.emitProgress(2, 80)
+    expect(session.snapshot().progress).toEqual({ state: 2, value: 80 })
+
+    xtermMocks.progressAddons[0]!.emitProgress(3, 0)
+    expect(session.snapshot().progress).toEqual({ state: 3, value: 0 })
+  })
+
+  test('progress state is cleared on restart', async () => {
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const session = new ManagedTerminalSession(descriptor, vi.fn())
+
+    session.attach(host)
+    await flushTerminalStart()
+    await flushUntil(() => session.snapshot().phase === 'open')
+
+    xtermMocks.progressAddons[0]!.emitProgress(1, 75)
+    expect(session.snapshot().progress).toEqual({ state: 1, value: 75 })
+
+    session.restart()
+    await flushTerminalStart()
+    await flushUntil(() => session.snapshot().phase === 'open')
+
+    expect(session.snapshot().progress).toBeUndefined()
+  })
+
+  test('progress value is clamped to 0-100', async () => {
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const session = new ManagedTerminalSession(descriptor, vi.fn())
+
+    session.attach(host)
+    await flushTerminalStart()
+    await flushUntil(() => session.snapshot().phase === 'open')
+
+    xtermMocks.progressAddons[0]!.emitProgress(1, 150)
+    expect(session.snapshot().progress).toEqual({ state: 1, value: 100 })
+
+    xtermMocks.progressAddons[0]!.emitProgress(1, -10)
+    expect(session.snapshot().progress).toEqual({ state: 1, value: 0 })
+  })
 })
 
 function openResult(
@@ -695,11 +1012,21 @@ function deferred<T>() {
   return { promise, resolve, reject }
 }
 
+function optionArrow(key: string): KeyboardEvent {
+  return new KeyboardEvent('keydown', { key, altKey: true, cancelable: true })
+}
+
 async function flushTerminalStart(): Promise<void> {
   for (let i = 0; i < 8; i += 1) await new Promise((resolve) => setTimeout(resolve, 0))
 }
 
 async function flushResizeDebounce(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 100))
+  await Promise.resolve()
+}
+
+async function flushFontRefit(): Promise<void> {
+  await Promise.resolve()
   await new Promise((resolve) => setTimeout(resolve, 100))
   await Promise.resolve()
 }

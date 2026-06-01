@@ -78,7 +78,7 @@ describe('terminal session utils', () => {
       isTerminalDescriptorLive(
         {
           [REMOTE_TARGET.id]: {
-            data: { branches: [{ name: 'feature', worktreePath: '/srv/goblin-feature' }] },
+            data: { branches: [createBranch('feature', { worktreePath: '/srv/goblin-feature' })] },
           } as any,
         },
         descriptor,

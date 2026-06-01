@@ -1,4 +1,5 @@
 import { appendRepoEvent, errorEvent, updateIfFresh } from '#/renderer/stores/repos/helpers.ts'
+import { isRepoUnavailableReason } from '#/renderer/stores/repos/availability.ts'
 import { persistRepoCache } from '#/renderer/stores/repos/persistence.ts'
 import { terminalBridge } from '#/renderer/terminal.ts'
 import type { DetailTab, ReposGet, ReposSet } from '#/renderer/stores/repos/types.ts'
@@ -79,6 +80,11 @@ function localRepoFresh(get: ReposGet, id: string, token: number): boolean {
   return !!repo && repo.kind !== 'remote' && repo.instanceToken === token
 }
 
+function pullRequestRefreshFailed(get: ReposGet, id: string, token: number): boolean {
+  const repo = get().repos[id]
+  return !!repo && repo.instanceToken === token && repo.resources.pullRequests.error !== null
+}
+
 async function refreshSelectedPullRequest(get: ReposGet, id: string, token: number): Promise<void> {
   const repo = get().repos[id]
   if (!repo || repo.instanceToken !== token || !repo.ui.selectedBranch) return
@@ -91,8 +97,10 @@ async function refreshPullRequestsAfterSnapshot(
 ): Promise<void> {
   if (!options.isSnapshotCurrent() || !localRepoFresh(get, options.id, options.token)) return
   await get().refreshPullRequests(options.id, options.branchNames, { token: options.token, mode: 'summary' })
+  if (pullRequestRefreshFailed(get, options.id, options.token)) return
   if (!options.isSnapshotCurrent() || !localRepoFresh(get, options.id, options.token)) return
   await refreshSelectedPullRequest(get, options.id, options.token)
+  if (pullRequestRefreshFailed(get, options.id, options.token)) return
   if (!options.isSnapshotCurrent() || !localRepoFresh(get, options.id, options.token)) return
   await get().refreshPullRequests(options.id, options.branchNames, {
     token: options.token,
@@ -114,7 +122,13 @@ export function runSnapshotSuccessWorkflow(
 ): void {
   if (!options.isSnapshotCurrent()) return
   const repo = get().repos[options.id]
-  if (repo?.kind !== 'remote') {
+  if (repo?.kind === 'remote') {
+    void terminalBridge
+      .pruneRepo({ kind: 'remote', repoId: options.id, worktreePaths: options.worktreePaths })
+      .catch((err) => {
+        console.warn('[terminal] failed to prune remote repo sessions', err)
+      })
+  } else {
     persistRepoCache(set, repo, options.token)
     void terminalBridge.pruneRepo({ repoRoot: options.id, worktreePaths: options.worktreePaths }).catch((err) => {
       console.warn('[terminal] failed to prune repo sessions', err)
@@ -163,6 +177,7 @@ export async function runRefreshAllWorkflow(get: ReposGet, options: { id: string
   // only refreshes when the changes panel is visible.
   const after = get().repos[options.id]
   if (!after || after.instanceToken !== options.token) return
+  if (after.availability.phase === 'unavailable') return
   if (after.kind !== 'remote' || after.ui.detailTab === 'changes') {
     await get().refreshStatus(options.id, { token: options.token })
   }
@@ -190,6 +205,10 @@ export async function runBackgroundFetchResultWorkflow(
 ): Promise<void> {
   if (!options.result.ok) {
     if (options.result.message === 'cancelled' || options.result.message === 'error.network-op-in-progress') return
+    if (isRepoUnavailableReason(options.result.message)) {
+      await get().refreshSnapshot(options.id, { token: options.token })
+      return
+    }
     console.warn('[backgroundFetch] git fetch failed:', options.result.message)
     updateIfFresh(set, options.id, options.token, (r) => {
       r.remote.fetchFailed = true

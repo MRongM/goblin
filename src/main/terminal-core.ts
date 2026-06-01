@@ -1,4 +1,4 @@
-import { BrowserWindow } from 'electron'
+import { BrowserWindow, app } from 'electron'
 import crypto from 'node:crypto'
 import path from 'node:path'
 import * as pty from 'node-pty'
@@ -128,7 +128,6 @@ export function openTerminalSession(input: TerminalOpenSessionInput): TerminalOp
   session.disposables.push(
     session.pty.onExit(() => {
       session.pty = null
-      disposeSessionListeners(session)
       // Exit IPC is a renderer UI hint for dismissing the terminal pane; main
       // still tears down the session immediately, so missed delivery only leaves
       // stale renderer chrome while subsequent writes/resizes no-op.
@@ -234,6 +233,11 @@ export function isValidTerminalSessionId(value: unknown): value is string {
 
 export function isValidTerminalWriteData(value: unknown): value is string {
   return typeof value === 'string' && value.length <= MAX_TERMINAL_WRITE_CHARS
+}
+
+export function wireTerminalSessionCleanup(): void {
+  app.on('will-quit', closeAllTerminalSessions)
+  app.on('before-quit', closeAllTerminalSessions)
 }
 
 function appendSessionData(session: TerminalSession, data: string): number {
@@ -379,7 +383,17 @@ function sendToOwner(
   channel: string,
   event: TerminalOutputEvent | TerminalExitEvent,
 ): void {
-  const win = BrowserWindow.getAllWindows().find((candidate) => candidate.webContents.id === ownerWebContentsId)
+  const win = BrowserWindow.getAllWindows().find((candidate) => {
+    try {
+      return (
+        !candidate.isDestroyed() &&
+        !candidate.webContents.isDestroyed() &&
+        candidate.webContents.id === ownerWebContentsId
+      )
+    } catch {
+      return false
+    }
+  })
   if (win) sendToWindow(win, channel, event)
 }
 

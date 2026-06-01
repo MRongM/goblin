@@ -1,7 +1,6 @@
 import type { RepoBranchActionKind } from '#/renderer/stores/repos/branch-action-types.ts'
-import { resourceBusy } from '#/renderer/stores/repos/resources.ts'
-import type { RepoState } from '#/renderer/stores/repos/types.ts'
-import type { BranchInfo } from '#/renderer/types.ts'
+import { branchActionKindFromReason, isBranchActionReason } from '#/renderer/stores/repos/operations.ts'
+import type { RepoBranchState, RepoState } from '#/renderer/stores/repos/types.ts'
 
 export type BranchActionItemId =
   | 'copyPatch'
@@ -9,26 +8,28 @@ export type BranchActionItemId =
   | 'checkoutRemoteBranch'
   | 'pull'
   | 'push'
-  | 'github'
+  | 'remote'
   | 'terminal'
   | 'editor'
   | 'deleteBranch'
   | 'removeWorktree'
 
 export function isBranchActionBlocked(repo: RepoState): boolean {
-  return resourceBusy(repo.resources.branchAction)
+  return repo.operations.branchAction.phase !== 'idle'
 }
 
 export function repoBranchActionsAvailable(repo: RepoState): boolean {
+  if (repo.availability.phase === 'unavailable') return false
   return repo.kind !== 'remote' || !!repo.remoteTarget
 }
 
-export function branchActionsAvailable(repo: RepoState, branch: BranchInfo | null | undefined): boolean {
+export function branchActionsAvailable(repo: RepoState, branch: RepoBranchState | null | undefined): boolean {
   if (!branch || !repoBranchActionsAvailable(repo)) return false
   return true
 }
 
 export function branchActionItemIdFromKind(kind: RepoBranchActionKind | null): BranchActionItemId | null {
+  if (!kind) return null
   switch (kind) {
     case 'checkout':
       return 'checkout'
@@ -43,18 +44,18 @@ export function branchActionItemIdFromKind(kind: RepoBranchActionKind | null): B
     case 'removeWorktree':
       return 'removeWorktree'
     case 'createWorktree':
-    case null:
       return null
   }
 }
 
-export function branchActionItemIdFromResource(repo: RepoState, branchName: string): BranchActionItemId | null {
-  const action = repo.resources.branchAction
-  if (!resourceBusy(action)) return null
-  if (action.target !== branchName) return null
-  return branchActionItemIdFromKind(action.kind)
+export function branchActionBusyItemId(repo: RepoState, branchName: string): BranchActionItemId | null {
+  const action = repo.operations.branchAction
+  if (action.phase === 'idle' || action.target !== branchName || !isBranchActionReason(action.reason)) return null
+  return branchActionItemIdFromKind(branchActionKindFromReason(action.reason))
 }
 
-export function branchActionItemIdFromOperation(repo: RepoState, branchName: string): BranchActionItemId | null {
-  return branchActionItemIdFromResource(repo, branchName)
+export function branchActionDisplayPhase(repo: RepoState, branchName: string): 'queued' | 'running' | null {
+  const action = repo.operations.branchAction
+  if (action.phase === 'idle' || action.target !== branchName) return null
+  return action.phase
 }

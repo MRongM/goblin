@@ -1,5 +1,13 @@
 import type { StoreApi } from 'zustand'
-import type { BranchInfo, ExecResult, LogEntry, PullRequestFetchMode, WorktreeStatus } from '#/renderer/types.ts'
+import type {
+  BranchSnapshotInfo,
+  BrowserRemoteProvider,
+  ExecResult,
+  GitRemoteInfo,
+  LogEntry,
+  PullRequestFetchMode,
+  WorktreeStatus,
+} from '#/renderer/types.ts'
 import type { CommitDetail } from '#/shared/rpc.ts'
 import type { RemoteDiagnosticsResult, RemoteRepoTarget, RepoKind, RepoSessionEntry } from '#/shared/remote-repo.ts'
 import type {
@@ -9,12 +17,17 @@ import type {
 } from '#/shared/remote-ports.ts'
 import type { WorkspaceDetailPaneSizes, WorkspaceLayout } from '#/shared/workspace-layout.ts'
 import type { RepoBranchAction, RunBranchActionOptions } from '#/renderer/stores/repos/branch-action-types.ts'
+import type { RepoOperationsState } from '#/renderer/stores/repos/operations.ts'
 import type { RepoResourcesState } from '#/renderer/stores/repos/resources.ts'
 
 export type DetailTab = 'status' | 'changes' | 'commits' | 'terminal'
 export type BranchViewMode = 'all' | 'worktrees' | 'no-worktree'
 export type RepoWorkspaceLayout = WorkspaceLayout
 export type RepoDataSource = 'cache' | 'fresh'
+// Renderer branches keep only the worktree reference; metadata lives in worktreesByPath.
+export type RepoBranchState = Omit<BranchSnapshotInfo, 'worktree'> & {
+  worktree?: Pick<NonNullable<BranchSnapshotInfo['worktree']>, 'path'>
+}
 export type CommitDetailState =
   | { phase: 'idle' }
   | { phase: 'opening'; hash: string }
@@ -26,8 +39,21 @@ export interface BranchLogState {
   hasMore: boolean
 }
 
+export type RepoEventAction =
+  | { kind: 'checkout'; branch: string }
+  | { kind: 'checkoutRemoteBranch'; branch: string }
+  | { kind: 'pull'; branch: string }
+  | { kind: 'push'; branch: string }
+  | { kind: 'createWorktree'; branch: string; worktreePath: string }
+  | { kind: 'deleteBranch'; branch: string }
+  | { kind: 'removeWorktree'; branch: string; worktreePath: string; alsoDeleteBranch: boolean }
+
+export interface RepoResultEventOptions {
+  action?: RepoEventAction
+}
+
 export type RepoEvent =
-  | { id: number; kind: 'result'; result: { ok: boolean; message: string } }
+  | { id: number; kind: 'result'; result: { ok: boolean; message: string }; action?: RepoEventAction }
   | { id: number; kind: 'error'; message: string }
 
 /** Discriminated union: a successful open guarantees `id`; a failed
@@ -36,11 +62,21 @@ export type RepoEvent =
 export type OpenRepoResult = { ok: true; id: string } | { ok: false; message: string }
 
 export interface RepoDataState {
-  branches: BranchInfo[]
+  branches: RepoBranchState[]
   currentBranch: string
   logsByBranch: Record<string, BranchLogState>
   status: WorktreeStatus[]
   statusLoaded: boolean
+  worktreesByPath: Record<string, RepoWorktreeState>
+}
+
+export interface RepoWorktreeState {
+  path: string
+  branch?: string
+  isMain: boolean
+  isDirty?: boolean
+  changeCount?: number
+  isLocked?: boolean
 }
 
 export interface RepoUiState {
@@ -57,6 +93,13 @@ export interface RepoCacheState {
 }
 
 export interface RepoRemoteState {
+  remotes?: string[]
+  remoteDetails?: GitRemoteInfo[]
+  hasRemotes?: boolean
+  hasBrowserRemote?: boolean
+  browserRemoteProvider?: BrowserRemoteProvider
+  remoteProviders?: Record<string, BrowserRemoteProvider>
+  hasGitHubRemote?: boolean
   /** Sticky connectivity badge for background fetch failures. Unlike
    *  `resources.fetch.error`, this persists after the operation settles and
    *  is cleared by the next successful network operation. */
@@ -80,10 +123,12 @@ export interface RepoRemotePortsState {
   }
 }
 
+export type RepoAvailabilityState = { phase: 'available' } | { phase: 'unavailable'; reason: string; checkedAt: number }
+
 export interface CachedRepoState {
   savedAt: number
   name: string
-  data: Pick<RepoDataState, 'branches' | 'currentBranch' | 'status' | 'statusLoaded'>
+  data: Pick<RepoDataState, 'branches' | 'currentBranch' | 'status' | 'statusLoaded' | 'worktreesByPath'>
   ui: Pick<RepoUiState, 'selectedBranch' | 'branchViewMode' | 'detailTab'>
 }
 
@@ -98,16 +143,13 @@ export interface RepoState {
   instanceToken: number
   data: RepoDataState
   resources: RepoResourcesState
+  operations: RepoOperationsState
   ui: RepoUiState
   cache: RepoCacheState
   remote: RepoRemoteState
   remotePorts: RepoRemotePortsState
+  availability: RepoAvailabilityState
   events: RepoEvent[]
-}
-
-export interface MissingRepo {
-  path: string
-  reason: string
 }
 
 export interface ReposStore {
@@ -120,12 +162,7 @@ export interface ReposStore {
   /** Hydration flag — true once boot session is restored, so we don't
    *  overwrite the saved session with an empty one before restore. */
   sessionReady: boolean
-  /** Paths from the previous session that didn't probe successfully on
-   *  hydrate (folder moved/deleted, external drive not mounted). The
-   *  tab strip surfaces them so the user knows why their tabs didn't all
-   *  come back, and offers a "forget" action to remove them from the
-   *  saved session. */
-  missingFromSession: MissingRepo[]
+  branchSearchQueries: Record<string, string>
   detailCollapsed: boolean
   detailFocusMode: boolean
   workspaceLayout: RepoWorkspaceLayout
@@ -158,6 +195,7 @@ export interface ReposStore {
   setDetailPaneSizes: (sizes: WorkspaceDetailPaneSizes) => void
   resetLayout: () => void
   setBranchViewMode: (id: string, viewMode: BranchViewMode) => void
+  setBranchSearchQuery: (id: string, query: string) => void
   selectBranch: (id: string, branch: string) => void
   selectLog: (id: string, branch: string, hash: string) => void
   cycleActive: (direction: 1 | -1) => void
@@ -202,12 +240,14 @@ export interface ReposStore {
   openCommit: (id: string, hash: string) => Promise<void>
   closeCommit: (id: string) => void
 
-  setLastResult: (id: string, result: { ok: boolean; message: string }, token: number) => void
+  setLastResult: (
+    id: string,
+    result: { ok: boolean; message: string },
+    token: number,
+    options?: RepoResultEventOptions,
+  ) => void
   clearEvents: (id: string, eventIds: number[]) => void
   hydrateSession: (openRepos: Array<RepoSessionEntry | string>, activeRepo: string | null) => Promise<void>
-  /** Drop the "missing" indicator for paths that failed to restore — the
-   *  user has acknowledged them. */
-  dismissMissing: () => void
   /** Clear the fetchFailed flag — called by manual fetch success and
    *  by an explicit refresh, so a stale badge doesn't follow the user
    *  around forever. */

@@ -6,7 +6,7 @@ import {
   resultEvent,
   updateIfFresh,
 } from '#/renderer/stores/repos/helpers.ts'
-import type { ReposGet, ReposSet } from '#/renderer/stores/repos/types.ts'
+import type { RepoResultEventOptions, ReposGet, ReposSet } from '#/renderer/stores/repos/types.ts'
 import { rpc } from '#/renderer/rpc.ts'
 
 export function createCommitActions(set: ReposSet, get: ReposGet) {
@@ -15,6 +15,7 @@ export function createCommitActions(set: ReposSet, get: ReposGet) {
       const repoBefore = get().repos[id]
       if (!repoBefore) return
       if (repoBefore.kind === 'remote') return
+      if (repoBefore.availability.phase === 'unavailable') return
       const token = repoBefore.instanceToken
       set((s) => {
         const repo = s.repos[id]
@@ -53,12 +54,17 @@ export function createCommitActions(set: ReposSet, get: ReposGet) {
       })
     },
 
-    setLastResult(id: string, result: { ok: boolean; message: string }, token: number) {
+    setLastResult(
+      id: string,
+      result: { ok: boolean; message: string },
+      token: number,
+      options?: RepoResultEventOptions,
+    ) {
       set((s) => {
         const repo = s.repos[id]
         if (!repo || repo.instanceToken !== token) return s
         return replaceRepoState(s, repo, (r) => {
-          r.events = appendRepoEvent(r.events, resultEvent(result))
+          r.events = appendRepoEvent(r.events, resultEvent(result, options))
         })
       })
     },

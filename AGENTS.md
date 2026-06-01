@@ -1,11 +1,11 @@
 # Project Notes
 
-## Git operation boundaries
+## Git boundaries
 
 - Read-only git commands may run concurrently.
-- Network git commands (`fetch`, `pull`, `push`) are cancellable and coalesced per repo where applicable.
-- Avoid adding destructive git operations to the app. Prefer copying repository/worktree context so the user can run high-risk commands manually or hand them to an AI/terminal workflow.
-- If a destructive operation is introduced later, design its stale-state, dirty-state, cancellation, and refresh-after-failure behavior explicitly before implementation.
+- Keep network git commands (`fetch`, `pull`, `push`) cancellable and coalesced per repo where applicable.
+- Avoid adding destructive git operations to the app; prefer handing repository/worktree context to the user, terminal, or AI workflow.
+- If a destructive operation is introduced, design its safety, cancellation, and recovery behavior explicitly first.
 
 ## Dependency and import conventions
 
@@ -15,17 +15,8 @@
 
 ## Verification
 
-- Unit tests run with Vitest via `bun run test`; watch mode is `bun run test:watch`.
-- `bun run typecheck` covers main, renderer, and test-specific TypeScript configs.
-
-## Repo loading and refresh architecture
-
-- UI loading, busy, disabled, error, stale, and loaded timestamps should be derived from `repo.resources`.
-- Do not reintroduce `repo.ops` or expose operation execution state on `RepoState`.
-- Execution-only state such as queue lane, request id, latest-wins replacement, and exclusive busy checks belongs in `runtime.ts` / `operation-runner.ts`.
-- Multi-resource sequencing belongs in `refresh-workflows.ts`; keep `refresh.ts` focused on single-resource RPC/data-write primitives.
-- Prefer `resource-runner.ts` for simple read-resource lifecycle code. Keep specialized resources such as PR fan-out or branch actions explicit when a generic abstraction would obscure behavior.
-- UI visual presentation should not surface runtime-only operation state. Runtime busy checks are for execution/concurrency safety and click gating.
+- Run unit tests with `bun run test`; use `bun run test:watch` for watch mode.
+- Run TypeScript verification with `bun run typecheck`.
 
 ## English UI copy conventions
 
@@ -34,3 +25,33 @@
 - Use lowercase for status chips and badges, e.g. `open`, `dirty`, `no upstream`, `no worktree`, `modified`.
 - Preserve official casing for proper nouns and acronyms, e.g. `GitHub`, `VS Code`, `PR`.
 - Preserve raw git/status data as-is, e.g. branch names, paths, `M`, `A`, and `??`.
+
+## UI component conventions
+
+- Prefer shadcn/ui primitives in `src/renderer/components/ui/`; adapt them to the current app design, including density, colors, and interaction states, instead of creating one-off controls or styles.
+- For forms, use shared primitives such as `Field`, `FieldLabel`, `FieldDescription`, `FieldError`, and `Input`. Keep label, control, helper, and error spacing consistent and layout-stable.
+
+## Path display conventions
+
+- Display user-visible paths under the home directory with `~`, e.g. `$HOME/Developer/project` as `~/Developer/project`. Use existing `tildify` helpers instead of hand-rolled replacements.
+
+## Privacy-safe examples
+
+- Use generic placeholders in examples, tests, docs, and snapshots. Do not include real user names, machine names, personal paths, emails, tokens, secrets, or company-internal identifiers.
+- Test fixtures and inline sample code should stay generic as well; avoid realistic business snippets, internal module names, or production-like file paths when a neutral placeholder communicates the same intent.
+
+## Overlay and dialog architecture
+
+- Keep app-level overlay orchestration in `src/renderer/hooks/useAppOverlays.ts`; do not add new top-level dialog booleans directly to `App.tsx`.
+- Reuse `src/renderer/hooks/useOverlayRegistry.ts` for generic open/close/close-all overlay state instead of hand-rolled boolean groups.
+- Keep UI primitives and dialog presentation inside components (for example shadcn/ui `Dialog` wrappers); overlay hooks should manage state and coordination only, not visual structure.
+- When adding a new app-level overlay, wire it through the overlay manager, `closeAllOverlays()`, and any overlay-aware gates such as keyboard shortcut suppression.
+
+## Window and multi-window architecture
+
+- Scope renderer entry trust per `BrowserWindow`, not globally.
+- Keep renderer windows on their own boot entry; route internally instead of cross-entry main-frame navigation.
+- Reuse `src/main/window-shell.ts` and `src/main/standalone-page-window.ts` for new trusted / auxiliary windows.
+- If an auxiliary window can lose meaningful in-memory UI state on close, use the close-time lifecycle flush path and register renderer flushers.
+- Parent native dialogs to the actual RPC caller window when possible.
+- Keep window chrome sizes in `src/shared/window-chrome.ts`, and use `src/main/window-chrome.ts` helpers for platform chrome / overlay colors.

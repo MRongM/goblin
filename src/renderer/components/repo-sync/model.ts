@@ -32,7 +32,7 @@ const STAGE_ACTIVITIES = Object.fromEntries(
 export function getRepoSyncActivity(repo: RepoState): RepoSyncActivity | null {
   const logLoading = Object.values(repo.resources.logsByBranch).some(resourceBusy)
   const snapshotLoading = resourceBusy(repo.resources.snapshot)
-  const branchActionLoading = resourceBusy(repo.resources.branchAction)
+  const branchActionLoading = repo.operations.branchAction.phase !== 'idle'
   const statusLoading = resourceBusy(repo.resources.status)
   const pullRequestsLoading = resourceBusy(repo.resources.pullRequests)
   const remoteLoading = resourceBusy(repo.resources.fetch)

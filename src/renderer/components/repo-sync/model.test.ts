@@ -5,12 +5,8 @@ import {
   isRepoSyncBlocked,
 } from '#/renderer/components/repo-sync/model.ts'
 import { emptyRepo } from '#/renderer/stores/repos/helpers.ts'
-import {
-  startBranchActionResource,
-  startPullRequestResource,
-  startResource,
-} from '#/renderer/stores/repos/resources.ts'
-import { disposeRepoRuntime, markRepoOperationTargets, nextRepoOperationId } from '#/renderer/stores/repos/runtime.ts'
+import { startPullRequestResource, startResource } from '#/renderer/stores/repos/resources.ts'
+import { disposeRepoRuntime, markRepoOperationTargets, nextRepoOperationId, repoOperation } from '#/renderer/stores/repos/runtime.ts'
 import type { RepoDataSource, RepoState } from '#/renderer/stores/repos/types.ts'
 
 interface RepoOverrides {
@@ -33,7 +29,15 @@ function repo(overrides: RepoOverrides = {}): RepoState {
   if (overrides.statusBusy) startResource(base.resources.status)
   if (overrides.pullRequestsBusy) startPullRequestResource(base.resources.pullRequests, 'full')
   if (overrides.fetchBusy) startResource(base.resources.fetch)
-  if (overrides.branchActionBusy) startBranchActionResource(base.resources.branchAction, 'checkout', 'feature/a')
+  if (overrides.branchActionBusy) {
+    markRepoOperationTargets(
+      base.id,
+      nextRepoOperationId(base.id),
+      [{ key: 'branchAction', reason: 'branch:checkout', target: 'feature/a' }],
+      'running',
+    )
+    base.operations.branchAction = { ...base.operations.branchAction, ...repoOperation(base.id, 'branchAction') }
+  }
   for (const branch of overrides.logBusyBranches ?? (overrides.logBusyBranch ? [overrides.logBusyBranch] : [])) {
     base.resources.logsByBranch[branch] = { phase: 'loading', loadedAt: null, error: null, stale: false }
   }

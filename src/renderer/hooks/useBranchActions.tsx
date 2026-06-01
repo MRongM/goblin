@@ -1,49 +1,87 @@
 import { useState } from 'react'
 import { useReposStore } from '#/renderer/stores/repos/store.ts'
-import type { RepoState } from '#/renderer/stores/repos/types.ts'
-import { useT } from '#/renderer/stores/i18n.ts'
-import { ConfirmDialog } from '#/renderer/components/ConfirmDialog.tsx'
-import { tildify } from '#/renderer/lib/paths.ts'
-import type { BranchInfo, ExecResult } from '#/renderer/types.ts'
+import type { RepoBranchState, RepoState } from '#/renderer/stores/repos/types.ts'
+import { BranchActionDialogs, type RemoveConfirm } from '#/renderer/components/BranchActionDialogs.tsx'
+import type { ExecResult } from '#/renderer/types.ts'
 import { PROTECTED_BRANCHES } from '#/shared/git-types.ts'
 import { rpc } from '#/renderer/rpc.ts'
-import {
-  branchActionItemIdFromOperation,
-  isBranchActionBlocked,
-  type BranchActionItemId,
-} from '#/renderer/hooks/branch-action-state.ts'
+import { branchActionBusyItemId, isBranchActionBlocked, type BranchActionItemId } from '#/renderer/hooks/branch-action-state.ts'
 import { useAsyncPending } from '#/renderer/hooks/useAsyncPending.ts'
+import { useRetainedDialogState } from '#/renderer/hooks/useRetainedDialogState.ts'
+import { getBranchWorktreeState } from '#/renderer/stores/repos/worktree-state.ts'
 
 export type { BranchActionItemId } from '#/renderer/hooks/branch-action-state.ts'
 
-const SILENT_SUCCESS_OPS = new Set<BranchActionItemId>(['github', 'terminal', 'editor'])
-type UiOnlyBranchActionItemId = 'copyPatch' | 'github' | 'terminal' | 'editor'
+const SILENT_SUCCESS_OPS = new Set<BranchActionItemId>(['remote', 'terminal', 'editor'])
+type LocalBranchActionItemId = 'copyPatch' | 'remote' | 'terminal' | 'editor'
 
-interface RemoveConfirm {
-  branch: string
-  path: string
+export interface BranchActionCapabilities {
+  isCurrent: boolean
+  checkedOutInAnotherWorktree: boolean
+  canCheckout: boolean
+  canCheckoutRemoteBranch: boolean
+  canRemoveWorktree: boolean
+  isRegularBranch: boolean
+  canCopyPatch: boolean
+  canPull: boolean
+  canPush: boolean
+  canOpenRemote: boolean
+  canOpenTerminal: boolean
+  canOpenEditor: boolean
 }
 
-export function useBranchActions(repo: RepoState, branch: BranchInfo) {
-  const t = useT()
+export function getBranchActionCapabilities(repo: RepoState, branch: RepoBranchState): BranchActionCapabilities {
+  const isCurrent = branch.name === repo.data.currentBranch
+  const isRemoteTrackingBranch = branch.remoteTracking === true
+  const checkedOutInAnotherWorktree = !!branch.worktree?.path && !isCurrent
+  const isProtected = PROTECTED_BRANCHES.has(branch.name)
+  const isRegularBranch = !isRemoteTrackingBranch && !isCurrent && !branch.worktree?.path && !isProtected
+  const worktreeState = getBranchWorktreeState(repo, branch)
+  const canRemoveWorktree = !isRemoteTrackingBranch && checkedOutInAnotherWorktree && !worktreeState?.isMain
+  const canCopyPatch = !isRemoteTrackingBranch && !!branch.worktree?.path && (worktreeState?.dirty ?? false)
+  const canOpenRemote =
+    repo.kind === 'remote'
+      ? !!repo.remoteTarget
+      : repo.remote.hasBrowserRemote === true || repo.remote.hasGitHubRemote === true
+
+  return {
+    isCurrent,
+    checkedOutInAnotherWorktree,
+    canCheckout: !isRemoteTrackingBranch && !isCurrent && !checkedOutInAnotherWorktree,
+    canCheckoutRemoteBranch: isRemoteTrackingBranch,
+    canRemoveWorktree,
+    isRegularBranch,
+    canCopyPatch,
+    canPull: !isRemoteTrackingBranch && !!branch.tracking,
+    canPush: !isRemoteTrackingBranch && repo.remote.hasRemotes === true,
+    canOpenRemote,
+    canOpenTerminal: !isRemoteTrackingBranch && !!branch.worktree?.path,
+    canOpenEditor: !isRemoteTrackingBranch && !!branch.worktree?.path,
+  }
+}
+
+export function useBranchActions(repo: RepoState, branch: RepoBranchState) {
   const setLastResult = useReposStore((s) => s.setLastResult)
   const runBranchAction = useReposStore((s) => s.runBranchAction)
   const branchActionBusy = isBranchActionBlocked(repo)
-  const branchOperationAction = branchActionItemIdFromOperation(repo, branch.name)
+  const branchBusyAction = branchActionBusyItemId(repo, branch.name)
   const {
     pending: pendingLocalAction,
     hasPending: hasPendingLocalAction,
     run: runPendingLocalAction,
-  } = useAsyncPending<UiOnlyBranchActionItemId>()
-  const [pushConfirm, setPushConfirm] = useState<string | null>(null)
-  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
-  const [forceDeleteConfirm, setForceDeleteConfirm] = useState<string | null>(null)
-  const [removeConfirm, setRemoveConfirm] = useState<RemoveConfirm | null>(null)
-  const [forceRemoveConfirm, setForceRemoveConfirm] = useState<RemoveConfirm | null>(null)
+  } = useAsyncPending<LocalBranchActionItemId>()
+  const pushConfirm = useRetainedDialogState<string>()
+  const deleteConfirm = useRetainedDialogState<string>()
+  const forceDeleteConfirm = useRetainedDialogState<string>()
+  const removeConfirm = useRetainedDialogState<RemoveConfirm>()
+  const forceRemoveConfirm = useRetainedDialogState<RemoveConfirm>()
   const [removeAlsoDeletes, setRemoveAlsoDeletes] = useState(true)
+  const [deleteAlsoUpstream, setDeleteAlsoUpstream] = useState(false)
+  const [removeAlsoUpstream, setRemoveAlsoUpstream] = useState(false)
+  const hasUpstream = !!branch.tracking && !branch.trackingGone
 
   function runUiAction(
-    op: UiOnlyBranchActionItemId,
+    op: LocalBranchActionItemId,
     fn: () => Promise<ExecResult>,
     options?: { handleResult?: (result: ExecResult) => boolean },
   ) {
@@ -78,8 +116,8 @@ export function useBranchActions(repo: RepoState, branch: BranchInfo) {
   }
 
   function copyPatch() {
-    if (!branch.worktreePath) return
-    const worktreePath = branch.worktreePath
+    if (!branch.worktree?.path) return
+    const worktreePath = branch.worktree.path
     return runUiAction('copyPatch', async () => {
       const result =
         repo.kind === 'remote'
@@ -107,21 +145,21 @@ export function useBranchActions(repo: RepoState, branch: BranchInfo) {
   }
 
   function pull() {
-    return runRepoAction({ kind: 'pull', branch: branch.name, worktreePath: branch.worktreePath })
+    return runRepoAction({ kind: 'pull', branch: branch.name, worktreePath: branch.worktree?.path })
   }
 
   function push() {
     if (branchActionBusy || hasPendingLocalAction()) return
     if (PROTECTED_BRANCHES.has(branch.name)) {
-      setPushConfirm(branch.name)
+      pushConfirm.openWith(branch.name)
       return
     }
     return runRepoAction({ kind: 'push', branch: branch.name })
   }
 
   function openTerminal() {
-    if (!branch.worktreePath) return
-    const worktreePath = branch.worktreePath
+    if (!branch.worktree?.path) return
+    const worktreePath = branch.worktree.path
     return runUiAction('terminal', () =>
       repo.kind === 'remote'
         ? repo.remoteTarget
@@ -132,8 +170,8 @@ export function useBranchActions(repo: RepoState, branch: BranchInfo) {
   }
 
   function openEditor() {
-    if (!branch.worktreePath) return
-    const worktreePath = branch.worktreePath
+    if (!branch.worktree?.path) return
+    const worktreePath = branch.worktree.path
     return runUiAction('editor', () =>
       repo.kind === 'remote'
         ? repo.remoteTarget
@@ -143,35 +181,37 @@ export function useBranchActions(repo: RepoState, branch: BranchInfo) {
     )
   }
 
-  function openGitHub() {
-    return runUiAction('github', () =>
+  function openRemote() {
+    return runUiAction('remote', () =>
       repo.kind === 'remote'
         ? repo.remoteTarget
           ? rpc.remote.openGitHub.mutate({ target: repo.remoteTarget, branch: branch.name })
           : Promise.resolve({ ok: false, message: 'error.remote-unavailable' })
-        : rpc.repo.openGitHub.mutate({ cwd: repo.id, branch: branch.name }),
+        : rpc.repo.openRemote.mutate({ cwd: repo.id, branch: branch.name }),
     )
   }
 
   function requestDeleteBranch() {
     if (branchActionBusy || hasPendingLocalAction()) return
-    setDeleteConfirm(branch.name)
+    setDeleteAlsoUpstream(false)
+    deleteConfirm.openWith(branch.name)
   }
 
   function requestRemoveWorktree() {
-    if (branchActionBusy || hasPendingLocalAction() || !branch.worktreePath) return
+    if (branchActionBusy || hasPendingLocalAction() || !branch.worktree?.path) return
     setRemoveAlsoDeletes(!PROTECTED_BRANCHES.has(branch.name))
-    setRemoveConfirm({ branch: branch.name, path: branch.worktreePath })
+    setRemoveAlsoUpstream(false)
+    removeConfirm.openWith({ branch: branch.name, path: branch.worktree.path })
   }
 
-  function deleteBranch(target: string, force = false) {
+  function deleteBranch(target: string, force = false, alsoDeleteUpstream = false) {
     return runRepoAction(
-      { kind: 'deleteBranch', branch: target, force },
+      { kind: 'deleteBranch', branch: target, force, alsoDeleteUpstream },
       {
         deferResultMessages: force ? [] : ['error.branch-not-fully-merged'],
         handleResult: (result) => {
           if (!force && !result.ok && result.message === 'error.branch-not-fully-merged') {
-            setForceDeleteConfirm(target)
+            forceDeleteConfirm.openWith(target)
             return true
           }
           return false
@@ -180,7 +220,12 @@ export function useBranchActions(repo: RepoState, branch: BranchInfo) {
     )
   }
 
-  function removeWorktree(target: RemoveConfirm, alsoDeleteBranch: boolean, forceDeleteBranch: boolean) {
+  function removeWorktree(
+    target: RemoveConfirm,
+    alsoDeleteBranch: boolean,
+    forceDeleteBranch: boolean,
+    alsoDeleteUpstream = false,
+  ) {
     return runRepoAction(
       {
         kind: 'removeWorktree',
@@ -188,6 +233,7 @@ export function useBranchActions(repo: RepoState, branch: BranchInfo) {
         worktreePath: target.path,
         alsoDeleteBranch,
         forceDeleteBranch,
+        alsoDeleteUpstream,
       },
       {
         deferResultMessages: alsoDeleteBranch && !forceDeleteBranch ? ['error.cannot-remove-unpushed-worktree'] : [],
@@ -198,7 +244,7 @@ export function useBranchActions(repo: RepoState, branch: BranchInfo) {
             alsoDeleteBranch &&
             !forceDeleteBranch
           ) {
-            setForceRemoveConfirm(target)
+            forceRemoveConfirm.openWith(target)
             return true
           }
           return false
@@ -207,180 +253,38 @@ export function useBranchActions(repo: RepoState, branch: BranchInfo) {
     )
   }
 
-  const isCurrent = branch.name === repo.data.currentBranch
-  const isRemoteTrackingBranch = branch.remoteTracking === true
-  const checkedOutInAnotherWorktree = !!branch.worktreePath && !isCurrent
-  const canRemoveWorktree = checkedOutInAnotherWorktree && !branch.worktreeIsPrimary
-  const isProtected = PROTECTED_BRANCHES.has(branch.name)
-  const isRegularBranch = !isRemoteTrackingBranch && !isCurrent && !branch.worktreePath && !isProtected
-  const changedStatus = branch.worktreePath ? repo.data.status.find((wt) => wt.path === branch.worktreePath) : null
-  const canCopyPatch = !!branch.worktreePath && (changedStatus?.entries.length ?? 0) > 0
-  const removeConfirmProtected = removeConfirm ? PROTECTED_BRANCHES.has(removeConfirm.branch) : false
+  const capabilities = getBranchActionCapabilities(repo, branch)
   const dialogs = (
-    <>
-      <ConfirmDialog
-        open={pushConfirm !== null}
-        title={pushConfirm ? t('action.confirm-push-protected-title', { branch: pushConfirm }) : ''}
-        message={
-          pushConfirm ? (
-            <span>
-              {t('action.confirm-push-protected-body.before')}
-              <b className="text-foreground">{pushConfirm}</b>
-              {t('action.confirm-push-protected-body.after')}
-            </span>
-          ) : (
-            ''
-          )
-        }
-        confirmLabel={t('action.confirm-push-confirm')}
-        destructive
-        onCancel={() => setPushConfirm(null)}
-        onConfirm={async () => {
-          const target = pushConfirm
-          if (target) await runRepoAction({ kind: 'push', branch: target })
-          setPushConfirm(null)
-        }}
-      />
-      <ConfirmDialog
-        open={deleteConfirm !== null}
-        title={deleteConfirm ? t('action.confirm-delete-branch-title', { branch: deleteConfirm }) : ''}
-        message={
-          deleteConfirm ? (
-            <span>
-              {t('action.confirm-delete-branch-body.before')}
-              <b className="text-foreground">{deleteConfirm}</b>
-              {t('action.confirm-delete-branch-body.after')}
-            </span>
-          ) : (
-            ''
-          )
-        }
-        confirmLabel={t('action.confirm-delete-branch-confirm')}
-        destructive
-        onCancel={() => setDeleteConfirm(null)}
-        onConfirm={async () => {
-          const target = deleteConfirm
-          if (target) await deleteBranch(target)
-          setDeleteConfirm(null)
-        }}
-      />
-      <ConfirmDialog
-        open={forceDeleteConfirm !== null}
-        title={
-          forceDeleteConfirm ? t('action.confirm-force-delete-standalone-title', { branch: forceDeleteConfirm }) : ''
-        }
-        message={
-          forceDeleteConfirm ? (
-            <span>
-              {t('action.confirm-force-delete-standalone-body.before')}
-              <b className="text-foreground">{forceDeleteConfirm}</b>
-              {t('action.confirm-force-delete-standalone-body.after')}
-            </span>
-          ) : (
-            ''
-          )
-        }
-        confirmLabel={t('action.confirm-force-delete-standalone-confirm')}
-        destructive
-        onCancel={() => setForceDeleteConfirm(null)}
-        onConfirm={async () => {
-          const target = forceDeleteConfirm
-          if (target) await deleteBranch(target, true)
-          setForceDeleteConfirm(null)
-        }}
-      />
-      <ConfirmDialog
-        open={removeConfirm !== null}
-        title={removeConfirm ? t('action.confirm-remove-worktree-title', { branch: removeConfirm.branch }) : ''}
-        message={
-          removeConfirm ? (
-            <div className="space-y-3">
-              <span>
-                {t('action.confirm-remove-worktree-body.before')}
-                <b className="text-foreground">{tildify(removeConfirm.path)}</b>
-                {t('action.confirm-remove-worktree-body.after')}
-              </span>
-              <label
-                className={
-                  removeConfirmProtected
-                    ? 'flex items-center gap-2 text-muted-foreground select-none cursor-not-allowed'
-                    : 'flex items-center gap-2 text-foreground cursor-pointer select-none'
-                }
-                title={removeConfirmProtected ? t('action.confirm-remove-worktree-protected-hint') : undefined}
-              >
-                <input
-                  type="checkbox"
-                  checked={removeAlsoDeletes}
-                  disabled={removeConfirmProtected}
-                  aria-describedby={removeConfirmProtected ? 'remove-worktree-protected-hint' : undefined}
-                  onChange={(e) => setRemoveAlsoDeletes(e.target.checked)}
-                  className="h-4 w-4 accent-destructive disabled:opacity-50"
-                />
-                <span>{t('action.confirm-remove-worktree-also-delete-branch', { branch: removeConfirm.branch })}</span>
-              </label>
-              {removeConfirmProtected && (
-                <div id="remove-worktree-protected-hint" className="text-xs text-muted-foreground">
-                  {t('action.confirm-remove-worktree-protected-hint')}
-                </div>
-              )}
-            </div>
-          ) : (
-            ''
-          )
-        }
-        confirmLabel={t('action.confirm-remove-worktree-confirm')}
-        destructive
-        onCancel={() => setRemoveConfirm(null)}
-        onConfirm={() => {
-          const target = removeConfirm
-          const alsoDelete = removeAlsoDeletes
-          // Match create-worktree: the confirm dialog only starts the repo action;
-          // branchAction resource owns progress, and a later unpushed-worktree result reopens force confirm.
-          setRemoveConfirm(null)
-          if (target) void removeWorktree(target, alsoDelete, false)
-        }}
-      />
-      <ConfirmDialog
-        open={forceRemoveConfirm !== null}
-        title={
-          forceRemoveConfirm ? t('action.confirm-force-delete-branch-title', { branch: forceRemoveConfirm.branch }) : ''
-        }
-        message={
-          forceRemoveConfirm ? (
-            <span>{t('action.confirm-force-delete-branch-body', { branch: forceRemoveConfirm.branch })}</span>
-          ) : (
-            ''
-          )
-        }
-        confirmLabel={t('action.confirm-force-delete-branch-confirm')}
-        destructive
-        onCancel={() => setForceRemoveConfirm(null)}
-        onConfirm={() => {
-          const target = forceRemoveConfirm
-          setForceRemoveConfirm(null)
-          if (target) void removeWorktree(target, true, true)
-        }}
-      />
-    </>
+    <BranchActionDialogs
+      branch={branch}
+      hasUpstream={hasUpstream}
+      pushConfirm={pushConfirm}
+      deleteConfirm={deleteConfirm}
+      forceDeleteConfirm={forceDeleteConfirm}
+      removeConfirm={removeConfirm}
+      forceRemoveConfirm={forceRemoveConfirm}
+      deleteAlsoUpstream={deleteAlsoUpstream}
+      removeAlsoDeletes={removeAlsoDeletes}
+      removeAlsoUpstream={removeAlsoUpstream}
+      setDeleteAlsoUpstream={setDeleteAlsoUpstream}
+      setRemoveAlsoDeletes={setRemoveAlsoDeletes}
+      setRemoveAlsoUpstream={setRemoveAlsoUpstream}
+      onPushConfirm={(target) => {
+        void runRepoAction({ kind: 'push', branch: target })
+      }}
+      onDeleteBranch={(target, force, alsoDeleteUpstream) => {
+        void deleteBranch(target, force, alsoDeleteUpstream)
+      }}
+      onRemoveWorktree={(target, alsoDeleteBranch, forceDeleteBranch, alsoDeleteUpstream) => {
+        void removeWorktree(target, alsoDeleteBranch, forceDeleteBranch, alsoDeleteUpstream)
+      }}
+    />
   )
 
   return {
     blocked: branchActionBusy || pendingLocalAction !== null,
-    busyAction: pendingLocalAction ?? branchOperationAction,
-    capabilities: {
-      isCurrent,
-      checkedOutInAnotherWorktree,
-      canCheckout: !isRemoteTrackingBranch && !isCurrent && !checkedOutInAnotherWorktree,
-      canCheckoutRemoteBranch: isRemoteTrackingBranch,
-      canRemoveWorktree,
-      isRegularBranch,
-      canCopyPatch,
-      canPull: !isRemoteTrackingBranch && !!branch.tracking,
-      canPush: !isRemoteTrackingBranch,
-      canOpenTerminal: !isRemoteTrackingBranch && !!branch.worktreePath,
-      canOpenEditor: !isRemoteTrackingBranch && !!branch.worktreePath,
-      canOpenGitHub: true,
-    },
+    busyAction: pendingLocalAction ?? branchBusyAction,
+    capabilities,
     actions: {
       copyPatch,
       checkout,
@@ -389,7 +293,7 @@ export function useBranchActions(repo: RepoState, branch: BranchInfo) {
       push,
       openTerminal,
       openEditor,
-      openGitHub,
+      openRemote,
       requestDeleteBranch,
       requestRemoveWorktree,
     },

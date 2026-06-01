@@ -1,5 +1,5 @@
 import { app } from 'electron'
-import { createMainWindow, getMainWindow } from '#/main/window.ts'
+import { activateMainWindow } from '#/main/window.ts'
 import { initTheme } from '#/main/theme.ts'
 import { loadSettings, flushSettings } from '#/main/settings.ts'
 import { buildAppMenu } from '#/main/menu.ts'
@@ -10,6 +10,27 @@ import { shutdownTerminalSessions } from '#/main/terminal-core.ts'
 import { remotePortForwardManager } from '#/main/ssh/port-forward.ts'
 import { syncGlobalShortcuts, unregisterAppShortcuts } from '#/main/shortcuts.ts'
 import { wireAppShutdown } from '#/main/app-shutdown.ts'
+import { enqueueExternalOpenPath } from '#/main/external-open.ts'
+
+function activateMainWindowFromEvent(): void {
+  void activationBarrier
+    .then(() => {
+      if (isQuitting) return null
+      return activateMainWindow()
+    })
+    .catch((err) => {
+      console.error('[window] failed to activate main window', err)
+    })
+}
+
+let activationBarrier: Promise<void> = Promise.resolve()
+let isQuitting = false
+
+app.on('open-file', (event, path) => {
+  event.preventDefault()
+  if (!enqueueExternalOpenPath(path)) return
+  activateMainWindowFromEvent()
+})
 
 async function main(): Promise<void> {
   if (!app.requestSingleInstanceLock()) {
@@ -17,24 +38,19 @@ async function main(): Promise<void> {
     return
   }
 
+  activationBarrier = initializeMainProcess()
+
   app.on('second-instance', () => {
-    const win = getMainWindow()
-    if (win) {
-      if (win.isMinimized()) win.restore()
-      win.focus()
-    } else {
-      void createMainWindow()
-    }
+    activateMainWindowFromEvent()
   })
 
   app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') app.quit()
   })
 
-  app.on('activate', () => {
-    if (!getMainWindow()) void createMainWindow()
+  app.on('before-quit', () => {
+    isQuitting = true
   })
-
   wireAppShutdown(app, {
     flushSettings,
     shutdownTerminalSessions,
@@ -42,9 +58,16 @@ async function main(): Promise<void> {
     unregisterAppShortcuts,
   })
 
+  await activationBarrier
+  if (isQuitting) return
+  await activateMainWindow()
+  if (isQuitting) return
+  app.on('activate', activateMainWindowFromEvent)
+}
+
+async function initializeMainProcess(): Promise<void> {
   await app.whenReady()
 
-  // Settings before theme — initTheme reads the persisted pref.
   const settings = await loadSettings()
   await initTheme()
 
@@ -58,9 +81,7 @@ async function main(): Promise<void> {
   wireTerminalIpc()
 
   buildAppMenu()
-  syncGlobalShortcuts(settings.shortcutsDisabled, settings.globalShortcut)
-
-  await createMainWindow()
+  syncGlobalShortcuts(settings.globalShortcutDisabled, settings.globalShortcut)
 }
 
 void main()

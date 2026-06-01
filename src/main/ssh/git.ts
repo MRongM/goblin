@@ -9,7 +9,14 @@ import {
   type RemoteCommandKind,
   type RemoteCommandResult,
 } from '#/main/ssh/commands.ts'
-import { PROTECTED_BRANCHES, type BranchInfo, type ExecResult, type LogEntry, type WorktreeInfo, type WorktreeStatus } from '#/shared/git-types.ts'
+import {
+  PROTECTED_BRANCHES,
+  type BranchSnapshotInfo,
+  type ExecResult,
+  type LogEntry,
+  type WorktreeInfo,
+  type WorktreeStatus,
+} from '#/shared/git-types.ts'
 import type { RemoteRepoTarget } from '#/shared/remote-repo.ts'
 import { isSafeBranchName } from '#/shared/refnames.ts'
 
@@ -25,7 +32,7 @@ const REMOTE_BRANCH_OP_TIMEOUT_MS = 180_000
 const REMOTE_PATCH_TIMEOUT_MS = 90_000
 
 export interface RemoteRepoSnapshot {
-  branches: BranchInfo[]
+  branches: BranchSnapshotInfo[]
   current: string
 }
 
@@ -316,7 +323,7 @@ export async function deleteRemoteBranch(
   const snapshot = await getRemoteSnapshot(target, { signal: input.signal, run })
   if (input.signal?.aborted) return { ok: false, message: 'cancelled' }
   if (snapshot?.current === input.branch) return { ok: false, message: 'error.cannot-delete-current-branch' }
-  if (snapshot?.branches.some((branchInfo) => branchInfo.name === input.branch && branchInfo.worktreePath)) {
+  if (snapshot?.branches.some((branchInfo) => branchInfo.name === input.branch && branchInfo.worktree?.path)) {
     return { ok: false, message: 'error.cannot-delete-checked-out-branch' }
   }
 

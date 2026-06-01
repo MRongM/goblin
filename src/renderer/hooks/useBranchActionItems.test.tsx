@@ -56,10 +56,14 @@ function ActionItemProbe({ repo, branch }: { repo: RepoState; branch: BranchInfo
 }
 
 function remoteRepo() {
-  return emptyRepo(REMOTE_TARGET.id, REMOTE_TARGET.displayName, {
+  const repo = emptyRepo(REMOTE_TARGET.id, REMOTE_TARGET.displayName, {
     kind: 'remote',
     remoteTarget: REMOTE_TARGET,
   })
+  repo.remote.hasRemotes = true
+  repo.remote.hasBrowserRemote = true
+  repo.remote.hasGitHubRemote = true
+  return repo
 }
 
 describe('useBranchActionItems remote visibility', () => {
@@ -83,7 +87,7 @@ describe('useBranchActionItems remote visibility', () => {
     )
 
     expect(ids).toEqual(
-      expect.arrayContaining(['copyPatch', 'pull', 'push', 'terminal', 'editor', 'github', 'removeWorktree']),
+      expect.arrayContaining(['copyPatch', 'pull', 'push', 'terminal', 'editor', 'remote', 'removeWorktree']),
     )
     expect(ids).not.toContain('deleteBranch')
   })
@@ -91,13 +95,15 @@ describe('useBranchActionItems remote visibility', () => {
   test('shows remote plain branch actions', () => {
     const ids = visibleIds(remoteRepo(), createBranch('feature/plain'))
 
-    expect(ids).toEqual(expect.arrayContaining(['checkout', 'push', 'github', 'deleteBranch']))
+    expect(ids).toEqual(expect.arrayContaining(['checkout', 'push', 'remote', 'deleteBranch']))
     expect(ids).not.toContain('terminal')
     expect(ids).not.toContain('removeWorktree')
   })
 
   test('shows only local checkout action for local remote tracking branches', () => {
     const repo = emptyRepo('/tmp/repo', 'repo')
+    repo.remote.hasBrowserRemote = true
+    repo.remote.hasGitHubRemote = true
     const ids = visibleIds(
       repo,
       createBranch('origin/feature/x', {
@@ -108,7 +114,7 @@ describe('useBranchActionItems remote visibility', () => {
     )
 
     expect(ids).toContain('checkoutRemoteBranch')
-    expect(ids).toContain('github')
+    expect(ids).toContain('remote')
     expect(ids).not.toContain('checkout')
     expect(ids).not.toContain('pull')
     expect(ids).not.toContain('push')

@@ -1,8 +1,10 @@
 import { produce, type Draft } from 'immer'
+import { emptyRepoOperations } from '#/renderer/stores/repos/operations.ts'
 import { emptyRepoResources } from '#/renderer/stores/repos/resources.ts'
 import type {
   RepoEvent,
   RepoRemotePortsState,
+  RepoResultEventOptions,
   RepoState,
   ReposSet,
   ReposStore,
@@ -38,8 +40,10 @@ export function emptyRepo(
       logsByBranch: {},
       status: [],
       statusLoaded: false,
+      worktreesByPath: {},
     },
     resources: emptyRepoResources(),
+    operations: emptyRepoOperations(),
     ui: {
       selectedBranch: null,
       branchViewMode: 'all',
@@ -52,10 +56,18 @@ export function emptyRepo(
       savedAt: null,
     },
     remote: {
+      remotes: [],
+      remoteDetails: [],
+      hasRemotes: false,
+      hasBrowserRemote: false,
+      browserRemoteProvider: undefined,
+      remoteProviders: {},
+      hasGitHubRemote: false,
       fetchFailed: false,
       fetchError: null,
     },
     remotePorts: emptyRemotePorts(),
+    availability: { phase: 'available' },
     events: [],
   }
 }
@@ -74,8 +86,8 @@ export function emptyRemotePorts(): RepoRemotePortsState {
   }
 }
 
-export function resultEvent(result: { ok: boolean; message: string }): RepoEvent {
-  return { id: nextEventId++, kind: 'result', result }
+export function resultEvent(result: { ok: boolean; message: string }, options?: RepoResultEventOptions): RepoEvent {
+  return { id: nextEventId++, kind: 'result', result, action: options?.action }
 }
 
 export function errorEvent(message: string): RepoEvent {

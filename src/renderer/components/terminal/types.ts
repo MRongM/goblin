@@ -28,11 +28,24 @@ export interface RemoteTerminalDescriptor {
   worktreePath: string
 }
 
+export interface TerminalProgressState {
+  /** 1 = normal, 2 = error, 3 = indeterminate, 4 = paused/warning. State 0 clears the progress (not stored). */
+  state: 1 | 2 | 3 | 4
+  /** 0-100 percent */
+  value: number
+}
+
+export interface TerminalBellEvent {
+  processName: string
+  visible: boolean
+}
+
 export interface TerminalSnapshot {
   phase: TerminalPhase
   message: string | null
   processName: string
   search?: TerminalSearchResult | null
+  progress?: TerminalProgressState | null
 }
 
 export interface TerminalSearchResult {
@@ -53,6 +66,7 @@ export interface TerminalSessionSummary {
   title: string
   phase: TerminalPhase
   active: boolean
+  hasBell: boolean
 }
 
 export interface TerminalSessionContextValue {
@@ -62,7 +76,8 @@ export interface TerminalSessionContextValue {
   activeDescriptor: (groupKey: string) => TerminalDescriptor | null
   sessionSummaries: (groupKey: string) => TerminalSessionSummary[]
   setActive: (groupKey: string, key: string) => void
-  closeTerminal: (key: string) => TerminalSessionSummary[]
+  clearBell: (key: string) => boolean
+  closeTerminalAndDismissDetailIfLast: (key: string, base: TerminalSessionBase) => TerminalSessionSummary[]
   attach: (descriptor: TerminalDescriptor, host: HTMLElement) => void
   detach: (key: string, host: HTMLElement) => void
   restart: (key: string) => void
@@ -71,6 +86,7 @@ export interface TerminalSessionContextValue {
   findNext: (key: string, term: string, incremental?: boolean) => TerminalSearchResult
   findPrevious: (key: string, term: string) => TerminalSearchResult
   clearSearch: (key: string) => void
+  writeInput: (key: string, data: string) => void
   /** Serializes xterm framebuffer state as VT sequences; not plain-text output for copy UI. */
   serialize: (key: string) => string
 }
@@ -87,6 +103,7 @@ export interface ManagedTerminalSessionLike {
   findNext: (term: string, incremental?: boolean) => TerminalSearchResult
   findPrevious: (term: string) => TerminalSearchResult
   clearSearch: () => void
+  writeInput: (data: string) => void
   /** Serializes xterm framebuffer state as VT sequences; not plain-text output for copy UI. */
   serialize: () => string
   handleOutput: (event: TerminalOutputEvent) => void

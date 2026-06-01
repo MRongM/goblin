@@ -172,7 +172,7 @@ describe('remote fetch timestamps', () => {
 
     await useReposStore.getState().backgroundFetch(REMOTE_TARGET.id)
 
-    expect(useReposStore.getState().repos[REMOTE_TARGET.id]?.remote).toEqual({
+    expect(useReposStore.getState().repos[REMOTE_TARGET.id]?.remote).toMatchObject({
       fetchFailed: true,
       fetchError: 'fatal: remote rejected',
     })
@@ -183,7 +183,7 @@ describe('remote fetch timestamps', () => {
     })
   })
 
-  test('remote snapshot refresh skips terminal pruning', async () => {
+  test('remote snapshot refresh prunes remote terminal sessions', async () => {
     const token = seedRemoteRepo()
     const pruneCalls: TerminalPruneRepoInput[] = []
     overrideTerminalBridge({
@@ -202,7 +202,13 @@ describe('remote fetch timestamps', () => {
 
     await useReposStore.getState().refreshSnapshot(REMOTE_TARGET.id, { token })
 
-    expect(pruneCalls).toEqual([])
+    expect(pruneCalls).toEqual([
+      {
+        kind: 'remote',
+        repoId: REMOTE_TARGET.id,
+        worktreePaths: ['/srv/goblin', '/srv/goblin-feature-x'],
+      },
+    ])
   })
 
   test('manual sync records the remote fetch settled time', async () => {
@@ -266,7 +272,7 @@ describe('remote fetch timestamps', () => {
     const repo = useReposStore.getState().repos[REPO_ID]
     expect(repo?.instanceToken).toBe(newToken)
     expect(repo?.data.branches.map((b) => b.name)).toEqual(['feature/reopened'])
-    expect(repo?.remote).toEqual({ fetchFailed: false, fetchError: null })
+    expect(repo?.remote).toMatchObject({ fetchFailed: false, fetchError: null })
     expect(repo?.resources.fetch.loadedAt).toBeNull()
   })
 
@@ -278,7 +284,7 @@ describe('remote fetch timestamps', () => {
 
     await useReposStore.getState().backgroundFetch(REPO_ID)
 
-    expect(useReposStore.getState().repos[REPO_ID]?.remote).toEqual({
+    expect(useReposStore.getState().repos[REPO_ID]?.remote).toMatchObject({
       fetchFailed: true,
       fetchError: 'fatal: offline',
     })
@@ -291,7 +297,7 @@ describe('remote fetch timestamps', () => {
     fetchOk = true
     await useReposStore.getState().backgroundFetch(REPO_ID)
 
-    expect(useReposStore.getState().repos[REPO_ID]?.remote).toEqual({
+    expect(useReposStore.getState().repos[REPO_ID]?.remote).toMatchObject({
       fetchFailed: false,
       fetchError: null,
     })
@@ -310,7 +316,7 @@ describe('remote fetch timestamps', () => {
 
     await useReposStore.getState().backgroundFetch(REPO_ID)
 
-    expect(useReposStore.getState().repos[REPO_ID]?.remote).toEqual({
+    expect(useReposStore.getState().repos[REPO_ID]?.remote).toMatchObject({
       fetchFailed: true,
       fetchError: 'network down',
     })
@@ -451,7 +457,7 @@ describe('remote fetch timestamps', () => {
     const work = useReposStore.getState().runBranchAction(REPO_ID, { kind: 'pull', branch: 'feature/a' }, { token })
 
     const runningRepo = useReposStore.getState().repos[REPO_ID]
-    expect(runningRepo?.resources.branchAction.phase).toBe('loading')
+    expect(runningRepo?.operations.branchAction.phase).toBe('running')
     expect(runningRepo?.resources.fetch.phase).toBe('loading')
     expect(canStartRemoteFetch(runningRepo)).toBe(false)
 
@@ -459,7 +465,7 @@ describe('remote fetch timestamps', () => {
     await work
 
     const repo = useReposStore.getState().repos[REPO_ID]
-    expect(repo?.resources.branchAction.phase).toBe('idle')
+    expect(repo?.operations.branchAction.phase).toBe('idle')
     expect(repo?.resources.fetch.phase).toBe('idle')
   })
 
@@ -497,14 +503,14 @@ describe('remote fetch timestamps', () => {
     const work = useReposStore.getState().runBranchAction(REPO_ID, { kind: 'checkout', branch: 'feature/a' }, { token })
 
     const runningRepo = useReposStore.getState().repos[REPO_ID]
-    expect(runningRepo?.resources.branchAction.phase).toBe('loading')
+    expect(runningRepo?.operations.branchAction.phase).toBe('running')
     expect(canStartRemoteFetch(runningRepo)).toBe(false)
 
     resolveCheckout({ ok: true, message: 'ok' })
     await work
 
     const repo = useReposStore.getState().repos[REPO_ID]
-    expect(repo?.resources.branchAction.phase).toBe('idle')
+    expect(repo?.operations.branchAction.phase).toBe('idle')
     expect(repo?.data.currentBranch).toBe('feature/a')
     expect(snapshotCount).toBe(1)
   })
@@ -531,7 +537,7 @@ describe('remote fetch timestamps', () => {
 
     const repo = useReposStore.getState().repos[REPO_ID]
     expect(result).toEqual({ ok: true, message: 'ok' })
-    expect(repo?.resources.branchAction.phase).toBe('idle')
+    expect(repo?.operations.branchAction.phase).toBe('idle')
     expect(repo?.data.branches.map((b) => b.name)).toEqual(['main', 'feature/a'])
     expect(snapshotCount).toBe(1)
   })
@@ -581,7 +587,7 @@ describe('remote fetch timestamps', () => {
     expect(result).toEqual({ ok: false, message: 'error.branch-not-fully-merged' })
     expect(repo?.events).toEqual([])
     expect(snapshotCount).toBe(0)
-    expect(repo?.resources.branchAction.phase).toBe('idle')
+    expect(repo?.operations.branchAction.phase).toBe('idle')
   })
 
   test('branch action failures refresh by default', async () => {
@@ -609,20 +615,20 @@ describe('remote fetch timestamps', () => {
   test('failed network branch actions do not clear the sticky fetch failure badge', async () => {
     const token = seedRepo([branch('feature/a')])
     updateRepoForTest((repo) => {
-      repo.remote = { fetchFailed: true, fetchError: 'previous failure' }
+      repo.remote.fetchFailed = true
+      repo.remote.fetchError = 'previous failure'
     })
     rpcHandlers['repo.pull'] = async () => ({ ok: false, message: 'fatal: rejected' })
 
     await useReposStore.getState().runBranchAction(REPO_ID, { kind: 'pull', branch: 'feature/a' }, { token })
 
-    expect(useReposStore.getState().repos[REPO_ID]?.remote).toEqual({
+    expect(useReposStore.getState().repos[REPO_ID]?.remote).toMatchObject({
       fetchFailed: true,
       fetchError: 'previous failure',
     })
-    expect(useReposStore.getState().repos[REPO_ID]?.resources.branchAction).toMatchObject({
+    expect(useReposStore.getState().repos[REPO_ID]?.operations.branchAction).toMatchObject({
       phase: 'idle',
       error: 'fatal: rejected',
-      kind: null,
       target: null,
     })
     expect(useReposStore.getState().repos[REPO_ID]?.resources.fetch).toMatchObject({
@@ -632,7 +638,7 @@ describe('remote fetch timestamps', () => {
   })
 
   test('remove worktree delegates terminal cleanup to the main process action', async () => {
-    const token = seedRepo([branch('feature/a', undefined, { worktreePath: '/tmp/worktree-a' })])
+    const token = seedRepo([branch('feature/a', undefined, { worktree: { path: '/tmp/worktree-a' } })])
     const calls: string[] = []
     rpcHandlers['repo.removeWorktree'] = async () => {
       calls.push('removeWorktree')
@@ -784,6 +790,40 @@ describe('core refresh request ordering', () => {
     expect(logCalls).toBe(0)
   })
 
+  test('refreshAll marks deleted or non-git paths unavailable and skips follow-up reads', async () => {
+    const token = seedRepo([branch('main')])
+    let statusCalls = 0
+    rpcHandlers['repo.snapshot'] = async () => {
+      throw new Error('error.not-git-repo')
+    }
+    rpcHandlers['repo.status'] = async () => {
+      statusCalls += 1
+      return []
+    }
+
+    await useReposStore.getState().refreshAll(REPO_ID, { token })
+
+    const repo = useReposStore.getState().repos[REPO_ID]
+    expect(repo?.availability).toMatchObject({ phase: 'unavailable', reason: 'error.not-git-repo' })
+    expect(repo?.resources.snapshot.error).toBe('error.not-git-repo')
+    expect(statusCalls).toBe(0)
+  })
+
+  test('refreshSnapshot restores an unavailable repo when the path is a git repo again', async () => {
+    const token = seedRepo([branch('old')])
+    updateRepoForTest((repo) => {
+      repo.availability = { phase: 'unavailable', reason: 'error.path-not-found', checkedAt: Date.now() }
+    })
+    rpcHandlers['repo.snapshot'] = async () => ({ branches: [branch('main')], current: 'main' })
+
+    await useReposStore.getState().refreshSnapshot(REPO_ID, { token })
+
+    const repo = useReposStore.getState().repos[REPO_ID]
+    expect(repo?.availability).toEqual({ phase: 'available' })
+    expect(repo?.data.branches.map((b) => b.name)).toEqual(['main'])
+    expect(repo?.resources.snapshot.error).toBeNull()
+  })
+
   test('refreshAll stops before log when the repo is reopened after status', async () => {
     const token = seedRepo([branch('main')], 1)
     let logCalls = 0
@@ -832,6 +872,135 @@ describe('core refresh request ordering', () => {
     resolveFirst([{ path: '/repo', isMain: true, entries: [{ x: 'M', y: ' ', path: 'stale.ts' }] }])
     await first
     expect(useReposStore.getState().repos[REPO_ID]?.data.status).toEqual(fresh)
+  })
+
+  test('refreshStatus updates normalized worktree dirty metadata', async () => {
+    const token = seedRepo([
+      branch('feature/cleaned', undefined, {
+        worktree: {
+          path: '/tmp/worktree-cleaned',
+          summary: {
+            dirty: true,
+            changeCount: 2,
+          },
+        },
+      }),
+      branch('feature/dirty', undefined, {
+        worktree: {
+          path: '/tmp/worktree-dirty',
+          summary: {
+            dirty: false,
+            changeCount: 0,
+          },
+        },
+      }),
+      branch('feature/missing', undefined, {
+        worktree: {
+          path: '/tmp/worktree-missing',
+          summary: {
+            dirty: true,
+            changeCount: 3,
+          },
+        },
+      }),
+    ])
+    rpcHandlers['repo.status'] = async () => [
+      { path: '/tmp/worktree-cleaned', branch: 'feature/cleaned', isMain: false, entries: [] },
+      {
+        path: '/tmp/worktree-dirty',
+        branch: 'feature/dirty',
+        isMain: false,
+        entries: [
+          { x: 'M', y: ' ', path: 'one.ts' },
+          { x: '?', y: '?', path: 'two.ts' },
+        ],
+      },
+    ]
+
+    await useReposStore.getState().refreshStatus(REPO_ID, { token })
+
+    const worktreesByPath = useReposStore.getState().repos[REPO_ID]?.data.worktreesByPath
+    expect(worktreesByPath?.['/tmp/worktree-cleaned']).toMatchObject({
+      isDirty: false,
+      changeCount: 0,
+    })
+    expect(worktreesByPath?.['/tmp/worktree-dirty']).toMatchObject({
+      isDirty: true,
+      changeCount: 2,
+    })
+    expect(worktreesByPath?.['/tmp/worktree-missing']).toMatchObject({
+      isDirty: true,
+      changeCount: 3,
+    })
+  })
+
+  test('snapshot refresh keeps status-derived worktree dirtiness authoritative', async () => {
+    const token = seedRepo(
+      [
+        branch('feature/a', undefined, {
+          worktree: {
+            path: '/tmp/worktree-a',
+            summary: {
+              dirty: false,
+              changeCount: 0,
+            },
+          },
+        }),
+      ],
+      1,
+    )
+    updateRepoForTest((repo) => {
+      repo.data.status = [{ path: '/tmp/worktree-a', branch: 'feature/a', isMain: false, entries: [] }]
+      repo.data.statusLoaded = true
+    })
+    rpcHandlers['repo.snapshot'] = async () => ({
+      branches: [
+        branch('feature/a', undefined, {
+          worktree: {
+            path: '/tmp/worktree-a',
+            summary: {
+              dirty: true,
+              changeCount: 4,
+            },
+          },
+        }),
+      ],
+      current: 'feature/a',
+    })
+
+    await useReposStore.getState().refreshSnapshot(REPO_ID, { token })
+
+    expect(useReposStore.getState().repos[REPO_ID]?.data.worktreesByPath['/tmp/worktree-a']).toMatchObject({
+      isDirty: false,
+      changeCount: 0,
+    })
+  })
+
+  test('snapshot refresh stores worktree state outside branch state', async () => {
+    const token = seedRepo([branch('feature/a')])
+    rpcHandlers['repo.snapshot'] = async () => ({
+      branches: [
+        branch('feature/a', undefined, {
+          worktree: {
+            path: '/tmp/worktree-a',
+            summary: {
+              dirty: true,
+              changeCount: 3,
+            },
+          },
+        }),
+      ],
+      current: 'feature/a',
+    })
+
+    await useReposStore.getState().refreshSnapshot(REPO_ID, { token })
+
+    const repo = useReposStore.getState().repos[REPO_ID]
+    expect(repo?.data.branches[0]?.worktree).not.toHaveProperty('summary')
+    expect(repo?.data.worktreesByPath['/tmp/worktree-a']).toMatchObject({
+      isDirty: true,
+      changeCount: 3,
+    })
   })
 
   test('refreshStatus records resource loading, success, and stale error state', async () => {
@@ -1014,7 +1183,7 @@ describe('core refresh request ordering', () => {
   })
 
   test('snapshot refresh falls back from terminal tab when selected branch loses its worktree', async () => {
-    const token = seedRepo([branch('main', undefined, { worktreePath: '/repo' }), branch('feature/a')])
+    const token = seedRepo([branch('main', undefined, { worktree: { path: '/repo' } }), branch('feature/a')])
     updateRepoForTest((repo) => {
       repo.ui.selectedBranch = 'feature/a'
       repo.ui.detailTab = 'terminal'
@@ -1029,7 +1198,7 @@ describe('core refresh request ordering', () => {
   })
 
   test('snapshot refresh prunes terminal sessions to current worktree paths', async () => {
-    const token = seedRepo([branch('stale', undefined, { worktreePath: '/tmp/stale-worktree' })])
+    const token = seedRepo([branch('stale', undefined, { worktree: { path: '/tmp/stale-worktree' } })])
     const calls: TerminalPruneRepoInput[] = []
     overrideTerminalBridge({
       pruneRepo: async (input) => {
@@ -1039,8 +1208,8 @@ describe('core refresh request ordering', () => {
     })
     rpcHandlers['repo.snapshot'] = async () => ({
       branches: [
-        branch('main', undefined, { worktreePath: '/repo' }),
-        branch('feature/a', undefined, { worktreePath: '/tmp/worktree-a' }),
+        branch('main', undefined, { worktree: { path: '/repo' } }),
+        branch('feature/a', undefined, { worktree: { path: '/tmp/worktree-a' } }),
         branch('feature/plain'),
       ],
       current: 'main',
@@ -1049,10 +1218,13 @@ describe('core refresh request ordering', () => {
     await useReposStore.getState().refreshSnapshot(REPO_ID, { token })
 
     expect(calls).toEqual([{ repoRoot: REPO_ID, worktreePaths: ['/repo', '/tmp/worktree-a'] }])
+    const worktreesByPath = useReposStore.getState().repos[REPO_ID]?.data.worktreesByPath
+    expect(worktreesByPath?.['/tmp/stale-worktree']).toBeUndefined()
+    expect(Object.keys(worktreesByPath ?? {}).sort()).toEqual(['/repo', '/tmp/worktree-a'])
   })
 
   test('snapshot refresh warns when pruning terminal sessions fails', async () => {
-    const token = seedRepo([branch('stale', undefined, { worktreePath: '/tmp/stale-worktree' })])
+    const token = seedRepo([branch('stale', undefined, { worktree: { path: '/tmp/stale-worktree' } })])
     const err = new Error('prune failed')
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     overrideTerminalBridge({
@@ -1061,7 +1233,7 @@ describe('core refresh request ordering', () => {
       },
     })
     rpcHandlers['repo.snapshot'] = async () => ({
-      branches: [branch('main', undefined, { worktreePath: '/repo' })],
+      branches: [branch('main', undefined, { worktree: { path: '/repo' } })],
       current: 'main',
     })
 

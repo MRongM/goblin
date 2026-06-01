@@ -10,7 +10,9 @@ export interface HelpShortcutSection {
   rows: HelpShortcutRow[]
 }
 
-export function helpShortcutSections(globalShortcut: string): HelpShortcutSection[] {
+export function helpShortcutSections(globalShortcut: string, swapCloseShortcuts = false): HelpShortcutSection[] {
+  const closeTabCombo = swapCloseShortcuts ? ['⌘', 'W'] : ['⌘', '⇧', 'W']
+  const closeWindowCombo = swapCloseShortcuts ? ['⌘', '⇧', 'W'] : ['⌘', 'W']
   return [
     {
       titleKey: 'help.section.nav',
@@ -30,7 +32,7 @@ export function helpShortcutSections(globalShortcut: string): HelpShortcutSectio
         { combos: [['⇧', 'P']], labelKey: 'action.push' },
         { combos: [['g']], labelKey: 'worktrees.open-in-terminal-label' },
         { combos: [['v']], labelKey: 'worktrees.open-in-editor-label' },
-        { combos: [['⇧', 'G']], labelKey: 'action.github' },
+        { combos: [['⇧', 'G']], labelKey: 'action.remote' },
       ],
     },
     {
@@ -46,10 +48,11 @@ export function helpShortcutSections(globalShortcut: string): HelpShortcutSectio
     {
       titleKey: 'help.section.app',
       rows: [
-        { combos: [['⌘', 'O']], labelKey: 'help.row.open-repo' },
+        { combos: [['⌘', 'O']], labelKey: 'help.row.open-local-repo' },
         { combos: [['⌘', '⇧', 'O']], labelKey: 'help.row.clone-repo' },
         { combos: [acceleratorToKeyLabels(globalShortcut)], labelKey: 'help.row.activate-window' },
-        { combos: [['⌘', '⇧', 'W']], labelKey: 'help.row.close-repo' },
+        { combos: [closeTabCombo], labelKey: 'help.row.close-repo' },
+        { combos: [closeWindowCombo], labelKey: 'help.row.close-window' },
         { combos: [['⌘', 'R']], labelKey: 'help.row.refresh' },
         { combos: [['⌘', ',']], labelKey: 'help.row.settings' },
         { combos: [['?']], labelKey: 'help.row.this-help' },

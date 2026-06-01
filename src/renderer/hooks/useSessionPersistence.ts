@@ -1,7 +1,8 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { useStoreWithEqualityFn } from 'zustand/traditional'
 import { useReposStore } from '#/renderer/stores/repos/store.ts'
 import { rpc } from '#/renderer/rpc.ts'
+import type { SessionState } from '#/shared/rpc.ts'
 import type { RepoSessionEntry } from '#/shared/remote-repo.ts'
 
 function sessionEntriesEqual(a: RepoSessionEntry[], b: RepoSessionEntry[]): boolean {
@@ -15,6 +16,8 @@ function sessionEntriesEqual(a: RepoSessionEntry[], b: RepoSessionEntry[]): bool
   }
   return true
 }
+
+const SESSION_SAVE_DEBOUNCE_MS = 200
 
 export function useSessionPersistence() {
   const activeId = useReposStore((s) => s.activeId)
@@ -38,22 +41,42 @@ export function useSessionPersistence() {
   const workspaceLayout = useReposStore((s) => s.workspaceLayout)
   const detailPaneSizes = useReposStore((s) => s.detailPaneSizes)
   const sessionReady = useReposStore((s) => s.sessionReady)
+  const lastSavedRef = useRef<string | null>(null)
+  const lastImmediateKeyRef = useRef<string | null>(null)
 
   useEffect(() => {
     if (!sessionReady) return
-    void rpc.settings.saveSession
-      .mutate({
-        session: {
-          openRepos,
-          activeRepo: activeId,
-          detailCollapsed,
-          detailFocusMode,
-          workspaceLayout,
-          detailPaneSizes,
-        },
-      })
-      .catch((err) => {
+    const session: SessionState = {
+      openRepos,
+      activeRepo: activeId,
+      detailCollapsed,
+      detailFocusMode,
+      workspaceLayout,
+      detailPaneSizes,
+    }
+    const serialized = JSON.stringify(session)
+    const immediateKey = JSON.stringify({
+      openRepos,
+      activeRepo: activeId,
+      detailCollapsed,
+      detailFocusMode,
+      workspaceLayout,
+    })
+    const immediate = lastImmediateKeyRef.current !== immediateKey
+    lastImmediateKeyRef.current = immediateKey
+    if (lastSavedRef.current === serialized) return
+    const save = () => {
+      lastSavedRef.current = serialized
+      void rpc.settings.saveSession.mutate({ session }).catch((err) => {
+        lastSavedRef.current = null
         console.warn('[session] save failed', err)
       })
+    }
+    if (immediate) {
+      save()
+      return
+    }
+    const timeout = window.setTimeout(save, SESSION_SAVE_DEBOUNCE_MS)
+    return () => window.clearTimeout(timeout)
   }, [sessionReady, openRepos, activeId, detailCollapsed, detailFocusMode, workspaceLayout, detailPaneSizes])
 }

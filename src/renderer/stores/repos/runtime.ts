@@ -4,32 +4,21 @@ import {
   queueOperation,
   settleOperation,
   startOperation,
+  type RepoOperationKey,
   type RepoOperationReason,
   type RepoOperationState,
+  type RepoOperationTarget,
 } from '#/renderer/stores/repos/operations.ts'
 
 export type RepoTaskLane = 'network' | 'read' | 'write'
-
-export type RepoOperationKey =
-  | 'fetch'
-  | 'snapshot'
-  | 'status'
-  | 'pullRequests'
-  | 'branchAction'
-  | `log:${string}`
-  | `pullRequest:${string}`
-
-export interface RepoRuntimeOperationTarget {
-  key: RepoOperationKey
-  reason: RepoOperationReason
-  target?: string | null
-}
+export type { RepoOperationKey, RepoOperationTarget as RepoRuntimeOperationTarget }
 
 interface QueuedRepoTask<T> {
   task: (signal: AbortSignal) => Promise<T>
   priority: number
   replaceKey?: string
   ctrl: AbortController
+  timeout?: ReturnType<typeof globalThis.setTimeout>
   onStart?: (wasQueued: boolean) => void
   resolve: (value: T) => void
   reject: (reason: unknown) => void
@@ -37,7 +26,10 @@ interface QueuedRepoTask<T> {
 
 interface RepoLaneOptions {
   priority?: number
+  // Includes the lane namespace because runRepoOperation builds it from lane + operationKey.
   replaceQueuedKey?: string
+  queuedTimeoutMs?: number
+  queuedTimeoutMessage?: string
   onQueued?: () => void
   onStart?: (wasQueued: boolean) => void
 }
@@ -64,6 +56,14 @@ class RepoLane {
       if (this.active < this.concurrency) this.start(queuedTask, false)
       else {
         options?.onQueued?.()
+        if (options?.queuedTimeoutMs !== undefined) {
+          queuedTask.timeout = globalThis.setTimeout(() => {
+            if (this.removeQueued(queuedTask as QueuedRepoTask<unknown>)) {
+              queuedTask.ctrl.abort(options.queuedTimeoutMessage)
+              queuedTask.reject(new Error(options.queuedTimeoutMessage ?? 'cancelled'))
+            }
+          }, options.queuedTimeoutMs)
+        }
         this.enqueue(queuedTask as QueuedRepoTask<unknown>)
       }
     })
@@ -74,12 +74,14 @@ class RepoLane {
     const queued = this.queued
     this.queued = []
     for (const task of queued) {
+      if (task.timeout) globalThis.clearTimeout(task.timeout)
       task.ctrl.abort()
       task.reject(new Error('cancelled'))
     }
   }
 
   private start<T>(queuedTask: QueuedRepoTask<T>, wasQueued: boolean): void {
+    if (queuedTask.timeout) globalThis.clearTimeout(queuedTask.timeout)
     this.active += 1
     this.activeControllers.add(queuedTask.ctrl)
     let work: Promise<T>
@@ -105,17 +107,29 @@ class RepoLane {
     this.queued.splice(index === -1 ? this.queued.length : index, 0, task)
   }
 
-  private cancelQueued(replaceKey: string): void {
+  cancelQueued(replaceKey: string): boolean {
+    let cancelled = false
     const keep: Array<QueuedRepoTask<unknown>> = []
     for (const task of this.queued) {
       if (task.replaceKey !== replaceKey) {
         keep.push(task)
         continue
       }
+      cancelled = true
+      if (task.timeout) globalThis.clearTimeout(task.timeout)
       task.ctrl.abort()
       task.reject(new Error('cancelled'))
     }
     this.queued = keep
+    return cancelled
+  }
+
+  private removeQueued(task: QueuedRepoTask<unknown>): boolean {
+    const index = this.queued.indexOf(task)
+    if (index === -1) return false
+    this.queued.splice(index, 1)
+    if (task.timeout) globalThis.clearTimeout(task.timeout)
+    return true
   }
 
   private drain(): void {
@@ -134,6 +148,7 @@ interface RepoRuntime {
 }
 
 const runtimes = new Map<string, RepoRuntime>()
+const operationIdleWaiters = new Map<string, Set<() => void>>()
 
 function createRuntime(): RepoRuntime {
   return {
@@ -181,7 +196,7 @@ export function repoOperationCurrent(repoId: string, key: RepoOperationKey, oper
 export function markRepoOperationTargets(
   repoId: string,
   operationId: number,
-  targets: RepoRuntimeOperationTarget[],
+  targets: RepoOperationTarget[],
   phase: 'queued' | 'running',
   wasQueued = false,
 ): void {
@@ -205,15 +220,63 @@ export function markRepoOperationTargets(
 export function settleRepoOperationTargets(
   repoId: string,
   operationId: number,
-  targets: RepoRuntimeOperationTarget[],
+  targets: RepoOperationTarget[],
   error: string | null,
 ): void {
   const runtime = runtimes.get(repoId)
   if (!runtime) return
+  let settled = false
   for (const target of targets) {
     const operation = runtime.operations[target.key]
-    if (operation) settleOperation(operation, operationId, { error })
+    if (operation && settleOperation(operation, operationId, { error })) settled = true
   }
+  if (settled) notifyOperationIdleWaiters(repoId)
+}
+
+function notifyOperationIdleWaiters(repoId: string): void {
+  const waiters = operationIdleWaiters.get(repoId)
+  if (!waiters) return
+  for (const waiter of [...waiters]) waiter()
+}
+
+export function waitForRepoOperationsIdle(
+  repoId: string,
+  keys: RepoOperationKey[],
+  signal?: AbortSignal,
+): Promise<void> {
+  if (keys.every((key) => !repoOperationBusy(repoId, key))) return Promise.resolve()
+  return new Promise((resolve, reject) => {
+    let settled = false
+    const cleanup = () => {
+      operationIdleWaiters.get(repoId)?.delete(check)
+      signal?.removeEventListener('abort', abort)
+    }
+    const finish = () => {
+      if (settled) return
+      settled = true
+      cleanup()
+      resolve()
+    }
+    const fail = () => {
+      if (settled) return
+      settled = true
+      cleanup()
+      reject(new Error('cancelled'))
+    }
+    const check = () => {
+      if (keys.every((key) => !repoOperationBusy(repoId, key))) finish()
+    }
+    const abort = () => fail()
+    if (signal?.aborted) {
+      fail()
+      return
+    }
+    const waiters = operationIdleWaiters.get(repoId) ?? new Set<() => void>()
+    waiters.add(check)
+    operationIdleWaiters.set(repoId, waiters)
+    signal?.addEventListener('abort', abort, { once: true })
+    check()
+  })
 }
 
 export function pruneRepoBranchLogOperations(repoId: string, validBranches: Set<string>): void {
@@ -248,6 +311,8 @@ export function disposeRepoRuntime(repoId: string): void {
   if (!runtime) return
   for (const queue of Object.values(runtime.queues)) queue.cancelAll()
   runtimes.delete(repoId)
+  notifyOperationIdleWaiters(repoId)
+  operationIdleWaiters.delete(repoId)
 }
 
 export function disposeAllRepoRuntimes(): void {

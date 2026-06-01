@@ -1,17 +1,19 @@
 import { initTRPC } from '@trpc/server'
 import * as v from 'valibot'
 import type {
-  BranchInfo,
+  BranchSnapshotInfo,
   ExecResult,
   LogEntry,
   PullRequestFetchMode,
   PullRequestInfo,
+  RepoRemoteInfo,
   WorktreeStatus,
 } from '#/shared/git-types.ts'
 import { WORKSPACE_LAYOUTS } from '#/shared/workspace-layout.ts'
 import { COLOR_THEMES } from '#/shared/color-theme.ts'
 import type { WorkspaceDetailPaneSizes, WorkspaceLayout } from '#/shared/workspace-layout.ts'
 import type { ColorTheme } from '#/shared/color-theme.ts'
+import { SETTINGS_PAGES, type SettingsPage } from '#/shared/settings-pages.ts'
 import type {
   RemoteConnectionInput,
   RemoteDiagnosticsResult,
@@ -32,6 +34,7 @@ import type {
 } from '#/shared/remote-ports.ts'
 
 export type { WorkspaceLayout } from '#/shared/workspace-layout.ts'
+export type { SettingsPage } from '#/shared/settings-pages.ts'
 
 export type ThemePref = 'auto' | 'light' | 'dark'
 export type ResolvedTheme = 'light' | 'dark'
@@ -41,7 +44,10 @@ export type TerminalPref = 'auto' | 'ghostty' | 'terminal'
 export type EditorPref = 'auto' | 'vscode' | 'cursor' | 'windsurf'
 export type ResolvedTerminalApp = Exclude<TerminalPref, 'auto'>
 export type ResolvedEditorApp = Exclude<EditorPref, 'auto'>
+export type TerminalAppAvailability = Record<ResolvedTerminalApp, boolean>
+export type EditorAppAvailability = Record<ResolvedEditorApp, boolean>
 export type NetworkOpKind = 'user' | 'background'
+
 export interface ThemeState {
   pref: ThemePref
   resolved: ResolvedTheme
@@ -63,15 +69,15 @@ export interface SettingsSnapshot {
   theme: ThemePref
   colorTheme: ColorTheme
   fetchIntervalSec: number
+  terminalNotificationsEnabled: boolean
   shortcutsDisabled: boolean
+  globalShortcutDisabled: boolean
+  swapCloseShortcuts: boolean
+  toggleDetailOnActionBarBlankClick: boolean
   globalShortcut: string
   globalShortcutRegistered: boolean
   terminalApp: TerminalPref
-  resolvedTerminalApp: ResolvedTerminalApp | null
-  terminalAvailable: boolean
   editorApp: EditorPref
-  resolvedEditorApp: ResolvedEditorApp | null
-  editorAvailable: boolean
   session: SessionState
   recentRepos: string[]
 }
@@ -81,16 +87,40 @@ export interface GlobalShortcutState {
   registered: boolean
 }
 
+export interface GitHubCliState {
+  available: boolean
+  version: string | null
+  detectedAt: number
+  hosts: Record<string, GitHubCliHostState>
+}
+
+export interface GitHubCliHostState {
+  host: string
+  authenticated: boolean
+  activeLogin: string | null
+  logins: string[]
+  tokenSource: string | null
+}
+
 export interface TerminalAppState {
   pref: TerminalPref
   resolved: ResolvedTerminalApp | null
   available: boolean
+  appAvailability: TerminalAppAvailability
+  detectedAt: number
 }
 
 export interface EditorAppState {
   pref: EditorPref
   resolved: ResolvedEditorApp | null
   available: boolean
+  appAvailability: EditorAppAvailability
+  detectedAt: number
+}
+
+export interface ExternalAppsSnapshot {
+  terminal: TerminalAppState
+  editor: EditorAppState
 }
 
 export interface I18nPayload {
@@ -123,8 +153,9 @@ export interface CommitDetail {
 }
 
 export interface RepoSnapshot {
-  branches: BranchInfo[]
+  branches: BranchSnapshotInfo[]
   current: string
+  remote?: RepoRemoteInfo
 }
 
 export interface ProbeResult {
@@ -160,6 +191,7 @@ export type RpcResponse =
 
 export type MenuAction =
   | 'open-repo'
+  | 'open-repo-path'
   | 'clone-repo'
   | 'close-repo'
   | 'next-repo'
@@ -171,20 +203,25 @@ export type MenuAction =
   | 'tab-terminal'
   | 'toggle-detail'
   | 'reset-layout'
-  | 'open-settings'
-  | 'show-help'
   | { type: 'open-recent-repo'; path: string }
   | { type: 'set-workspace-layout'; layout: WorkspaceLayout }
 
 export type RpcEvent =
   | { type: 'theme-changed'; state: ThemeState }
   | { type: 'fetch-interval-changed'; sec: number }
+  | { type: 'terminal-notifications-changed'; enabled: boolean }
   | { type: 'shortcuts-disabled-changed'; disabled: boolean }
+  | { type: 'global-shortcut-disabled-changed'; disabled: boolean }
+  | { type: 'swap-close-shortcuts-changed'; swapped: boolean }
+  | { type: 'toggle-detail-on-action-bar-blank-click-changed'; enabled: boolean }
   | { type: 'global-shortcut-changed'; state: GlobalShortcutState }
   | ({ type: 'terminal-app-changed' } & TerminalAppState)
   | ({ type: 'editor-app-changed' } & EditorAppState)
+  | { type: 'github-cli-changed'; state: GitHubCliState }
   | { type: 'settings-write-error'; message: string }
+  | { type: 'external-open-enqueued' }
   | { type: 'menu-action'; action: MenuAction }
+  | { type: 'terminal-bell-click'; repoRoot: string }
   | { type: 'i18n-changed'; payload: I18nPayload }
   | { type: 'remote-port-session-changed'; session: RemotePortForwardSession }
 
@@ -192,9 +229,11 @@ export interface AppRpcHandlers {
   app: {
     openProjectGitHub: () => Promise<ExecResult>
     openExternalUrl: (input: { url: string }) => Promise<ExecResult>
+    openSettingsWindow: (input?: { page?: SettingsPage }) => Promise<void>
   }
   repo: {
     openDialog: () => Promise<string | null>
+    consumeExternalOpenPaths: () => Promise<string[]>
     cloneParentDialog: () => Promise<string | null>
     probe: (input: { cwd: string }) => Promise<ProbeResult>
     clone: (input: {
@@ -216,13 +255,19 @@ export interface AppRpcHandlers {
     commit: (input: { cwd: string; hash: string }) => Promise<CommitDetail | null>
     checkout: (input: { cwd: string; branch: string }) => Promise<ExecResult>
     checkoutRemoteBranch: (input: { cwd: string; remoteBranch: string }) => Promise<ExecResult>
-    deleteBranch: (input: { cwd: string; branch: string; force?: boolean }) => Promise<ExecResult>
+    deleteBranch: (input: {
+      cwd: string
+      branch: string
+      force?: boolean
+      alsoDeleteUpstream?: boolean
+    }) => Promise<ExecResult>
     removeWorktree: (input: {
       cwd: string
       branch: string
       worktreePath: string
       alsoDeleteBranch: boolean
       forceDeleteBranch?: boolean
+      alsoDeleteUpstream?: boolean
     }) => Promise<ExecResult>
     createWorktree: (input: {
       cwd: string
@@ -234,7 +279,7 @@ export interface AppRpcHandlers {
     push: (input: { cwd: string; branch: string }) => Promise<ExecResult>
     fetch: (input: { cwd: string; kind?: NetworkOpKind }) => Promise<ExecResult>
     abort: (input: { cwd: string }) => Promise<boolean>
-    openGitHub: (input: { cwd: string; branch?: string }) => Promise<ExecResult>
+    openRemote: (input: { cwd: string; branch?: string }) => Promise<ExecResult>
     openInFinder: (input: { path: string }) => Promise<ExecResult>
     openTerminal: (input: { path: string }) => Promise<ExecResult>
     openEditor: (input: { path: string }) => Promise<ExecResult>
@@ -291,13 +336,25 @@ export interface AppRpcHandlers {
   settings: {
     get: () => Promise<SettingsSnapshot>
     setFetchInterval: (input: { sec: number }) => Promise<void>
+    setTerminalNotificationsEnabled: (input: { enabled: boolean }) => Promise<void>
     setShortcutsDisabled: (input: { disabled: boolean }) => Promise<void>
+    setGlobalShortcutDisabled: (input: { disabled: boolean }) => Promise<void>
+    setSwapCloseShortcuts: (input: { swapped: boolean }) => Promise<void>
+    setToggleDetailOnActionBarBlankClick: (input: { enabled: boolean }) => Promise<void>
     setGlobalShortcut: (input: { accelerator: string }) => Promise<GlobalShortcutState>
     setTerminalApp: (input: { pref: TerminalPref }) => Promise<TerminalAppState>
     setEditorApp: (input: { pref: EditorPref }) => Promise<EditorAppState>
     saveSession: (input: { session: SessionState }) => Promise<void>
     addRecentRepo: (input: { repoPath: string }) => Promise<string[]>
     clearRecentRepos: () => Promise<void>
+  }
+  externalApps: {
+    get: () => Promise<ExternalAppsSnapshot>
+    refresh: () => Promise<ExternalAppsSnapshot>
+  }
+  githubCli: {
+    get: (input?: { hosts?: string[] }) => Promise<GitHubCliState>
+    refresh: (input?: { hosts?: string[] }) => Promise<GitHubCliState>
   }
   i18n: {
     get: () => Promise<I18nPayload>
@@ -407,9 +464,13 @@ export function createAppRouter(handlers: AppRpcHandlers) {
       openExternalUrl: p
         .input(v.object({ url: v.string() }))
         .mutation(({ input }) => handlers.app.openExternalUrl(input)),
+      openSettingsWindow: p
+        .input(v.optional(v.object({ page: v.optional(v.picklist(SETTINGS_PAGES)) })))
+        .mutation(({ input }) => handlers.app.openSettingsWindow(input)),
     }),
     repo: t.router({
       openDialog: p.input(EmptyInput).mutation(() => handlers.repo.openDialog()),
+      consumeExternalOpenPaths: p.input(EmptyInput).mutation(() => handlers.repo.consumeExternalOpenPaths()),
       cloneParentDialog: p.input(EmptyInput).mutation(() => handlers.repo.cloneParentDialog()),
       probe: p.input(CwdInput).query(({ input }) => handlers.repo.probe(input)),
       clone: p
@@ -457,7 +518,14 @@ export function createAppRouter(handlers: AppRpcHandlers) {
         .input(v.object({ cwd: v.string(), remoteBranch: v.string() }))
         .mutation(({ input }) => handlers.repo.checkoutRemoteBranch(input)),
       deleteBranch: p
-        .input(v.object({ cwd: v.string(), branch: v.string(), force: v.optional(v.boolean()) }))
+        .input(
+          v.object({
+            cwd: v.string(),
+            branch: v.string(),
+            force: v.optional(v.boolean()),
+            alsoDeleteUpstream: v.optional(v.boolean()),
+          }),
+        )
         .mutation(({ input }) => handlers.repo.deleteBranch(input)),
       removeWorktree: p
         .input(
@@ -467,6 +535,7 @@ export function createAppRouter(handlers: AppRpcHandlers) {
             worktreePath: v.string(),
             alsoDeleteBranch: v.boolean(),
             forceDeleteBranch: v.optional(v.boolean()),
+            alsoDeleteUpstream: v.optional(v.boolean()),
           }),
         )
         .mutation(({ input }) => handlers.repo.removeWorktree(input)),
@@ -481,9 +550,9 @@ export function createAppRouter(handlers: AppRpcHandlers) {
         .input(v.object({ cwd: v.string(), kind: v.optional(v.picklist(['user', 'background'])) }))
         .mutation(({ input }) => handlers.repo.fetch(input)),
       abort: p.input(CwdInput).mutation(({ input }) => handlers.repo.abort(input)),
-      openGitHub: p
+      openRemote: p
         .input(v.object({ cwd: v.string(), branch: v.optional(v.string()) }))
-        .mutation(({ input }) => handlers.repo.openGitHub(input)),
+        .mutation(({ input }) => handlers.repo.openRemote(input)),
       openInFinder: p.input(PathInput).mutation(({ input }) => handlers.repo.openInFinder(input)),
       openTerminal: p.input(PathInput).mutation(({ input }) => handlers.repo.openTerminal(input)),
       openEditor: p.input(PathInput).mutation(({ input }) => handlers.repo.openEditor(input)),
@@ -597,9 +666,21 @@ export function createAppRouter(handlers: AppRpcHandlers) {
       setFetchInterval: p
         .input(v.object({ sec: FiniteNumber }))
         .mutation(({ input }) => handlers.settings.setFetchInterval(input)),
+      setTerminalNotificationsEnabled: p
+        .input(v.object({ enabled: v.boolean() }))
+        .mutation(({ input }) => handlers.settings.setTerminalNotificationsEnabled(input)),
       setShortcutsDisabled: p
         .input(v.object({ disabled: v.boolean() }))
         .mutation(({ input }) => handlers.settings.setShortcutsDisabled(input)),
+      setGlobalShortcutDisabled: p
+        .input(v.object({ disabled: v.boolean() }))
+        .mutation(({ input }) => handlers.settings.setGlobalShortcutDisabled(input)),
+      setSwapCloseShortcuts: p
+        .input(v.object({ swapped: v.boolean() }))
+        .mutation(({ input }) => handlers.settings.setSwapCloseShortcuts(input)),
+      setToggleDetailOnActionBarBlankClick: p
+        .input(v.object({ enabled: v.boolean() }))
+        .mutation(({ input }) => handlers.settings.setToggleDetailOnActionBarBlankClick(input)),
       setGlobalShortcut: p
         .input(v.object({ accelerator: v.string() }))
         .mutation(({ input }) => handlers.settings.setGlobalShortcut(input)),
@@ -630,6 +711,18 @@ export function createAppRouter(handlers: AppRpcHandlers) {
         .input(v.object({ repoPath: v.string() }))
         .mutation(({ input }) => handlers.settings.addRecentRepo(input)),
       clearRecentRepos: p.input(EmptyInput).mutation(() => handlers.settings.clearRecentRepos()),
+    }),
+    externalApps: t.router({
+      get: p.input(EmptyInput).query(() => handlers.externalApps.get()),
+      refresh: p.input(EmptyInput).mutation(() => handlers.externalApps.refresh()),
+    }),
+    githubCli: t.router({
+      get: p
+        .input(v.optional(v.object({ hosts: v.optional(v.array(v.string())) })))
+        .query(({ input }) => handlers.githubCli.get(input)),
+      refresh: p
+        .input(v.optional(v.object({ hosts: v.optional(v.array(v.string())) })))
+        .mutation(({ input }) => handlers.githubCli.refresh(input)),
     }),
     i18n: t.router({
       get: p.input(EmptyInput).query(() => handlers.i18n.get()),

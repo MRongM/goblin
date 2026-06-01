@@ -18,6 +18,7 @@ describe('getSelectedBranchDetailPresentation', () => {
       branchLog: undefined,
       selectedStatus: [],
       statusCount: 0,
+      worktreeState: null,
     })
   })
 

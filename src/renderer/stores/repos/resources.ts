@@ -1,5 +1,4 @@
 import type { PullRequestFetchMode } from '#/renderer/types.ts'
-import type { RepoBranchActionKind } from '#/renderer/stores/repos/branch-action-types.ts'
 
 export type RepoResourcePhase = 'idle' | 'loading' | 'refreshing'
 
@@ -14,17 +13,11 @@ export interface RepoPullRequestResourceState extends RepoResourceState {
   mode: PullRequestFetchMode | null
 }
 
-export interface RepoBranchActionResourceState extends RepoResourceState {
-  kind: RepoBranchActionKind | null
-  target: string | null
-}
-
 export interface RepoResourcesState {
   snapshot: RepoResourceState
   status: RepoResourceState
   fetch: RepoResourceState
   diagnostics: RepoResourceState
-  branchAction: RepoBranchActionResourceState
   pullRequests: RepoPullRequestResourceState
   pullRequestsByBranch: Record<string, RepoPullRequestResourceState>
   logsByBranch: Record<string, RepoResourceState>
@@ -49,21 +42,12 @@ export function idlePullRequestResource(
   }
 }
 
-export function idleBranchActionResource(loadedAt: number | null = null): RepoBranchActionResourceState {
-  return {
-    ...idleResource(loadedAt),
-    kind: null,
-    target: null,
-  }
-}
-
 export function emptyRepoResources(): RepoResourcesState {
   return {
     snapshot: idleResource(),
     status: idleResource(),
     fetch: idleResource(),
     diagnostics: idleResource(),
-    branchAction: idleBranchActionResource(),
     pullRequests: idlePullRequestResource(),
     pullRequestsByBranch: {},
     logsByBranch: {},
@@ -137,29 +121,4 @@ export function finishPullRequestResourceUnavailable(
 export function finishPullRequestResourceError(resource: RepoPullRequestResourceState, error: string): void {
   finishResourceError(resource, error)
   resource.mode = null
-}
-
-export function startBranchActionResource(
-  resource: RepoBranchActionResourceState,
-  kind: RepoBranchActionKind,
-  target: string | null,
-): void {
-  startResource(resource)
-  resource.kind = kind
-  resource.target = target
-}
-
-export function finishBranchActionResourceSuccess(
-  resource: RepoBranchActionResourceState,
-  loadedAt: number = Date.now(),
-): void {
-  finishResourceSuccess(resource, loadedAt)
-  resource.kind = null
-  resource.target = null
-}
-
-export function finishBranchActionResourceError(resource: RepoBranchActionResourceState, error: string): void {
-  finishResourceError(resource, error)
-  resource.kind = null
-  resource.target = null
 }

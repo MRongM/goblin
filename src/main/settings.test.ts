@@ -24,6 +24,26 @@ test('defaults auto-fetch to two minutes', async () => {
   expect(loaded.fetchIntervalSec).toBe(120)
 })
 
+test('defaults action bar blank click detail toggle to disabled', async () => {
+  tmp = mkdtempSync(path.join(os.tmpdir(), 'gbl-settings-test-'))
+  vi.doMock('electron', () => ({ app: { getPath: () => tmp! } }))
+  const settings = await import('#/main/settings.ts')
+
+  const loaded = await settings.loadSettings()
+
+  expect(loaded.toggleDetailOnActionBarBlankClick).toBe(false)
+})
+
+test('defaults terminal bell notifications to disabled', async () => {
+  tmp = mkdtempSync(path.join(os.tmpdir(), 'gbl-settings-test-'))
+  vi.doMock('electron', () => ({ app: { getPath: () => tmp! } }))
+  const settings = await import('#/main/settings.ts')
+
+  const loaded = await settings.loadSettings()
+
+  expect(loaded.terminalNotificationsEnabled).toBe(false)
+})
+
 test('flushSettings drains writes queued during an in-flight flush', async () => {
   tmp = mkdtempSync(path.join(os.tmpdir(), 'gbl-settings-test-'))
   vi.doMock('electron', () => ({ app: { getPath: () => tmp! } }))
@@ -89,12 +109,57 @@ test('persists the selected color theme', async () => {
   vi.doMock('electron', () => ({ app: { getPath: () => tmp! } }))
   const settings = await import('#/main/settings.ts')
 
-  await settings.setColorTheme('shadcn')
+  await settings.setColorTheme('mono')
   const flushed = await settings.flushSettings()
   expect(flushed).toBe(true)
 
   const saved = JSON.parse(readFileSync(path.join(tmp, 'settings.json'), 'utf-8')) as { colorTheme: string }
-  expect(saved.colorTheme).toBe('shadcn')
+  expect(saved.colorTheme).toBe('mono')
+})
+
+test('falls back to the default color theme for unknown values', async () => {
+  tmp = mkdtempSync(path.join(os.tmpdir(), 'gbl-settings-test-'))
+  await fs.writeFile(
+    path.join(tmp, 'settings.json'),
+    JSON.stringify({ theme: 'auto', colorTheme: 'unknown-theme' }),
+    'utf-8',
+  )
+  vi.doMock('electron', () => ({ app: { getPath: () => tmp! } }))
+  const settings = await import('#/main/settings.ts')
+
+  const loaded = await settings.loadSettings()
+
+  expect(loaded.colorTheme).toBe('macos')
+})
+
+test('persists action bar blank click detail toggle', async () => {
+  tmp = mkdtempSync(path.join(os.tmpdir(), 'gbl-settings-test-'))
+  vi.doMock('electron', () => ({ app: { getPath: () => tmp! } }))
+  const settings = await import('#/main/settings.ts')
+
+  await settings.setToggleDetailOnActionBarBlankClick(true)
+  const flushed = await settings.flushSettings()
+  expect(flushed).toBe(true)
+
+  const saved = JSON.parse(readFileSync(path.join(tmp, 'settings.json'), 'utf-8')) as {
+    toggleDetailOnActionBarBlankClick: boolean
+  }
+  expect(saved.toggleDetailOnActionBarBlankClick).toBe(true)
+})
+
+test('persists terminal bell notifications toggle', async () => {
+  tmp = mkdtempSync(path.join(os.tmpdir(), 'gbl-settings-test-'))
+  vi.doMock('electron', () => ({ app: { getPath: () => tmp! } }))
+  const settings = await import('#/main/settings.ts')
+
+  await settings.setTerminalNotificationsEnabled(true)
+  const flushed = await settings.flushSettings()
+  expect(flushed).toBe(true)
+
+  const saved = JSON.parse(readFileSync(path.join(tmp, 'settings.json'), 'utf-8')) as {
+    terminalNotificationsEnabled: boolean
+  }
+  expect(saved.terminalNotificationsEnabled).toBe(true)
 })
 
 test('persists session detail focus mode', async () => {
@@ -217,4 +282,39 @@ test('drops malformed remote session entries and clears stale active repo', asyn
 
   expect(loaded.session.openRepos).toEqual([])
   expect(loaded.session.activeRepo).toBeNull()
+})
+
+test('adds opened repos to the OS recent documents list', async () => {
+  tmp = mkdtempSync(path.join(os.tmpdir(), 'gbl-settings-test-'))
+  const addRecentDocument = vi.fn()
+  vi.doMock('electron', () => ({
+    app: {
+      getPath: () => tmp!,
+      addRecentDocument,
+      clearRecentDocuments: vi.fn(),
+    },
+  }))
+  const settings = await import('#/main/settings.ts')
+
+  await settings.addRecentRepo('/tmp/repo')
+
+  expect(addRecentDocument).toHaveBeenCalledWith('/tmp/repo')
+})
+
+test('clears OS recent documents when recent repos are cleared', async () => {
+  tmp = mkdtempSync(path.join(os.tmpdir(), 'gbl-settings-test-'))
+  const clearRecentDocuments = vi.fn()
+  vi.doMock('electron', () => ({
+    app: {
+      getPath: () => tmp!,
+      addRecentDocument: vi.fn(),
+      clearRecentDocuments,
+    },
+  }))
+  const settings = await import('#/main/settings.ts')
+
+  await settings.addRecentRepo('/tmp/repo')
+  await settings.clearRecentRepos()
+
+  expect(clearRecentDocuments).toHaveBeenCalledTimes(1)
 })

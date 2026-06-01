@@ -129,16 +129,18 @@ describe('remote git snapshot', () => {
     const snapshot = await getRemoteSnapshot(TARGET, { run })
 
     expect(snapshot?.branches.find((branch) => branch.name === 'main')).toMatchObject({
-      worktreePath: '/srv/goblin',
-      worktreeIsPrimary: true,
-      worktreeDirty: false,
-      worktreeChangeCount: 0,
+      worktree: {
+        path: '/srv/goblin',
+        isPrimary: true,
+        summary: { dirty: false, changeCount: 0 },
+      },
     })
     expect(snapshot?.branches.find((branch) => branch.name === 'feature/x')).toMatchObject({
-      worktreePath: '/srv/goblin-feature-x',
-      worktreeIsPrimary: false,
-      worktreeDirty: true,
-      worktreeChangeCount: 2,
+      worktree: {
+        path: '/srv/goblin-feature-x',
+        isPrimary: false,
+        summary: { dirty: true, changeCount: 2 },
+      },
     })
   })
 

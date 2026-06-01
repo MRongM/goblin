@@ -1,17 +1,19 @@
 import { useEffect, useRef } from 'react'
 import { useReposStore } from '#/renderer/stores/repos/store.ts'
 import { isShortcutBlockingLayerOpen } from '#/renderer/lib/layers.ts'
-import { onRpcEventType, rpc } from '#/renderer/rpc.ts'
+import { onRpcEventType } from '#/renderer/rpc.ts'
 import { isTerminalFocused } from '#/renderer/terminal-focus.ts'
+import { useT } from '#/renderer/stores/i18n.ts'
+import { openRepoFromDialog } from '#/renderer/lib/open-repo-dialog.ts'
 
 interface MenuActionHandlers {
-  openSettings: () => void
+  closeAllOverlays: () => void
+  openRepoPathDialog: () => void
   openCloneRepo: () => void
-  showHelp: () => void
   isOverlayOpen: () => boolean
 }
 
-export function useMenuActions({ openSettings, openCloneRepo, showHelp, isOverlayOpen }: MenuActionHandlers) {
+export function useMenuActions({ closeAllOverlays, openRepoPathDialog, openCloneRepo, isOverlayOpen }: MenuActionHandlers) {
   const syncAndRefresh = useReposStore((s) => s.syncAndRefresh)
   const closeRepo = useReposStore((s) => s.closeRepo)
   const cycleActive = useReposStore((s) => s.cycleActive)
@@ -20,8 +22,25 @@ export function useMenuActions({ openSettings, openCloneRepo, showHelp, isOverla
   const setWorkspaceLayout = useReposStore((s) => s.setWorkspaceLayout)
   const toggleDetailCollapsed = useReposStore((s) => s.toggleDetailCollapsed)
   const resetLayout = useReposStore((s) => s.resetLayout)
+  const t = useT()
   const isOverlayOpenRef = useRef(isOverlayOpen)
   isOverlayOpenRef.current = isOverlayOpen
+
+  useEffect(() => {
+    const offBellClick = onRpcEventType('terminal-bell-click', (event) => {
+      const state = useReposStore.getState()
+      // repo.id is the absolute repoRoot path
+      const repo = state.repos[event.repoRoot]
+      if (!repo) return
+      // Notification clicks are high-priority navigation: close any open
+      // overlay and switch straight to the terminal tab.
+      closeAllOverlays()
+      state.setActive(repo.id)
+      setDetailTab(repo.id, 'terminal')
+      setDetailCollapsed(false)
+    })
+    return offBellClick
+  }, [closeAllOverlays, setDetailCollapsed, setDetailTab])
 
   useEffect(() => {
     const off = onRpcEventType('menu-action', async (event) => {
@@ -52,16 +71,18 @@ export function useMenuActions({ openSettings, openCloneRepo, showHelp, isOverla
         if (isOverlayOpenRef.current() || isShortcutBlockingLayerOpen()) return
         const state = useReposStore.getState()
         switch (action) {
-          case 'open-repo': {
-            const path = await rpc.repo.openDialog.mutate()
-            if (path) await state.openRepo(path)
+          case 'open-repo':
+            await openRepoFromDialog({ openRepo: state.openRepo, t })
             break
-          }
+          case 'open-repo-path':
+            openRepoPathDialog()
+            break
           case 'clone-repo':
             openCloneRepo()
             break
           case 'close-repo': {
             if (state.activeId) closeRepo(state.activeId)
+            else window.close()
             break
           }
           case 'next-repo':
@@ -105,12 +126,6 @@ export function useMenuActions({ openSettings, openCloneRepo, showHelp, isOverla
             // Match VS Code: Cmd+J toggles the panel even while the integrated terminal owns focus.
             if (state.activeId) toggleDetailCollapsed()
             break
-          case 'open-settings':
-            openSettings()
-            break
-          case 'show-help':
-            showHelp()
-            break
         }
       } catch (err) {
         console.warn('[menu] action failed', err)
@@ -120,14 +135,14 @@ export function useMenuActions({ openSettings, openCloneRepo, showHelp, isOverla
   }, [
     closeRepo,
     cycleActive,
+    openRepoPathDialog,
     openCloneRepo,
-    openSettings,
     resetLayout,
     setDetailCollapsed,
     setDetailTab,
     setWorkspaceLayout,
-    showHelp,
     syncAndRefresh,
+    t,
     toggleDetailCollapsed,
   ])
 }

@@ -1,5 +1,5 @@
 import { ChevronDown, Loader2 } from 'lucide-react'
-import type { RepoState } from '#/renderer/stores/repos/types.ts'
+import type { RepoBranchState, RepoState } from '#/renderer/stores/repos/types.ts'
 import { useT } from '#/renderer/stores/i18n.ts'
 import { Button } from '#/renderer/components/ui/button.tsx'
 import {
@@ -16,19 +16,26 @@ import {
   type BranchActionItemGroups,
 } from '#/renderer/hooks/useBranchActionItems.ts'
 import { useAsyncPending } from '#/renderer/hooks/useAsyncPending.ts'
-import type { BranchInfo } from '#/renderer/types.ts'
 
 interface Props {
   repo: RepoState
-  branch: BranchInfo
+  branch: RepoBranchState
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
 }
 
-export function BranchActionsMenu({ repo, branch }: Props) {
+export function BranchActionsMenu({ repo, branch, open, onOpenChange }: Props) {
   const { patchItems, mainItems, destructiveItems, dialogs } = useBranchActionItems(repo, branch)
 
   return (
     <>
-      <BranchActionsDropdown patchItems={patchItems} mainItems={mainItems} destructiveItems={destructiveItems} />
+      <BranchActionsDropdown
+        patchItems={patchItems}
+        mainItems={mainItems}
+        destructiveItems={destructiveItems}
+        open={open}
+        onOpenChange={onOpenChange}
+      />
 
       {dialogs}
     </>
@@ -39,7 +46,12 @@ export function BranchActionsDropdown({
   patchItems,
   mainItems,
   destructiveItems,
-}: Pick<BranchActionItemGroups, 'patchItems' | 'mainItems' | 'destructiveItems'>) {
+  open,
+  onOpenChange,
+}: Pick<BranchActionItemGroups, 'patchItems' | 'mainItems' | 'destructiveItems'> & {
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
+}) {
   const t = useT()
   const { pending: pendingAction, run } = useAsyncPending<BranchActionItem['id']>()
   const visiblePatchItems = patchItems.filter((item) => item.visible)
@@ -49,12 +61,12 @@ export function BranchActionsDropdown({
   const busyAction = pendingAction ?? visibleItems.find((item) => item.busy)?.id ?? null
 
   function runItem(item: BranchActionItem) {
-    if (item.disabled || busyAction) return
+    if (branchActionMenuItemDisabled(item, busyAction)) return
     void run(item.id, item.onSelect)
   }
 
   return (
-    <DropdownMenu>
+    <DropdownMenu open={open} onOpenChange={onOpenChange}>
       <DropdownMenuTrigger asChild>
         <Button
           variant="ghost"
@@ -106,7 +118,8 @@ function BranchActionMenuItem({
 }) {
   return (
     <DropdownMenuItem
-      disabled={item.disabled || busy !== null}
+      disabled={branchActionMenuItemDisabled(item, busy)}
+      title={item.title}
       onClick={onSelect}
       variant={item.destructive ? 'destructive' : 'default'}
       className={item.shortcut ? 'whitespace-nowrap' : undefined}
@@ -116,4 +129,8 @@ function BranchActionMenuItem({
       {item.shortcut && <DropdownMenuShortcut>{item.shortcut}</DropdownMenuShortcut>}
     </DropdownMenuItem>
   )
+}
+
+export function branchActionMenuItemDisabled(item: BranchActionItem, busy: BranchActionItem['id'] | null): boolean {
+  return item.disabled || busy !== null
 }

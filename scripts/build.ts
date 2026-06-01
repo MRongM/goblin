@@ -11,12 +11,14 @@ import { chmodSync, existsSync, mkdirSync, renameSync, rmSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { parseArgs } from 'node:util'
+import { closeRunningApp } from './close-app.ts'
 
 const repoRoot = path.resolve(import.meta.dirname, '..')
 process.chdir(repoRoot)
 $.cwd(repoRoot)
 
 const APP_NAME = 'Goblin'
+const APP_ID = 'goblin.app'
 
 const { positionals } = parseArgs({ allowPositionals: true })
 const mode = positionals[0]
@@ -93,10 +95,9 @@ if (shouldInstall) {
 
   console.log(`Installing ${APP_NAME}.app to ~/Applications...`)
 
-  // Imported for side-effects: the module's top-level await quits a
-  // running Goblin.app (and no-ops on non-macOS). Relative path because
+  // Close a running Goblin.app before replacing it. Relative path because
   // scripts/ sits outside src/ and isn't covered by the `#/` alias.
-  await import('./close-app.ts')
+  await closeRunningApp()
 
   const appsDir = path.join(os.homedir(), 'Applications')
   mkdirSync(appsDir, { recursive: true })
@@ -104,6 +105,17 @@ if (shouldInstall) {
   rmSync(destApp, { recursive: true, force: true })
   renameSync(srcApp, destApp)
   console.log(`Installed: ${destApp}`)
+
+  // electron-builder's ad-hoc signature (identity: null) uses the Electron
+  // binary identifier and does not bind Info.plist. macOS Notification Center
+  // identifies apps by the code-signing identifier, not CFBundleIdentifier, so
+  // without re-signing the app appears as "Electron" in notification settings
+  // and the NSUserNotificationAlertStyle plist key has no effect.
+  // Re-signing with --identifier forces the correct bundle ID and binds the
+  // Info.plist so notifications work and Goblin appears in System Settings.
+  console.log('Re-signing with correct bundle identifier...')
+  await $`codesign --force --deep --sign - --identifier ${APP_ID} ${destApp}`
+  console.log('Re-signed.')
 
   rmSync(path.join(repoRoot, 'release'), { recursive: true, force: true })
   console.log('Done.')

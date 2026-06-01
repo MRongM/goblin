@@ -2,6 +2,7 @@ import { formatGraphqlError, getGitHubRepoRef, graphqlRequestResult } from '#/ma
 import { isSafeBranchName } from '#/shared/refnames.ts'
 import type { GitHubRepoRef, GraphqlRequestError } from '#/main/github/graphql.ts'
 import type { PullRequestFetchMode, PullRequestInfo } from '#/shared/git-types.ts'
+import { canQueryGitHubHost } from '#/main/system/github-cli.ts'
 
 const PR_CACHE_TTL_MS = 30_000
 
@@ -163,12 +164,24 @@ function cacheSatisfiesMode(cachedMode: PullRequestFetchMode, requestedMode: Pul
   return requestedMode === 'summary' || cachedMode === 'full'
 }
 
-function branchCacheKey(cwd: string, branch: string, mode: PullRequestFetchMode): string {
-  return `${cwd}\0${branch}\0${mode}`
+function repoKey(repo: GitHubRepoRef): string {
+  return `${repo.host}/${repo.owner}/${repo.name}`
 }
 
-function repoRequestKey(cwd: string, mode: PullRequestFetchMode): string {
-  return `${cwd}\0${mode}`
+function repoCacheKey(cwd: string, repo: GitHubRepoRef): string {
+  return `${cwd}\0${repoKey(repo)}`
+}
+
+function branchCacheKey(cwd: string, repo: GitHubRepoRef, branch: string, mode: PullRequestFetchMode): string {
+  return `${repoCacheKey(cwd, repo)}\0${branch}\0${mode}`
+}
+
+function repoRequestKey(cwd: string, repo: GitHubRepoRef, mode: PullRequestFetchMode): string {
+  return `${repoCacheKey(cwd, repo)}\0${mode}`
+}
+
+async function hasPullRequestQueryCapability(repo: GitHubRepoRef, signal?: AbortSignal): Promise<boolean> {
+  return canQueryGitHubHost(repo.host, signal)
 }
 
 const signalIds = new WeakMap<AbortSignal, number>()
@@ -186,10 +199,11 @@ function pendingRequestKey(key: string, signal?: AbortSignal): string {
 
 function getCachedBranchPullRequest(
   cwd: string,
+  repo: GitHubRepoRef,
   branch: string,
   mode: PullRequestFetchMode,
 ): { hit: boolean; pr: PullRequestInfo | null } {
-  const cached = prCache.get(cwd)
+  const cached = prCache.get(repoCacheKey(cwd, repo))
   if (cached && cacheFresh(cached.expiresAt) && cacheSatisfiesMode(cached.mode, mode)) {
     const pr = cached.prs?.get(branch)
     if (pr) return { hit: true, pr }
@@ -197,8 +211,8 @@ function getCachedBranchPullRequest(
 
   const branchCacheKeys =
     mode === 'summary'
-      ? [branchCacheKey(cwd, branch, 'summary'), branchCacheKey(cwd, branch, 'full')]
-      : [branchCacheKey(cwd, branch, mode)]
+      ? [branchCacheKey(cwd, repo, branch, 'summary'), branchCacheKey(cwd, repo, branch, 'full')]
+      : [branchCacheKey(cwd, repo, branch, mode)]
   for (const key of branchCacheKeys) {
     const branchCached = branchPrCache.get(key)
     if (branchCached && cacheFresh(branchCached.expiresAt) && cacheSatisfiesMode(branchCached.mode, mode)) {
@@ -210,11 +224,12 @@ function getCachedBranchPullRequest(
 
 function cacheBranchPullRequest(
   cwd: string,
+  repo: GitHubRepoRef,
   branch: string,
   mode: PullRequestFetchMode,
   pr: PullRequestInfo | null,
 ): void {
-  branchPrCache.set(branchCacheKey(cwd, branch, mode), { expiresAt: Date.now() + PR_CACHE_TTL_MS, mode, pr })
+  branchPrCache.set(branchCacheKey(cwd, repo, branch, mode), { expiresAt: Date.now() + PR_CACHE_TTL_MS, mode, pr })
 }
 
 const PULL_REQUESTS_QUERY = `
@@ -355,8 +370,9 @@ async function queryPullRequests(
       options.signal,
     )
     if (!response.ok) {
+      const message = formatGraphqlError(response.error)
       if (!options.signal?.aborted) logGraphqlError(response.error)
-      return null
+      throw new Error(message)
     }
     if (!response.data.repository?.pullRequests) return null
     const connection: PullRequestsConnection = response.data.repository.pullRequests
@@ -371,11 +387,13 @@ async function queryPullRequests(
 }
 
 function logGraphqlError(error: GraphqlRequestError): void {
-  const key = `${error.host}:${error.operationName}:${error.code}:${error.status ?? ''}`
+  const key = `${error.host}:${error.operationName}:${error.code}:${error.status ?? 'unknown'}`
   const lastLoggedAt = loggedGraphqlErrors.get(key) ?? 0
   if (Date.now() - lastLoggedAt < PR_CACHE_TTL_MS) return
   loggedGraphqlErrors.set(key, Date.now())
-  console.warn('[pull-requests]', formatGraphqlError(error))
+  try {
+    console.warn('[pull-requests]', formatGraphqlError(error))
+  } catch {}
 }
 
 async function queryRepositoryPullRequests(
@@ -387,6 +405,7 @@ async function queryRepositoryPullRequests(
   const openPrs = await queryPullRequests(cwd, repo, { states: ['OPEN'], limit: 200, mode, signal })
   if (!openPrs) return null
   if (mode === 'summary') return openPrs
+  if (signal?.aborted) return null
 
   // Closed and merged PRs are only supplemental history. Querying open PRs
   // separately prevents a busy repository's recent closed PRs from pushing
@@ -424,7 +443,7 @@ async function fetchRepositoryPullRequestMap(
   const prs = await queryRepositoryPullRequests(cwd, repo, mode, signal)
   if (!prs) return null
   const byBranch = mapPullRequestsByBranch(prs)
-  prCache.set(cwd, { expiresAt: Date.now() + PR_CACHE_TTL_MS, mode, prs: byBranch })
+  prCache.set(repoCacheKey(cwd, repo), { expiresAt: Date.now() + PR_CACHE_TTL_MS, mode, prs: byBranch })
   return byBranch
 }
 
@@ -438,7 +457,7 @@ async function fetchSingleBranchPullRequestMap(
   const prs = await queryPullRequests(cwd, repo, { headBranch: branch, limit: 20, mode, signal })
   if (!prs) return null
   const byBranch = mapPullRequestsByBranch(prs)
-  cacheBranchPullRequest(cwd, branch, mode, byBranch.get(branch) ?? null)
+  cacheBranchPullRequest(cwd, repo, branch, mode, byBranch.get(branch) ?? null)
   return byBranch
 }
 
@@ -449,21 +468,22 @@ export async function getBranchPullRequests(
 ): Promise<Map<string, PullRequestInfo> | null> {
   const mode = options?.mode ?? 'full'
   const singleBranch = branchNames?.size === 1 ? Array.from(branchNames)[0] : undefined
-  const cached = prCache.get(cwd)
-  if (!singleBranch && cached && cacheFresh(cached.expiresAt) && cacheSatisfiesMode(cached.mode, mode)) {
-    return filterPullRequests(cached.prs, branchNames)
-  }
-
+  let repo: GitHubRepoRef | null = null
   try {
-    const repo = await getGitHubRepoRef(cwd, options?.signal)
+    repo = await getGitHubRepoRef(cwd, { branch: singleBranch, signal: options?.signal })
     if (!repo) return null
+    const cached = prCache.get(repoCacheKey(cwd, repo))
+    if (!singleBranch && cached && cacheFresh(cached.expiresAt) && cacheSatisfiesMode(cached.mode, mode)) {
+      return filterPullRequests(cached.prs, branchNames)
+    }
     if (singleBranch) {
-      const cached = getCachedBranchPullRequest(cwd, singleBranch, mode)
+      const cached = getCachedBranchPullRequest(cwd, repo, singleBranch, mode)
       if (cached.hit) {
         return cached.pr ? new Map([[singleBranch, cached.pr]]) : new Map()
       }
+      if (!(await hasPullRequestQueryCapability(repo, options?.signal))) return null
 
-      const key = pendingRequestKey(branchCacheKey(cwd, singleBranch, mode), options?.signal)
+      const key = pendingRequestKey(branchCacheKey(cwd, repo, singleBranch, mode), options?.signal)
       const existing = pendingBranchRequests.get(key)
       const byBranch = existing ?? fetchSingleBranchPullRequestMap(cwd, repo, singleBranch, mode, options?.signal)
       if (!existing) pendingBranchRequests.set(key, byBranch)
@@ -474,7 +494,8 @@ export async function getBranchPullRequests(
       }
     }
 
-    const key = pendingRequestKey(repoRequestKey(cwd, mode), options?.signal)
+    const key = pendingRequestKey(repoRequestKey(cwd, repo, mode), options?.signal)
+    if (!(await hasPullRequestQueryCapability(repo, options?.signal))) return null
     const existing = pendingRepoRequests.get(key)
     const byBranch = existing ?? fetchRepositoryPullRequestMap(cwd, repo, mode, options?.signal)
     if (!existing) pendingRepoRequests.set(key, byBranch)
@@ -483,12 +504,16 @@ export async function getBranchPullRequests(
     } finally {
       if (pendingRepoRequests.get(key) === byBranch) pendingRepoRequests.delete(key)
     }
-  } catch {
-    const current = prCache.get(cwd)
-    if (!singleBranch && (!current || !cacheFresh(current.expiresAt) || current.prs === null)) {
-      prCache.set(cwd, { expiresAt: Date.now() + PR_CACHE_TTL_MS, mode, prs: null })
+  } catch (err) {
+    if (options?.signal?.aborted) return null
+    if (!singleBranch && repo) {
+      const key = repoCacheKey(cwd, repo)
+      const current = prCache.get(key)
+      if (!current || !cacheFresh(current.expiresAt) || current.prs === null) {
+        prCache.set(key, { expiresAt: Date.now() + PR_CACHE_TTL_MS, mode, prs: null })
+      }
     }
-    return null
+    throw err instanceof Error ? err : new Error(String(err))
   }
 }
 
@@ -499,12 +524,13 @@ export async function getBranchPullRequest(
 ): Promise<PullRequestInfo | null> {
   if (options?.signal?.aborted) return null
   if (!isSafeBranchName(branch)) return null
-  const cached = getCachedBranchPullRequest(cwd, branch, 'full')
-  if (cached.hit) return cached.pr
   try {
-    const repo = await getGitHubRepoRef(cwd, options?.signal)
+    const repo = await getGitHubRepoRef(cwd, { branch, signal: options?.signal })
     if (!repo) return null
-    const key = pendingRequestKey(branchCacheKey(cwd, branch, 'full'), options?.signal)
+    const cached = getCachedBranchPullRequest(cwd, repo, branch, 'full')
+    if (cached.hit) return cached.pr
+    if (!(await hasPullRequestQueryCapability(repo, options?.signal))) return null
+    const key = pendingRequestKey(branchCacheKey(cwd, repo, branch, 'full'), options?.signal)
     const existing = pendingBranchRequests.get(key)
     const byBranch = existing ?? fetchSingleBranchPullRequestMap(cwd, repo, branch, 'full', options?.signal)
     if (!existing) pendingBranchRequests.set(key, byBranch)

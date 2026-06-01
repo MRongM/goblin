@@ -24,6 +24,7 @@ import {
   type WorkspaceLayout,
 } from '#/shared/workspace-layout.ts'
 import { DEFAULT_COLOR_THEME, isColorTheme } from '#/shared/color-theme.ts'
+import { toSafeSessionPath } from '#/main/ipc/validation.ts'
 import type { EditorPref, LangPref, SessionState, TerminalPref, ThemePref } from '#/shared/rpc.ts'
 import type { ColorTheme } from '#/shared/color-theme.ts'
 import { normalizeRemoteTarget, type RepoSessionEntry } from '#/shared/remote-repo.ts'
@@ -35,25 +36,22 @@ export interface WindowBounds {
   height: number
 }
 
-/** Bump when a breaking schema change lands (renamed fields, removed
- *  enum values, etc.). loadSettings checks this so a future migration
- *  can rewrite the file before the app reads it. */
-export const SETTINGS_SCHEMA_VERSION = 1
 export const DEFAULT_SESSION_DETAIL_COLLAPSED = DEFAULT_DETAIL_COLLAPSED
 export const DEFAULT_SESSION_DETAIL_FOCUS_MODE = false
 export const DEFAULT_SESSION_WORKSPACE_LAYOUT: WorkspaceLayout = DEFAULT_WORKSPACE_LAYOUT
 export const DEFAULT_SESSION_DETAIL_PANE_SIZES: WorkspaceDetailPaneSizes = DEFAULT_DETAIL_PANE_SIZES
 
 export interface Settings {
-  /** Schema version of this file. Older files without it are treated as
-   *  v0 and quietly upgraded to the current version on next write. */
-  version: number
   theme: ThemePref
   colorTheme: ColorTheme
   lang: LangPref
   /** Auto-fetch interval in seconds for the active repo. 0 = disabled. */
   fetchIntervalSec: number
+  terminalNotificationsEnabled: boolean
   shortcutsDisabled: boolean
+  globalShortcutDisabled: boolean
+  swapCloseShortcuts: boolean
+  toggleDetailOnActionBarBlankClick: boolean
   globalShortcut: string
   terminalApp: TerminalPref
   editorApp: EditorPref
@@ -63,12 +61,15 @@ export interface Settings {
 }
 
 const DEFAULTS: Settings = {
-  version: SETTINGS_SCHEMA_VERSION,
   theme: 'auto',
   colorTheme: DEFAULT_COLOR_THEME,
   lang: 'auto',
   fetchIntervalSec: 120,
+  terminalNotificationsEnabled: false,
   shortcutsDisabled: false,
+  globalShortcutDisabled: false,
+  swapCloseShortcuts: false,
+  toggleDetailOnActionBarBlankClick: false,
   globalShortcut: DEFAULT_GLOBAL_SHORTCUT,
   terminalApp: 'auto',
   editorApp: 'auto',
@@ -165,14 +166,6 @@ function normalizeRecentRepos(recentRepos: unknown): string[] {
   return normalized
 }
 
-function toSafeSessionPath(p: unknown): string | null {
-  if (typeof p !== 'string' || p.length === 0 || p.includes('\0') || !path.isAbsolute(p)) return null
-  // Session/recent-repo entries are persisted local paths, not a sandbox
-  // boundary. Normalize odd absolute spellings; repo probes still decide
-  // whether the path is usable when it is opened.
-  return path.normalize(p)
-}
-
 function normalizeThemePref(value: unknown): ThemePref {
   return value === 'auto' || value === 'light' || value === 'dark' ? value : DEFAULTS.theme
 }
@@ -203,6 +196,10 @@ function normalizeFetchInterval(value: unknown): number {
     : DEFAULTS.fetchIntervalSec
 }
 
+function normalizeTerminalNotificationsEnabled(value: unknown): boolean {
+  return value === true
+}
+
 function normalizeWindowBounds(value: unknown): WindowBounds | null {
   if (!value || typeof value !== 'object') return null
   const bounds = value as Partial<WindowBounds>
@@ -227,16 +224,16 @@ export async function loadSettings(): Promise<Settings> {
   try {
     const raw = await fs.readFile(settingsFile(), 'utf-8')
     const parsed = JSON.parse(raw) as Partial<Settings>
-    // version is read but not yet used — no migrations exist for v1.
-    // When v2 ships, add a migrate(parsed) step here that rewrites
-    // fields before the field-by-field merge below.
     cache = {
-      version: SETTINGS_SCHEMA_VERSION,
       theme: normalizeThemePref(parsed.theme),
       colorTheme: normalizeColorTheme(parsed.colorTheme),
       lang: normalizeLangPref(parsed.lang),
       fetchIntervalSec: normalizeFetchInterval(parsed.fetchIntervalSec),
+      terminalNotificationsEnabled: normalizeTerminalNotificationsEnabled(parsed.terminalNotificationsEnabled),
       shortcutsDisabled: parsed.shortcutsDisabled === true,
+      globalShortcutDisabled: parsed.globalShortcutDisabled === true,
+      swapCloseShortcuts: parsed.swapCloseShortcuts === true,
+      toggleDetailOnActionBarBlankClick: parsed.toggleDetailOnActionBarBlankClick === true,
       globalShortcut: normalizeGlobalShortcut(parsed.globalShortcut),
       terminalApp: normalizeTerminalPref(parsed.terminalApp),
       editorApp: normalizeEditorPref(parsed.editorApp),
@@ -258,6 +255,18 @@ export function getRecentRepos(): string[] {
 
 export function getShortcutsDisabled(): boolean {
   return cache?.shortcutsDisabled ?? DEFAULTS.shortcutsDisabled
+}
+
+export function getTerminalNotificationsEnabled(): boolean {
+  return cache?.terminalNotificationsEnabled ?? DEFAULTS.terminalNotificationsEnabled
+}
+
+export function getGlobalShortcutDisabled(): boolean {
+  return cache?.globalShortcutDisabled ?? DEFAULTS.globalShortcutDisabled
+}
+
+export function getSwapCloseShortcuts(): boolean {
+  return cache?.swapCloseShortcuts ?? DEFAULTS.swapCloseShortcuts
 }
 
 export function getGlobalShortcut(): string {
@@ -381,12 +390,44 @@ export async function setFetchInterval(sec: number): Promise<number> {
   return clamped
 }
 
+export async function setTerminalNotificationsEnabled(enabled: boolean): Promise<boolean> {
+  const s = await loadSettings()
+  if (s.terminalNotificationsEnabled === enabled) return enabled
+  s.terminalNotificationsEnabled = enabled
+  scheduleWrite()
+  return enabled
+}
+
 export async function setShortcutsDisabled(disabled: boolean): Promise<boolean> {
   const s = await loadSettings()
   if (s.shortcutsDisabled === disabled) return disabled
   s.shortcutsDisabled = disabled
   scheduleWrite()
   return disabled
+}
+
+export async function setGlobalShortcutDisabled(disabled: boolean): Promise<boolean> {
+  const s = await loadSettings()
+  if (s.globalShortcutDisabled === disabled) return disabled
+  s.globalShortcutDisabled = disabled
+  scheduleWrite()
+  return disabled
+}
+
+export async function setSwapCloseShortcuts(swapped: boolean): Promise<boolean> {
+  const s = await loadSettings()
+  if (s.swapCloseShortcuts === swapped) return swapped
+  s.swapCloseShortcuts = swapped
+  scheduleWrite()
+  return swapped
+}
+
+export async function setToggleDetailOnActionBarBlankClick(enabled: boolean): Promise<boolean> {
+  const s = await loadSettings()
+  if (s.toggleDetailOnActionBarBlankClick === enabled) return enabled
+  s.toggleDetailOnActionBarBlankClick = enabled
+  scheduleWrite()
+  return enabled
 }
 
 export async function setGlobalShortcut(accelerator: string): Promise<string> {
@@ -433,6 +474,7 @@ export async function addRecentRepo(repoPath: string): Promise<string[]> {
   if (!safePath) return getRecentRepos()
   const s = await loadSettings()
   s.recentRepos = [safePath, ...s.recentRepos.filter((p) => p !== safePath)].slice(0, MAX_RECENT_REPOS)
+  app.addRecentDocument(safePath)
   scheduleWrite()
   return s.recentRepos
 }
@@ -441,5 +483,6 @@ export async function clearRecentRepos(): Promise<void> {
   const s = await loadSettings()
   if (s.recentRepos.length === 0) return
   s.recentRepos = []
+  app.clearRecentDocuments()
   scheduleWrite()
 }

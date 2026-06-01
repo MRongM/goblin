@@ -153,11 +153,11 @@ function BranchChangesTab({
 
   return (
     <BranchTabPanel detailId={detailId} tabId="changes" busy={statusLoading}>
-      {branch.worktreePath && statusLoading && !repo.data.statusLoaded ? (
+      {branch.worktree?.path && statusLoading && !repo.data.statusLoaded ? (
         <ListSkeleton rows={8} variant="status" />
-      ) : branch.worktreePath && !repo.data.statusLoaded && statusError ? (
+      ) : branch.worktree?.path && !repo.data.statusLoaded && statusError ? (
         <EmptyState title={t(statusError)} action={retry && <RetryButton busy={statusLoading} onRetry={retry} />} />
-      ) : branch.worktreePath ? (
+      ) : branch.worktree?.path ? (
         totalEntries > 0 ? (
           <div className="flex min-h-0 flex-1 flex-col">
             {statusStale && statusError && (
@@ -316,7 +316,7 @@ function BranchTerminalTab({
 }
 
 function branchTerminalBase(repo: RepoState, branch: BranchDetailBranch | null | undefined): TerminalSessionBase | null {
-  if (!branch?.worktreePath) return null
+  if (!branch?.worktree?.path) return null
   if (repo.kind === 'remote') {
     if (!repo.remoteTarget) return null
     return {
@@ -324,10 +324,10 @@ function branchTerminalBase(repo: RepoState, branch: BranchDetailBranch | null |
       repoId: repo.id,
       target: repo.remoteTarget,
       branch: branch.name,
-      worktreePath: branch.worktreePath,
+      worktreePath: branch.worktree.path,
     }
   }
-  return { kind: 'local', repoRoot: repo.id, branch: branch.name, worktreePath: branch.worktreePath }
+  return { kind: 'local', repoRoot: repo.id, branch: branch.name, worktreePath: branch.worktree.path }
 }
 
 function OpeningCommitDetail({ repoId }: { repoId: string }) {
@@ -347,15 +347,17 @@ function OpeningCommitDetail({ repoId }: { repoId: string }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col" aria-busy="true">
       <div className="flex items-start gap-3 border-b border-separator bg-muted px-4 py-3">
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="icon-xs"
           onClick={() => closeCommit(repoId)}
-          className="mt-0.5 shrink-0 cursor-pointer text-muted-foreground hover:text-foreground transition-colors duration-100"
+          className="mt-0.5 shrink-0 text-muted-foreground hover:bg-transparent hover:text-foreground"
           aria-label={t('error.back')}
           title={t('error.back')}
         >
-          <ArrowLeft size={16} />
-        </button>
+          <ArrowLeft className="size-4" />
+        </Button>
         <div className="min-w-0 flex-1 space-y-2 py-0.5">
           <span className="block h-3 w-24 animate-pulse rounded bg-accent" />
           <span className="block h-3 w-2/3 animate-pulse rounded bg-accent" />

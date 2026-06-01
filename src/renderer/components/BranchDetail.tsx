@@ -2,10 +2,15 @@ import { useId } from 'react'
 import { useStoreWithEqualityFn } from 'zustand/traditional'
 import { useReposStore } from '#/renderer/stores/repos/store.ts'
 import type { RepoState, RepoWorkspaceLayout } from '#/renderer/stores/repos/types.ts'
-import { getSelectedBranchDetailPresentation } from '#/renderer/components/branch-detail/model.ts'
+import {
+  getSelectedBranchDetailPresentation,
+  type SelectedBranchDetailPresentation,
+} from '#/renderer/components/branch-detail/model.ts'
 import { BranchDetailToolbar } from '#/renderer/components/branch-detail/BranchDetailToolbar.tsx'
 import { BranchDetailContent } from '#/renderer/components/branch-detail/BranchDetailContent.tsx'
 import { DEFAULT_WORKSPACE_LAYOUT } from '#/shared/workspace-layout.ts'
+import { useBranchActionItems } from '#/renderer/hooks/useBranchActionItems.ts'
+import { BranchActionDialogs } from '#/renderer/components/BranchActionBar.tsx'
 
 interface Props {
   repoId: string
@@ -30,10 +35,12 @@ function branchDetailRepoEqual(a: RepoState | undefined, b: RepoState | undefine
       a.data.logsByBranch === b.data.logsByBranch &&
       a.data.status === b.data.status &&
       a.data.statusLoaded === b.data.statusLoaded &&
+      a.data.worktreesByPath === b.data.worktreesByPath &&
       a.resources.status === b.resources.status &&
       a.resources.logsByBranch === b.resources.logsByBranch &&
       a.resources.pullRequests === b.resources.pullRequests &&
-      a.resources.branchAction === b.resources.branchAction &&
+      a.operations.branchAction === b.operations.branchAction &&
+      a.remote === b.remote &&
       a.ui.detailTab === b.ui.detailTab)
   )
 }
@@ -53,6 +60,69 @@ export function BranchDetail({
 
   return (
     <section className="flex min-h-0 flex-1 flex-col bg-background">
+      {detail.branch ? (
+        <BranchDetailWithActions
+          key={`${repo.id}:${detail.branch.name}`}
+          repo={repo}
+          detail={detail}
+          branch={detail.branch}
+          detailId={detailId}
+          contentId={contentId}
+          collapsed={collapsed}
+          focusMode={focusMode}
+          layout={layout}
+        />
+      ) : (
+        <>
+          <BranchDetailToolbar
+            repo={repo}
+            detail={detail}
+            detailId={detailId}
+            contentId={contentId}
+            collapsed={collapsed}
+            focusMode={focusMode}
+            layout={layout}
+          />
+          {!collapsed && (
+            <BranchDetailContent
+              repo={repo}
+              detail={detail}
+              detailId={detailId}
+              contentId={contentId}
+              layout={layout}
+            />
+          )}
+        </>
+      )}
+    </section>
+  )
+}
+
+interface BranchDetailWithActionsProps {
+  repo: RepoState
+  detail: SelectedBranchDetailPresentation
+  branch: NonNullable<SelectedBranchDetailPresentation['branch']>
+  detailId: string
+  contentId: string
+  collapsed: boolean
+  focusMode: boolean
+  layout: RepoWorkspaceLayout
+}
+
+function BranchDetailWithActions({
+  repo,
+  detail,
+  branch,
+  detailId,
+  contentId,
+  collapsed,
+  focusMode,
+  layout,
+}: BranchDetailWithActionsProps) {
+  const actions = useBranchActionItems(repo, branch)
+
+  return (
+    <>
       <BranchDetailToolbar
         repo={repo}
         detail={detail}
@@ -61,10 +131,12 @@ export function BranchDetail({
         collapsed={collapsed}
         focusMode={focusMode}
         layout={layout}
+        branchActions={actions}
       />
+      <BranchActionDialogs actions={actions} />
       {!collapsed && (
         <BranchDetailContent repo={repo} detail={detail} detailId={detailId} contentId={contentId} layout={layout} />
       )}
-    </section>
+    </>
   )
 }

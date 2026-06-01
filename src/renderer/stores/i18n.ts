@@ -8,15 +8,38 @@ import i18next from 'i18next'
 import { initReactI18next, useTranslation } from 'react-i18next'
 import { create, type StoreApi } from 'zustand'
 import type { I18nPayload, Lang, LangPref } from '#/shared/rpc.ts'
+import { getInitialBootstrap } from '#/renderer/bootstrap.ts'
 import { onRpcEventType, rpc } from '#/renderer/rpc.ts'
 
 export type { Lang, LangPref }
 export type Dict = Record<string, string>
 
+interface InitialI18n {
+  lang: Lang
+  pref: LangPref
+  dict: Dict
+}
+
+function getInitialI18n(): InitialI18n | null {
+  try {
+    const raw = getInitialBootstrap().initialI18n
+    if (raw && typeof raw === 'object' && 'lang' in raw && 'pref' in raw && 'dict' in raw) {
+      return raw as InitialI18n
+    }
+  } catch {
+    // ignore
+  }
+  return null
+}
+
+const initial = getInitialI18n()
+
 void i18next.use(initReactI18next).init({
-  lng: 'en',
+  lng: initial?.lang ?? 'en',
   fallbackLng: 'en',
-  resources: { en: { translation: {} } },
+  resources: initial
+    ? { [initial.lang]: { translation: initial.dict } }
+    : { en: { translation: {} } },
   defaultNS: 'translation',
   keySeparator: false,
   interpolation: {
@@ -28,6 +51,10 @@ void i18next.use(initReactI18next).init({
     useSuspense: false,
   },
 })
+
+if (initial && typeof document !== 'undefined') {
+  document.documentElement.setAttribute('lang', initial.lang)
+}
 
 interface I18nState {
   lang: Lang
@@ -49,9 +76,9 @@ function clearI18nSubscription() {
 }
 
 export const useI18nStore = create<I18nState>((set) => ({
-  lang: 'en',
-  pref: 'auto',
-  dict: {},
+  lang: initial?.lang ?? 'en',
+  pref: initial?.pref ?? 'auto',
+  dict: initial?.dict ?? {},
 
   async hydrate() {
     const version = ++hydrateVersion
@@ -113,4 +140,8 @@ export function useT() {
   return (key: string, params?: Record<string, string | number>) => {
     return t(key, params) as string
   }
+}
+
+export function translate(key: string, params?: Record<string, string | number>): string {
+  return i18next.t(key, params) as string
 }

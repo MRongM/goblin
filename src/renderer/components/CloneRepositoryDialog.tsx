@@ -1,13 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
   DialogFooter,
-  DialogHeader,
-  DialogTitle,
 } from '#/renderer/components/ui/dialog.tsx'
 import { Button } from '#/renderer/components/ui/button.tsx'
+import { DialogError } from '#/renderer/components/ui/dialog-error.tsx'
+import { FormDialog } from '#/renderer/components/ui/form-dialog.tsx'
+import { Field, FieldDescription, FieldError, FieldLabel } from '#/renderer/components/ui/field.tsx'
+import { Input } from '#/renderer/components/ui/input.tsx'
 import { useT } from '#/renderer/stores/i18n.ts'
 import { goblin, rpc } from '#/renderer/rpc.ts'
 import { joinPath, tildify, untildify } from '#/renderer/lib/paths.ts'
@@ -118,30 +117,25 @@ export function CloneRepositoryDialog({ open, onClose, onClone }: Props) {
   }
 
   return (
-    <Dialog
+    <FormDialog
       open={open}
       onOpenChange={(nextOpen) => {
-        if (!nextOpen) void handleCancel()
+        if (!nextOpen && !pending) void handleCancel()
       }}
+      showCloseButton={!pending}
+      title={t('repo-tabs.clone-title')}
+      description={t('repo-tabs.clone-description')}
     >
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{t('repo-tabs.clone-title')}</DialogTitle>
-          <DialogDescription>{t('repo-tabs.clone-description')}</DialogDescription>
-        </DialogHeader>
-
-        <form
-          className="space-y-4"
-          onSubmit={(event) => {
-            event.preventDefault()
-            void handleSubmit()
-          }}
-        >
-          <div>
-            <label className="block text-sm font-medium text-foreground" htmlFor="clone-url">
-              {t('repo-tabs.clone-url-label')}
-            </label>
-            <input
+      <form
+        className="space-y-0"
+        onSubmit={(event) => {
+          event.preventDefault()
+          void handleSubmit()
+        }}
+      >
+          <Field>
+            <FieldLabel htmlFor="clone-url">{t('repo-tabs.clone-url-label')}</FieldLabel>
+            <Input
               id="clone-url"
               autoFocus
               disabled={pending}
@@ -151,23 +145,22 @@ export function CloneRepositoryDialog({ open, onClose, onClone }: Props) {
                 setError(null)
               }}
               placeholder={t('repo-tabs.clone-url-placeholder')}
-              className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-ring"
+              className="font-mono text-xs"
             />
-          </div>
+            <FieldDescription reserveHeight aria-hidden />
+          </Field>
 
-          <div>
-            <label className="block text-sm font-medium text-foreground" htmlFor="clone-parent-path">
-              {t('repo-tabs.clone-parent-label')}
-            </label>
-            <div className="mt-1 flex gap-2">
-              <input
+          <Field>
+            <FieldLabel htmlFor="clone-parent-path">{t('repo-tabs.clone-parent-label')}</FieldLabel>
+            <div className="flex gap-2">
+              <Input
                 id="clone-parent-path"
                 value={parentPath}
                 onChange={(event) => {
                   setParentPath(event.target.value)
                   setError(null)
                 }}
-                className="min-w-0 flex-1 rounded-md border border-input bg-background px-3 py-2 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-ring"
+                className="min-w-0 flex-1 font-mono text-xs"
                 disabled={pending}
               />
               <Button
@@ -180,13 +173,12 @@ export function CloneRepositoryDialog({ open, onClose, onClone }: Props) {
                 {t('repo-tabs.clone-parent-choose')}
               </Button>
             </div>
-          </div>
+            <FieldDescription reserveHeight aria-hidden />
+          </Field>
 
-          <div>
-            <label className="block text-sm font-medium text-foreground" htmlFor="clone-directory-name">
-              {t('repo-tabs.clone-directory-label')}
-            </label>
-            <input
+          <Field data-invalid={directoryError ? true : undefined}>
+            <FieldLabel htmlFor="clone-directory-name">{t('repo-tabs.clone-directory-label')}</FieldLabel>
+            <Input
               id="clone-directory-name"
               disabled={pending}
               value={directoryName}
@@ -198,22 +190,26 @@ export function CloneRepositoryDialog({ open, onClose, onClone }: Props) {
               placeholder={t('repo-tabs.clone-directory-placeholder')}
               aria-invalid={!!directoryError}
               aria-describedby={directoryError ? 'clone-directory-error' : 'clone-path-preview'}
-              className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-ring aria-invalid:border-destructive aria-invalid:ring-destructive/20"
+              className="font-mono text-xs"
             />
             {directoryError ? (
-              <div id="clone-directory-error" className="mt-1 min-h-4 text-xs leading-4 text-destructive">
+              <FieldError id="clone-directory-error" reserveHeight>
                 {directoryError}
-              </div>
+              </FieldError>
             ) : (
-              <div id="clone-path-preview" className="mt-1 min-h-4 truncate text-xs leading-4 text-muted-foreground">
+              <FieldDescription id="clone-path-preview" reserveHeight className="truncate">
                 {effectivePath ? t('repo-tabs.clone-path-preview', { path: effectivePath }) : ''}
-              </div>
+              </FieldDescription>
             )}
-          </div>
+          </Field>
 
-          {error && <div className="rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">{error}</div>}
+          {error && (
+            <DialogError>
+              {error}
+            </DialogError>
+          )}
 
-          <DialogFooter>
+          <DialogFooter className="pt-4">
             <Button type="button" variant="ghost" onClick={() => void handleCancel()}>
               {t('dialog.cancel')}
             </Button>
@@ -221,9 +217,8 @@ export function CloneRepositoryDialog({ open, onClose, onClone }: Props) {
               {pending ? t('repo-tabs.clone-cloning') : t('repo-tabs.clone-confirm')}
             </Button>
           </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
+      </form>
+    </FormDialog>
   )
 }
 

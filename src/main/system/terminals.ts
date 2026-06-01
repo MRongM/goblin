@@ -8,10 +8,10 @@
 // 3. Add the new id to TerminalPref in shared/rpc.ts
 // 4. Add i18n keys for the settings picker
 
-import type { ResolvedTerminalApp, TerminalPref } from '#/shared/rpc.ts'
+import type { ResolvedTerminalApp, TerminalAppAvailability, TerminalPref } from '#/shared/rpc.ts'
 import type { RemoteRepoTarget } from '#/shared/remote-repo.ts'
 import { isGhosttyInstalled, openInGhostty, openRemoteInGhostty } from '#/main/system/ghostty.ts'
-import { openInAppleTerminal, openRemoteInAppleTerminal } from '#/main/system/apple-terminal.ts'
+import { isAppleTerminalInstalled, openInAppleTerminal, openRemoteInAppleTerminal } from '#/main/system/apple-terminal.ts'
 
 export interface TerminalBackend {
   /** Whether this terminal is available on the current system.
@@ -34,23 +34,26 @@ const backends: Record<ResolvedTerminalApp, TerminalBackend> = {
 /** Auto-detection priority — first installed backend wins. */
 const AUTO_PRIORITY: ResolvedTerminalApp[] = ['ghostty', 'terminal']
 
-function resolveTerminalApp(pref: TerminalPref): ResolvedTerminalApp | null {
+export function resolveTerminalApp(pref: TerminalPref, availability: TerminalAppAvailability): ResolvedTerminalApp | null {
   if (pref !== 'auto') {
-    const backend = backends[pref]
-    return backend.isInstalled() ? pref : null
+    return availability[pref] ? pref : null
   }
   for (const id of AUTO_PRIORITY) {
-    const backend = backends[id]
-    if (backend.isInstalled()) return id
+    if (availability[id]) return id
   }
-  // Unreachable on macOS (Terminal.app is always available), but
-  // a safe fallback.
-  return 'terminal'
+  return null
+}
+
+export function getTerminalActionAvailability(): TerminalAppAvailability {
+  return {
+    ghostty: backends.ghostty.isInstalled(),
+    terminal: true,
+  }
 }
 
 /** Open `path` in the terminal selected by `pref`. */
-export function openInPreferredTerminal(path: string, pref: TerminalPref): Promise<{ ok: boolean; message: string }> {
-  const resolved = resolveTerminalApp(pref)
+export async function openInPreferredTerminal(path: string, pref: TerminalPref): Promise<{ ok: boolean; message: string }> {
+  const resolved = resolveTerminalApp(pref, getTerminalActionAvailability())
   return resolved
     ? backends[resolved].open(path)
     : Promise.resolve({ ok: false, message: 'error.terminal-not-installed' })
@@ -61,12 +64,19 @@ export function openRemoteInPreferredTerminal(
   path: string,
   pref: TerminalPref,
 ): Promise<{ ok: boolean; message: string }> {
-  const resolved = resolveTerminalApp(pref)
+  const resolved = resolveTerminalApp(pref, getTerminalActionAvailability())
   if (!resolved) return Promise.resolve({ ok: false, message: 'error.terminal-not-installed' })
   const opener = backends[resolved].openRemote
   return opener ? opener(target, path) : Promise.resolve({ ok: false, message: 'error.remote-terminal-unavailable' })
 }
 
-export function getResolvedTerminalApp(pref: TerminalPref): ResolvedTerminalApp | null {
-  return resolveTerminalApp(pref)
+export async function getResolvedTerminalApp(pref: TerminalPref): Promise<ResolvedTerminalApp | null> {
+  return resolveTerminalApp(pref, getTerminalActionAvailability())
+}
+
+export async function getTerminalAppAvailability(signal?: AbortSignal): Promise<TerminalAppAvailability> {
+  return {
+    ghostty: backends.ghostty.isInstalled(),
+    terminal: await isAppleTerminalInstalled(signal),
+  }
 }

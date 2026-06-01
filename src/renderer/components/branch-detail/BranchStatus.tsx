@@ -74,16 +74,16 @@ export function BranchStatus({ repo, detail, layout }: Props) {
 
   const protectedBranch = PROTECTED_BRANCHES.has(branch.name)
   const worktreePath =
-    repo.kind === 'remote' && repo.remoteTarget && branch.worktreePath
-      ? remoteWorktreePathLabel(repo.remoteTarget, branch.worktreePath)
-      : branch.worktreePath
-        ? tildify(branch.worktreePath)
+    repo.kind === 'remote' && repo.remoteTarget && branch.worktree?.path
+      ? remoteWorktreePathLabel(repo.remoteTarget, branch.worktree.path)
+      : branch.worktree?.path
+        ? tildify(branch.worktree.path)
         : ''
-  const worktreeChangeCount = statusCount > 0 ? statusCount : (branch.worktreeChangeCount ?? 0)
+  const worktreeChangeCount = detail.worktreeState?.changeCount ?? statusCount
   const pullRequest =
     branch.pullRequest && branchPullRequestBelongsToBranch(branch, branch.pullRequest) ? branch.pullRequest : undefined
   const hasRole = branch.isCurrent || branch.isDefault || protectedBranch
-  const hasWorktreeChanges = !!branch.worktreePath && (branch.worktreeDirty || worktreeChangeCount > 0)
+  const hasWorktreeChanges = !!branch.worktree?.path && (detail.worktreeState?.dirty || worktreeChangeCount > 0)
   const mergeKnown = branch.isDefault || branch.mergedToDefault !== undefined
   const showMerged = !branch.isDefault
   const mergeLabel = !mergeKnown
@@ -92,14 +92,15 @@ export function BranchStatus({ repo, detail, layout }: Props) {
       ? t('branch-status.merged')
       : t('branch-status.not-merged')
   const mergeTone: Tone = !mergeKnown ? 'neutral' : branch.mergedToDefault ? 'success' : 'attention'
-  const remoteTone: Tone = branch.trackingGone || !branch.tracking ? 'attention' : 'brand'
+  const upstreamTone: Tone = branch.trackingGone || !branch.tracking ? 'attention' : 'brand'
   const syncTone: Tone = !branch.tracking ? 'attention' : branch.behind > 0 ? 'attention' : 'success'
+  const worktreeLocked = detail.worktreeState?.isLocked ?? false
   const worktreeTone: Tone =
-    branch.worktreeLocked || hasWorktreeChanges ? 'attention' : branch.worktreePath ? 'brand' : 'neutral'
-  const worktreeValue = branch.worktreePath ? (
+    worktreeLocked || hasWorktreeChanges ? 'attention' : branch.worktree?.path ? 'brand' : 'neutral'
+  const worktreeValue = branch.worktree?.path ? (
     <CopyableValue
       value={worktreePath}
-      copyValue={branch.worktreePath}
+      copyValue={branch.worktree?.path}
       copyLabel={t('branch-status.copy-worktree-path')}
       copiedLabel={t('branch-status.copied')}
     />
@@ -107,22 +108,22 @@ export function BranchStatus({ repo, detail, layout }: Props) {
     <StatusChip>{t('branch-status.worktree.none')}</StatusChip>
   )
   const worktreeAfter =
-    branch.worktreeLocked || hasWorktreeChanges ? (
+    worktreeLocked || hasWorktreeChanges ? (
       <>
-        {branch.worktreeLocked && <StatusChip tone="attention">{t('branch-status.worktree.locked')}</StatusChip>}
+        {worktreeLocked && <StatusChip tone="attention">{t('branch-status.worktree.locked')}</StatusChip>}
         {hasWorktreeChanges && (
           <StatusChip tone="attention">{t('branch-status.worktree-dirty', { n: worktreeChangeCount })}</StatusChip>
         )}
       </>
     ) : undefined
-  const remoteValue = branch.tracking ? (
+  const upstreamValue = branch.tracking ? (
     <MonoValue title={branch.tracking} tone={branch.trackingGone ? 'attention' : undefined} truncate>
       {branch.tracking}
     </MonoValue>
   ) : (
     <StatusChip tone="attention">{t('branches.no-upstream')}</StatusChip>
   )
-  const remoteAfter = branch.trackingGone ? (
+  const upstreamAfter = branch.trackingGone ? (
     <StatusChip tone="attention">{t('branches.gone')}</StatusChip>
   ) : !branch.tracking && pullRequest ? (
     <StatusChip>{t('branch-status.upstream.pr-only')}</StatusChip>
@@ -161,11 +162,11 @@ export function BranchStatus({ repo, detail, layout }: Props) {
       />
       <StatusRow
         icon={<RadioTower size={14} />}
-        label={t('branch-status.signal.remote')}
-        value={remoteValue}
-        after={remoteAfter}
+        label={t('branch-status.signal.upstream')}
+        value={upstreamValue}
+        after={upstreamAfter}
         valueLayout="inline"
-        tone={remoteTone}
+        tone={upstreamTone}
       />
       <StatusRow
         icon={<RefreshCw size={14} />}

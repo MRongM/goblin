@@ -1,5 +1,9 @@
 import type { FitAddon as XTermFitAddon } from '@xterm/addon-fit'
 import { FitAddon } from '@xterm/addon-fit'
+import type { ImageAddon as XTermImageAddon } from '@xterm/addon-image'
+import { ImageAddon } from '@xterm/addon-image'
+import type { ProgressAddon as XTermProgressAddon } from '@xterm/addon-progress'
+import { ProgressAddon } from '@xterm/addon-progress'
 import type { SearchAddon as XTermSearchAddon, ISearchOptions, ISearchResultChangeEvent } from '@xterm/addon-search'
 import { SearchAddon } from '@xterm/addon-search'
 import type { SerializeAddon as XTermSerializeAddon } from '@xterm/addon-serialize'
@@ -24,9 +28,15 @@ import {
   terminalSearchDecorationsForCurrentDocument,
   terminalThemeForCurrentDocument,
 } from '#/renderer/components/terminal/terminal-theme.ts'
+import {
+  isMacNavigatorPlatform,
+  terminalInputForMacOptionArrow,
+} from '#/renderer/components/terminal/terminal-keyboard.ts'
 import type {
+  TerminalBellEvent,
   TerminalDescriptor,
   TerminalPhase,
+  TerminalProgressState,
   TerminalSearchResult,
   TerminalSnapshot,
 } from '#/renderer/components/terminal/types.ts'
@@ -36,11 +46,14 @@ const DEFAULT_PARKING_HEIGHT = 400
 const DEFAULT_TERMINAL_COLS = 80
 const DEFAULT_TERMINAL_ROWS = 24
 const RESIZE_DEBOUNCE_MS = 80
+const FONT_REMEASURE_DEBOUNCE_MS = 80
+const TERMINAL_FONT_FAMILY = "'Goblin Mono', monospace"
 const EMPTY_SEARCH_RESULT: TerminalSearchResult = { resultIndex: -1, resultCount: 0, found: false }
 
 export class ManagedTerminalSession {
   descriptor: TerminalDescriptor
   private readonly notify: () => void
+  private readonly onBell: ((descriptor: TerminalDescriptor, event: TerminalBellEvent) => void) | null
   private readonly frame: HTMLDivElement
   private readonly xtermHost: HTMLDivElement
   private readonly parkingElement: HTMLDivElement
@@ -48,6 +61,8 @@ export class ManagedTerminalSession {
   private fitAddon: XTermFitAddon | null = null
   private searchAddon: XTermSearchAddon | null = null
   private serializeAddon: XTermSerializeAddon | null = null
+  private imageAddon: XTermImageAddon | null = null
+  private progressAddon: XTermProgressAddon | null = null
   private resizeObserver: ResizeObserver | null = null
   private disposables: Array<{ dispose: () => void }> = []
   private ptySessionId: string | null = null
@@ -65,17 +80,25 @@ export class ManagedTerminalSession {
   private pendingResize: { cols: number; rows: number } | null = null
   private pendingOutput: string[] = []
   private disposeThemeObserver: (() => void) | null = null
+  private disposeFontObserver: (() => void) | null = null
   private disposed = false
   private lastWidth = DEFAULT_PARKING_WIDTH
   private lastHeight = DEFAULT_PARKING_HEIGHT
   private lastPtyCols = 0
   private lastPtyRows = 0
   private searchResult: TerminalSearchResult | null = null
+  private progressState: TerminalProgressState | null = null
   private processName = 'terminal'
+  private fontFitTimer: number | null = null
 
-  constructor(descriptor: TerminalDescriptor, notify: () => void) {
+  constructor(
+    descriptor: TerminalDescriptor,
+    notify: () => void,
+    onBell: ((descriptor: TerminalDescriptor, event: TerminalBellEvent) => void) | null = null,
+  ) {
     this.descriptor = descriptor
     this.notify = notify
+    this.onBell = onBell
     this.frame = document.createElement('div')
     this.frame.className = 'goblin-managed-terminal-frame'
     this.xtermHost = document.createElement('div')
@@ -144,6 +167,7 @@ export class ManagedTerminalSession {
   snapshot(): TerminalSnapshot {
     const snapshot: TerminalSnapshot = { phase: this.phase, message: this.message, processName: this.processName }
     if (this.searchResult) snapshot.search = this.searchResult
+    if (this.progressState) snapshot.progress = this.progressState
     return snapshot
   }
 
@@ -209,7 +233,9 @@ export class ManagedTerminalSession {
       this.fitAddon = fitAddon
       term.loadAddon(fitAddon)
       term.open(this.xtermHost)
+
       this.installResizeObserver()
+      this.installFontObserver(term)
       await waitForTerminalLayout()
       if (!this.currentStart(token, term)) return
       const restart = this.restartOnStart
@@ -368,10 +394,16 @@ export class ManagedTerminalSession {
     for (const disposable of this.disposables.splice(0)) disposable.dispose()
     this.disposeThemeObserver?.()
     this.disposeThemeObserver = null
+    this.disposeFontObserver?.()
+    this.disposeFontObserver = null
+    this.cancelFontFit()
     this.fitAddon = null
     this.searchAddon = null
     this.serializeAddon = null
+    this.imageAddon = null
+    this.progressAddon = null
     this.searchResult = null
+    this.progressState = null
     this.term?.dispose()
     this.term = null
     this.xtermHost.replaceChildren()
@@ -389,27 +421,49 @@ export class ManagedTerminalSession {
   private createTerminal(): XTermTerminal {
     const theme = terminalThemeForCurrentDocument()
     const term = new Terminal({
+      allowProposedApi: true,
       cols: DEFAULT_TERMINAL_COLS,
       rows: DEFAULT_TERMINAL_ROWS,
       cursorBlink: true,
-      fontFamily: "'JetBrains Mono', var(--font-mono)",
+      fontFamily: TERMINAL_FONT_FAMILY,
       fontSize: 14,
       lineHeight: 1.35,
       minimumContrastRatio: 4.5,
       scrollback: 10_000,
       macOptionIsMeta: true,
+      rescaleOverlappingGlyphs: true,
       scrollOnUserInput: true,
       theme,
     })
     this.installOptionalAddons(term)
+    this.installKeyboardHandlers(term)
     this.applyTerminalTheme(term, theme)
     this.disposeThemeObserver = observeTerminalTheme((theme) => {
       this.applyTerminalTheme(term, theme)
     })
     this.disposables.push(term.onData((data) => this.writeInput(data)))
     this.disposables.push(term.onBinary((data) => this.writeInput(data)))
+    this.disposables.push(term.onBell(() => this.handleBell()))
     this.disposables.push(term.onResize(({ cols, rows }) => this.queueResize(cols, rows)))
     return term
+  }
+
+  private installKeyboardHandlers(term: XTermTerminal): void {
+    // attachCustomKeyEventHandler returns void (no disposable); the handler is
+    // implicitly cleaned up when the Terminal instance is disposed in
+    // destroyActiveView.
+    const isMac = isMacNavigatorPlatform(globalThis.navigator?.platform ?? '')
+    term.attachCustomKeyEventHandler((event) => {
+      const input = terminalInputForMacOptionArrow(event, {
+        isMac,
+        applicationCursorKeysMode: term.modes.applicationCursorKeysMode,
+      })
+      if (!input) return true
+      event.preventDefault()
+      event.stopPropagation()
+      this.writeInput(input)
+      return false
+    })
   }
 
   private installOptionalAddons(term: XTermTerminal): void {
@@ -417,6 +471,8 @@ export class ManagedTerminalSession {
     this.installWebLinksAddon(term)
     this.installSearchAddon(term)
     this.installSerializeAddon(term)
+    this.installImageAddon(term)
+    this.installProgressAddon(term)
   }
 
   private installUnicode11Addon(term: XTermTerminal): void {
@@ -455,6 +511,44 @@ export class ManagedTerminalSession {
     } catch (err) {
       console.warn('[terminal] failed to load serialize addon', err)
     }
+  }
+
+  private installImageAddon(term: XTermTerminal): void {
+    try {
+      const imageAddon = new ImageAddon()
+      term.loadAddon(imageAddon)
+      this.imageAddon = imageAddon
+    } catch (err) {
+      console.warn('[terminal] failed to load image addon', err)
+    }
+  }
+
+  private installProgressAddon(term: XTermTerminal): void {
+    try {
+      const progressAddon = new ProgressAddon()
+      term.loadAddon(progressAddon)
+      this.disposables.push(progressAddon.onChange(({ state, value }) => this.updateProgress(state, value)))
+      this.progressAddon = progressAddon
+    } catch (err) {
+      console.warn('[terminal] failed to load progress addon', err)
+    }
+  }
+
+  private updateProgress(state: number, value: number): void {
+    if (state === 0) {
+      if (!this.progressState) return
+      this.progressState = null
+    } else {
+      this.progressState = { state: state as TerminalProgressState['state'], value: Math.max(0, Math.min(100, value)) }
+    }
+    this.notify()
+  }
+
+  private handleBell(): void {
+    this.onBell?.(this.descriptor, {
+      processName: this.processName,
+      visible: !!this.host?.isConnected,
+    })
   }
 
   private find(term: string, direction: 'next' | 'previous', incremental: boolean): TerminalSearchResult {
@@ -504,9 +598,44 @@ export class ManagedTerminalSession {
     this.resizeObserver.observe(this.xtermHost)
   }
 
+  private installFontObserver(term: XTermTerminal): void {
+    this.disposeFontObserver?.()
+    this.disposeFontObserver = null
+    const fonts = document.fonts
+    if (!fonts) return
+    const refit = () => this.scheduleFontFit(term)
+    fonts.ready.then(refit).catch(() => {})
+    fonts.addEventListener?.('loadingdone', refit)
+    this.disposeFontObserver = () => {
+      fonts.removeEventListener?.('loadingdone', refit)
+    }
+  }
+
   private disconnectResizeObserver(): void {
     this.resizeObserver?.disconnect()
     this.resizeObserver = null
+  }
+
+  private scheduleFontFit(term: XTermTerminal): void {
+    if (this.disposed || this.term !== term) return
+    this.cancelFontFit()
+    this.fontFitTimer = window.setTimeout(() => {
+      this.fontFitTimer = null
+      this.fitForFontLoad(term)
+    }, FONT_REMEASURE_DEBOUNCE_MS)
+  }
+
+  private cancelFontFit(): void {
+    if (this.fontFitTimer === null) return
+    window.clearTimeout(this.fontFitTimer)
+    this.fontFitTimer = null
+  }
+
+  private fitForFontLoad(term: XTermTerminal): void {
+    if (this.disposed || this.term !== term || !this.fitAddon || !hasMeasurableBox(this.xtermHost)) return
+    remeasureTerminal(term)
+    this.fitAddon.fit()
+    term.refresh(0, Math.max(0, term.rows - 1))
   }
 
   private fitSoon(): void {
@@ -600,6 +729,17 @@ function waitForTerminalResponseFlush(): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(() => requestAnimationFrame(() => requestAnimationFrame(() => resolve())), 0)
   })
+}
+
+function remeasureTerminal(term: XTermTerminal): void {
+  const internal = term as XTermTerminal & {
+    _core?: {
+      _charSizeService?: { measure?: () => void }
+      _renderService?: { clear?: () => void }
+    }
+  }
+  internal._core?._charSizeService?.measure?.()
+  internal._core?._renderService?.clear?.()
 }
 
 function cancelScheduledAnimationFrame(frame: number): void {

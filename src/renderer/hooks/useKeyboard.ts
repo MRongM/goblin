@@ -20,7 +20,7 @@ import { runBranchActionShortcut } from '#/renderer/keyboard/branch-action-short
 import { isTerminalFocused } from '#/renderer/terminal-focus.ts'
 import type { RepoState, ReposStore } from '#/renderer/stores/repos/types.ts'
 
-type BranchShortcutAction = 'pull' | 'push' | 'terminal' | 'editor' | 'github'
+type BranchShortcutAction = 'pull' | 'push' | 'terminal' | 'editor' | 'remote'
 type MoveDirection = 1 | -1
 const INTERACTIVE_SHORTCUT_TARGET_SELECTOR =
   'button,a,input,textarea,select,[role="button"],[role="tab"],[role="menuitem"],[data-interactive]'
@@ -47,7 +47,7 @@ function activeElement(): HTMLElement | null {
 
 function branchShortcutAction(e: KeyboardEvent): BranchShortcutAction | null {
   if (e.code === 'KeyP') return e.shiftKey ? 'push' : 'pull'
-  if (e.code === 'KeyG') return e.shiftKey ? 'github' : 'terminal'
+  if (e.code === 'KeyG') return e.shiftKey ? 'remote' : 'terminal'
   if (e.code === 'KeyV' && !e.shiftKey) return 'editor'
   return null
 }
@@ -69,7 +69,11 @@ function moveCommitSelection(state: ReposStore, repo: RepoState, direction: Move
 }
 
 function moveBranchSelection(state: ReposStore, repo: RepoState, direction: MoveDirection): boolean {
-  const branches = visibleBranches(repo)
+  const branches = visibleBranches({
+    branches: repo.data.branches,
+    viewMode: repo.ui.branchViewMode,
+    searchQuery: state.branchSearchQueries[repo.id] ?? '',
+  })
   if (branches.length === 0) return false
   const index = branches.findIndex((branch) => branch.name === repo.ui.selectedBranch)
   const next = branches[nextIndex(index, branches.length, direction)]
@@ -165,7 +169,7 @@ export function useKeyboard({ onShowHelp, isOverlayOpen }: Options) {
             adjacentDetailTab(
               repo.ui.detailTab,
               e.key === 'ArrowRight' ? 1 : -1,
-              !!selected?.worktreePath && (repo.kind !== 'remote' || !!repo.remoteTarget),
+              !!selected?.worktree?.path && (repo.kind !== 'remote' || !!repo.remoteTarget),
             ),
           )
           break

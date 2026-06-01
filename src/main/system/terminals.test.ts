@@ -1,23 +1,23 @@
-import { afterEach, describe, expect, test, vi } from 'vitest'
+import { beforeEach, describe, expect, test, vi } from 'vitest'
+import {
+  getTerminalAppAvailability,
+  openInPreferredTerminal,
+  openRemoteInPreferredTerminal,
+} from '#/main/system/terminals.ts'
+import { isAppleTerminalInstalled, openInAppleTerminal, openRemoteInAppleTerminal } from '#/main/system/apple-terminal.ts'
+import { isGhosttyInstalled, openInGhostty, openRemoteInGhostty } from '#/main/system/ghostty.ts'
 import type { RemoteRepoTarget } from '#/shared/remote-repo.ts'
 
-const execaMock = vi.hoisted(() => vi.fn())
-const existsSyncMock = vi.hoisted(() => vi.fn(() => true))
-const statSyncMock = vi.hoisted(() => vi.fn(() => ({ isDirectory: () => true })))
-
-vi.mock('electron', () => ({
-  app: {
-    getPath: vi.fn(() => '/Users/test'),
-  },
+vi.mock('#/main/system/ghostty.ts', () => ({
+  isGhosttyInstalled: vi.fn(() => false),
+  openInGhostty: vi.fn(async (path: string) => ({ ok: true, message: path })),
+  openRemoteInGhostty: vi.fn(async (_target: RemoteRepoTarget, path: string) => ({ ok: true, message: path })),
 }))
 
-vi.mock('node:fs', () => ({
-  existsSync: existsSyncMock,
-  statSync: statSyncMock,
-}))
-
-vi.mock('execa', () => ({
-  execa: execaMock,
+vi.mock('#/main/system/apple-terminal.ts', () => ({
+  isAppleTerminalInstalled: vi.fn(async () => true),
+  openInAppleTerminal: vi.fn(async (path: string) => ({ ok: true, message: path })),
+  openRemoteInAppleTerminal: vi.fn(async (_target: RemoteRepoTarget, path: string) => ({ ok: true, message: path })),
 }))
 
 const TARGET: RemoteRepoTarget = {
@@ -30,61 +30,75 @@ const TARGET: RemoteRepoTarget = {
   displayName: 'prod:goblin',
 }
 
-afterEach(() => {
-  execaMock.mockReset()
-  existsSyncMock.mockReset()
-  existsSyncMock.mockReturnValue(true)
-  statSyncMock.mockReset()
-  statSyncMock.mockReturnValue({ isDirectory: () => true })
-  vi.resetModules()
+describe('openInPreferredTerminal', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  test('opens Terminal.app explicitly even when detection reports unavailable', async () => {
+    vi.mocked(isGhosttyInstalled).mockReturnValue(false)
+    vi.mocked(isAppleTerminalInstalled).mockResolvedValue(false)
+
+    await expect(openInPreferredTerminal('/repo', 'terminal')).resolves.toEqual({
+      ok: true,
+      message: '/repo',
+    })
+    expect(openInAppleTerminal).toHaveBeenCalledWith('/repo')
+  })
+
+  test('prefers Ghostty in auto mode when it is installed', async () => {
+    vi.mocked(isGhosttyInstalled).mockReturnValue(true)
+    vi.mocked(isAppleTerminalInstalled).mockResolvedValue(true)
+
+    await openInPreferredTerminal('/repo', 'auto')
+
+    expect(openInGhostty).toHaveBeenCalledWith('/repo')
+    expect(openInAppleTerminal).not.toHaveBeenCalled()
+  })
+
+  test('falls back to Terminal.app in auto mode without waiting on detection', async () => {
+    vi.mocked(isGhosttyInstalled).mockReturnValue(false)
+    vi.mocked(isAppleTerminalInstalled).mockResolvedValue(false)
+
+    await expect(openInPreferredTerminal('/repo', 'auto')).resolves.toEqual({
+      ok: true,
+      message: '/repo',
+    })
+
+    expect(openInAppleTerminal).toHaveBeenCalledWith('/repo')
+  })
+
+  test('reports async Terminal.app availability for settings', async () => {
+    vi.mocked(isGhosttyInstalled).mockReturnValue(true)
+    vi.mocked(isAppleTerminalInstalled).mockResolvedValue(false)
+
+    await expect(getTerminalAppAvailability()).resolves.toEqual({
+      ghostty: true,
+      terminal: false,
+    })
+  })
 })
 
-describe('remote terminal opening', () => {
-  test('opens an SSH session in Terminal.app through AppleScript argv', async () => {
-    execaMock.mockResolvedValue({ stdout: '' })
-    const { openRemoteInPreferredTerminal } = await import('#/main/system/terminals.ts')
+describe('openRemoteInPreferredTerminal', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
 
+  test('opens Terminal.app explicitly for remote repositories', async () => {
     await expect(openRemoteInPreferredTerminal(TARGET, '/srv/goblin-feature-x', 'terminal')).resolves.toEqual({
       ok: true,
       message: '/srv/goblin-feature-x',
     })
 
-    expect(execaMock).toHaveBeenCalledWith(
-      '/usr/bin/osascript',
-      [
-        '-e',
-        expect.stringContaining('do script commandText'),
-        expect.stringContaining("ssh -tt -o StrictHostKeyChecking=yes"),
-      ],
-      expect.objectContaining({ timeout: 10_000 }),
-    )
+    expect(openRemoteInAppleTerminal).toHaveBeenCalledWith(TARGET, '/srv/goblin-feature-x')
   })
 
-  test('opens an SSH session in Ghostty with structured ssh argv', async () => {
-    const child = Promise.resolve({})
-    Object.assign(child, { unref: vi.fn() })
-    execaMock.mockReturnValue(child)
-    const { openRemoteInPreferredTerminal } = await import('#/main/system/terminals.ts')
+  test('prefers Ghostty in auto mode for remote repositories when it is installed', async () => {
+    vi.mocked(isGhosttyInstalled).mockReturnValue(true)
 
-    await expect(openRemoteInPreferredTerminal(TARGET, '/srv/goblin-feature-x', 'ghostty')).resolves.toEqual({
-      ok: true,
-      message: '/srv/goblin-feature-x',
-    })
+    await openRemoteInPreferredTerminal(TARGET, '/srv/goblin-feature-x', 'auto')
 
-    expect(execaMock).toHaveBeenCalledWith(
-      'open',
-      expect.arrayContaining(['-na', 'Ghostty.app', '--args', '-e', 'ssh', '-tt', '-p', '2222']),
-      expect.objectContaining({ detached: true, timeout: 10_000 }),
-    )
-  })
-
-  test('rejects malformed remote paths before launching a terminal', async () => {
-    const { openRemoteInPreferredTerminal } = await import('#/main/system/terminals.ts')
-
-    await expect(openRemoteInPreferredTerminal(TARGET, 'relative/path', 'terminal')).resolves.toEqual({
-      ok: false,
-      message: 'error.invalid-path',
-    })
-    expect(execaMock).not.toHaveBeenCalled()
+    expect(openRemoteInGhostty).toHaveBeenCalledWith(TARGET, '/srv/goblin-feature-x')
+    expect(openRemoteInAppleTerminal).not.toHaveBeenCalled()
   })
 })

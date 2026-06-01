@@ -1,12 +1,12 @@
-// Root layout — three-region shell:
-//   row 1 (40px): Topbar (always)
-//   row 2 (40px): RepoTabs strip
-//   row 3 (1fr):  active RepoView body
+// Root layout — two-region shell:
+//   row 1 (40px): Topbar with embedded RepoTabs strip
+//   row 2 (1fr):  active RepoView body
 //
 // Boots in this order:
 //   1. theme.hydrate()       — pulls main's resolved theme + subscribes
-//   2. settings.hydrate()    — fetch interval + saved session
-//   3. repos.hydrateSession  — re-opens the repos that were open last run
+//   2. settings.hydrate()    — persistable settings + saved session
+//   3. settings.hydrateExternalApps() — external app snapshot
+//   4. repos.hydrateSession  — re-opens the repos that were open last run
 //
 // After hydration, side-effects run for the lifetime of the app:
 //   - background fetch loop (active repo only, debounced by interval)
@@ -16,65 +16,69 @@
 //   - settings write-error toast (warns the user if prefs aren't
 //     persisting instead of silently dropping their changes)
 
-import { useCallback, useState } from 'react'
+import { useCallback } from 'react'
+import { Trans } from 'react-i18next'
 import { Toaster } from '#/renderer/components/ui/sonner.tsx'
 import { Topbar } from '#/renderer/components/Topbar.tsx'
 import { ErrorBoundary } from '#/renderer/components/ErrorBoundary.tsx'
 import { RepoTabs } from '#/renderer/components/RepoTabs.tsx'
+import { RepoCloneDialog } from '#/renderer/components/RepoCloneDialog.tsx'
+import { RepoOpenDialog } from '#/renderer/components/RepoOpenDialog.tsx'
+import { RepoRemoteDialog } from '#/renderer/components/RepoRemoteDialog.tsx'
 import { RepoView } from '#/renderer/components/RepoView.tsx'
 import { RepoWorkspaceSkeleton } from '#/renderer/components/Skeleton.tsx'
-import { SettingsPanel, type SettingsPage } from '#/renderer/components/SettingsPanel.tsx'
 import { RepoDropOverlay } from '#/renderer/components/RepoDropOverlay.tsx'
 import { TerminalSessionProvider } from '#/renderer/components/terminal/TerminalSessionProvider.tsx'
 import { useReposStore } from '#/renderer/stores/repos/store.ts'
-import { useSettingsStore } from '#/renderer/stores/settings.ts'
 import { useT } from '#/renderer/stores/i18n.ts'
 import { useKeyboard } from '#/renderer/hooks/useKeyboard.ts'
 import { useRepoDrop } from '#/renderer/hooks/useRepoDrop.ts'
 import { useAppBootstrap } from '#/renderer/hooks/useAppBootstrap.ts'
 import { useBackgroundFetch } from '#/renderer/hooks/useBackgroundFetch.ts'
+import { useExternalOpenPaths } from '#/renderer/hooks/useExternalOpenPaths.ts'
+import { useAppOverlays } from '#/renderer/hooks/useAppOverlays.ts'
 import { useMenuActions } from '#/renderer/hooks/useMenuActions.ts'
 import { useRemotePortSessionEvents } from '#/renderer/hooks/useRemotePortSessionEvents.ts'
 import { useSessionPersistence } from '#/renderer/hooks/useSessionPersistence.ts'
 import { useSettingsWriteErrorToast } from '#/renderer/hooks/useSettingsWriteErrorToast.ts'
 import { repoWorkspaceBehavior } from '#/renderer/lib/workspace-layout.ts'
+import { rpc } from '#/renderer/rpc.ts'
+import type { SettingsPage } from '#/shared/rpc.ts'
 
 export function App() {
   const activeId = useReposStore((s) => s.activeId)
   const sessionReady = useReposStore((s) => s.sessionReady)
   const detailCollapsed = useReposStore((s) => s.detailCollapsed)
   const workspaceLayout = useReposStore((s) => s.workspaceLayout)
-  const shortcutsDisabled = useSettingsStore((s) => s.shortcutsDisabled)
-  const [settingsOpen, setSettingsOpen] = useState(false)
-  const [settingsPage, setSettingsPage] = useState<SettingsPage>('general')
-  const [cloneOpen, setCloneOpen] = useState(false)
-  const [remoteOpen, setRemoteOpen] = useState(false)
+  const overlays = useAppOverlays()
   const workspaceBehavior = repoWorkspaceBehavior(workspaceLayout, detailCollapsed)
-  const openSettings = useCallback((page: SettingsPage = 'general') => {
-    setSettingsPage(page)
-    setSettingsOpen(true)
+  const openSettingsWindow = useCallback((page: SettingsPage = 'general') => {
+    void rpc.app.openSettingsWindow.mutate({ page }).catch((err) => {
+      console.warn('[settings-window] failed to open', err)
+    })
   }, [])
-  const closeSettings = useCallback(() => {
-    setSettingsOpen(false)
-    setSettingsPage('general')
-  }, [])
-  const openCloneRepo = useCallback(() => setCloneOpen(true), [])
   const showHelp = useCallback(() => {
-    if (!shortcutsDisabled) openSettings('shortcuts')
-  }, [openSettings, shortcutsDisabled])
+    openSettingsWindow('shortcuts')
+  }, [openSettingsWindow])
   // Shared gate: any modal overlay suppresses both
   // keyboard shortcuts and the file-drop dashed border. useKeyboard
   // additionally OR's in commit-detail, which is per-repo state read
   // from the store inside the hook itself.
-  const modalOpen = settingsOpen || cloneOpen || remoteOpen
+  const modalOpen = overlays.anyOpen
   const repoDrop = useRepoDrop({ blocked: modalOpen })
 
   useAppBootstrap()
   useSessionPersistence()
   useSettingsWriteErrorToast()
   useBackgroundFetch()
-  useMenuActions({ openSettings, openCloneRepo, showHelp, isOverlayOpen: () => modalOpen })
   useRemotePortSessionEvents()
+  useExternalOpenPaths()
+  useMenuActions({
+    closeAllOverlays: overlays.closeAllOverlays,
+    openRepoPathDialog: overlays.openRepoPathDialog,
+    openCloneRepo: overlays.openCloneRepo,
+    isOverlayOpen: () => modalOpen,
+  })
 
   useKeyboard({
     onShowHelp: showHelp,
@@ -98,13 +102,9 @@ export function App() {
           onDragLeave={repoDrop.onDragLeave}
           onDrop={repoDrop.onDrop}
         >
-          <Topbar onOpenSettings={openSettings} />
-          <RepoTabs
-            cloneOpen={cloneOpen}
-            onCloneOpenChange={setCloneOpen}
-            remoteOpen={remoteOpen}
-            onRemoteOpenChange={setRemoteOpen}
-          />
+          <Topbar onOpenSettings={() => openSettingsWindow()}>
+            <RepoTabs onClone={overlays.openCloneRepo} onAddRemote={overlays.openRemoteRepo} />
+          </Topbar>
           <main className="flex flex-1 min-h-0 min-w-0">
             <ErrorBoundary resetKey={activeId}>
               {activeId ? (
@@ -120,13 +120,10 @@ export function App() {
               )}
             </ErrorBoundary>
           </main>
-          <SettingsPanel
-            open={settingsOpen}
-            page={settingsPage}
-            onPageChange={setSettingsPage}
-            onClose={closeSettings}
-          />
-          {repoDrop.active && <RepoDropOverlay />}
+          <RepoOpenDialog open={overlays.state.openRepo.open} onOpenChange={overlays.setOpenRepoOpen} />
+          <RepoCloneDialog open={overlays.state.clone.open} onOpenChange={overlays.setCloneOpen} />
+          <RepoRemoteDialog open={overlays.state.remoteRepo.open} onOpenChange={overlays.setRemoteRepoOpen} />
+          <RepoDropOverlay active={repoDrop.active} />
           {/* shadcn/ui Toaster wrapper — owns its own theme + style hooks.
            * App-level only sets position + closeButton; the rest of the
            * visual contract is in components/ui/sonner.tsx. */}
@@ -148,9 +145,7 @@ function EmptyState() {
       <div className="text-center max-w-sm">
         <div className="text-sm font-medium text-foreground mb-1">{t('empty.title')}</div>
         <div className="text-xs text-muted-foreground leading-relaxed">
-          {t('empty.body.before')}
-          <span className="text-foreground">{t('empty.body.open-label')}</span>
-          {t('empty.body.after')}
+          <Trans i18nKey="empty.body" components={{ open: <span className="text-foreground" /> }} />
         </div>
       </div>
     </div>

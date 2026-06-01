@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, test } from 'vitest'
 import { useReposStore } from '#/renderer/stores/repos/store.ts'
-import type { BranchInfo } from '#/renderer/types.ts'
+import type { BranchSnapshotInfo } from '#/renderer/types.ts'
 import {
-  branch,
+  branchSnapshot,
   flushRpc,
   installGoblin,
   REPO_A,
@@ -45,10 +45,11 @@ describe('repo session hydration', () => {
           savedAt,
           name: 'cached-a',
           data: {
-            branches: [branch('cached')],
+            branches: [branchSnapshot('cached')],
             currentBranch: 'cached',
             status: [],
             statusLoaded: true,
+            worktreesByPath: {},
           },
           ui: {
             selectedBranch: 'cached',
@@ -58,10 +59,10 @@ describe('repo session hydration', () => {
         },
       },
     })
-    let resolveSnapshot!: (value: { branches: BranchInfo[]; current: string }) => void
+    let resolveSnapshot!: (value: { branches: BranchSnapshotInfo[]; current: string }) => void
     installGoblin({
       snapshot: () =>
-        new Promise<{ branches: BranchInfo[]; current: string }>((resolve) => {
+        new Promise<{ branches: BranchSnapshotInfo[]; current: string }>((resolve) => {
           resolveSnapshot = resolve
         }),
     })
@@ -76,7 +77,7 @@ describe('repo session hydration', () => {
     expect(cachedRepo?.resources.snapshot.phase).toBe('refreshing')
     expect(cachedRepo?.cache.savedAt).toBe(savedAt)
 
-    resolveSnapshot({ branches: [branch('fresh')], current: 'fresh' })
+    resolveSnapshot({ branches: [branchSnapshot('fresh')], current: 'fresh' })
     await flushRpc()
 
     const freshRepo = useReposStore.getState().repos[REPO_A]
@@ -94,10 +95,11 @@ describe('repo session hydration', () => {
           savedAt,
           name: 'cached-a',
           data: {
-            branches: [branch('cached')],
+            branches: [branchSnapshot('cached')],
             currentBranch: 'cached',
             status: [],
             statusLoaded: true,
+            worktreesByPath: {},
           },
           ui: {
             selectedBranch: 'cached',
@@ -113,7 +115,7 @@ describe('repo session hydration', () => {
         new Promise<{ ok: true; root: string; name: string }>((resolve) => {
           probes.set(path, resolve)
         }),
-      snapshot: () => new Promise<{ branches: BranchInfo[]; current: string }>(() => {}),
+      snapshot: () => new Promise<{ branches: BranchSnapshotInfo[]; current: string }>(() => {}),
     })
 
     const work = useReposStore.getState().hydrateSession([REPO_A, REPO_B], REPO_A)
@@ -143,14 +145,18 @@ describe('repo session hydration', () => {
     expect(useReposStore.getState().activeId).toBe(REPO_A)
   })
 
-  test('hydrateSession reports missing repos while restoring valid repos', async () => {
+  test('hydrateSession restores unavailable repos as tabs', async () => {
     installGoblin()
 
     await useReposStore.getState().hydrateSession([REPO_A, '/missing'], '/missing')
 
-    expect(useReposStore.getState().order).toEqual([REPO_A])
-    expect(useReposStore.getState().activeId).toBe(REPO_A)
-    expect(useReposStore.getState().missingFromSession).toEqual([{ path: '/missing', reason: 'missing' }])
+    expect(useReposStore.getState().order).toEqual([REPO_A, '/missing'])
+    expect(useReposStore.getState().activeId).toBe('/missing')
+    expect(useReposStore.getState().repos['/missing']).toMatchObject({
+      id: '/missing',
+      name: 'missing',
+      availability: { phase: 'unavailable', reason: 'missing' },
+    })
   })
 
   test('hydrateSession limits concurrent repo probes', async () => {

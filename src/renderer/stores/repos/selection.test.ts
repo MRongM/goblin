@@ -3,13 +3,13 @@ import { replaceRepo } from '#/renderer/stores/repos/helpers.ts'
 import { useReposStore } from '#/renderer/stores/repos/store.ts'
 import type { BranchLogState, DetailTab, RepoState } from '#/renderer/stores/repos/types.ts'
 import {
-  createBranch as branch,
+  createRepoBranch as branch,
   createCommitDetail,
   installGoblinTestBridge,
   resetReposStore,
   seedRepoState,
 } from '#/renderer/stores/repos/test-utils.ts'
-import type { BranchInfo } from '#/renderer/types.ts'
+import type { BranchSnapshotInfo } from '#/renderer/types.ts'
 import { DEFAULT_DETAIL_PANE_SIZES } from '#/shared/workspace-layout.ts'
 
 const REPO_ID = '/tmp/gbl-selection-test-repo'
@@ -29,19 +29,27 @@ function seedRepo(options: {
   currentBranch?: string
   detailTab?: DetailTab
   openCommit?: boolean
-  branches?: BranchInfo[]
+  branches?: BranchSnapshotInfo[]
 }) {
   seedRepoState({
     id: REPO_ID,
     branches: options.branches ?? [
-      branch('main', { worktreePath: '/repo' }),
-      branch('feature/worktree', { worktreePath: '/tmp/feature-worktree' }),
+      branch('main', { worktree: { path: '/repo' } }),
+      branch('feature/worktree', { worktree: { path: '/tmp/feature-worktree' } }),
       branch('feature/plain'),
     ],
     currentBranch: options.currentBranch ?? 'main',
     selectedBranch: options.selectedBranch ?? 'feature/plain',
     detailTab: options.detailTab ?? 'status',
     openCommit: options.openCommit ? createCommitDetail() : null,
+    remote: {
+      remotes: ['origin'],
+      hasRemotes: true,
+      hasBrowserRemote: true,
+      browserRemoteProvider: 'github',
+      remoteProviders: { origin: 'github' },
+      hasGitHubRemote: true,
+    },
   })
 }
 
@@ -188,7 +196,7 @@ describe('setBranchViewMode', () => {
     seedRepo({
       selectedBranch: 'main',
       detailTab: 'terminal',
-      branches: [branch('main', { worktreePath: '/repo' }), branch('feature/plain')],
+      branches: [branch('main', { worktree: { path: '/repo' } }), branch('feature/plain')],
     })
 
     useReposStore.getState().setBranchViewMode(REPO_ID, 'no-worktree')
@@ -747,6 +755,54 @@ describe('resetLayout', () => {
   })
 })
 
+describe('setBranchSearchQuery', () => {
+  test('updates runtime search without rewriting durable cache or changing selection', () => {
+    seedRepo({ selectedBranch: 'feature/plain' })
+    const repo = useReposStore.getState().repos[REPO_ID]!
+    const cached = {
+      savedAt: 123,
+      name: repo.name,
+      data: {
+        branches: repo.data.branches,
+        currentBranch: repo.data.currentBranch,
+        status: repo.data.status,
+        statusLoaded: repo.data.statusLoaded,
+        worktreesByPath: repo.data.worktreesByPath,
+      },
+      ui: {
+        selectedBranch: repo.ui.selectedBranch,
+        branchViewMode: repo.ui.branchViewMode,
+        detailTab: repo.ui.detailTab,
+      },
+    }
+    useReposStore.setState({ repoCache: { [REPO_ID]: cached } })
+
+    useReposStore.getState().setBranchSearchQuery(REPO_ID, 'worktree')
+
+    expect(useReposStore.getState().branchSearchQueries[REPO_ID]).toBe('worktree')
+    expect(useReposStore.getState().repos[REPO_ID]?.ui.selectedBranch).toBe('feature/plain')
+    expect(useReposStore.getState().repoCache[REPO_ID]).toBe(cached)
+  })
+
+  test('removes runtime search when the query is cleared or the repo is closed', () => {
+    seedRepo({ selectedBranch: 'feature/plain' })
+
+    useReposStore.getState().setBranchSearchQuery(REPO_ID, 'worktree')
+    useReposStore.getState().setBranchSearchQuery(REPO_ID, '')
+
+    expect(useReposStore.getState().branchSearchQueries[REPO_ID]).toBeUndefined()
+
+    useReposStore.getState().setBranchSearchQuery(REPO_ID, '   ')
+
+    expect(useReposStore.getState().branchSearchQueries[REPO_ID]).toBeUndefined()
+
+    useReposStore.getState().setBranchSearchQuery(REPO_ID, 'feature')
+    useReposStore.getState().closeRepo(REPO_ID)
+
+    expect(useReposStore.getState().branchSearchQueries[REPO_ID]).toBeUndefined()
+  })
+})
+
 describe('selectLog', () => {
   test('updates runtime log selection without rewriting durable cache', () => {
     seedRepo({ selectedBranch: 'main', detailTab: 'commits' })
@@ -759,6 +815,7 @@ describe('selectLog', () => {
         currentBranch: repo.data.currentBranch,
         status: repo.data.status,
         statusLoaded: repo.data.statusLoaded,
+        worktreesByPath: repo.data.worktreesByPath,
       },
       ui: {
         selectedBranch: repo.ui.selectedBranch,

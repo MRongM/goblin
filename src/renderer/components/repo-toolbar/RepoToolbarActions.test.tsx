@@ -4,13 +4,22 @@ import { RepoToolbarActions } from '#/renderer/components/repo-toolbar/RepoToolb
 import { emptyRepo } from '#/renderer/stores/repos/helpers.ts'
 import { createBranch, installGoblinTestBridge } from '#/renderer/stores/repos/test-utils.ts'
 
+const storeMock = vi.hoisted(() => ({
+  repos: {} as Record<string, unknown>,
+}))
+
 vi.mock('#/renderer/stores/i18n.ts', () => ({
   useT: () => (key: string) => key,
+}))
+
+vi.mock('#/renderer/components/repo-activity/RepoActivityControl.tsx', () => ({
+  RepoActivityControl: () => 'action.refresh-remote',
 }))
 
 vi.mock('#/renderer/stores/repos/store.ts', () => ({
   useReposStore: (selector: any) =>
     selector({
+      repos: storeMock.repos,
       runBranchAction: vi.fn(),
       refreshAll: vi.fn(),
       refreshRemoteDiagnostics: vi.fn(),
@@ -37,8 +46,9 @@ describe('RepoToolbarActions', () => {
         displayName: 'prod:goblin',
       },
     })
+    storeMock.repos = { [repo.id]: repo }
 
-    const html = renderToStaticMarkup(<RepoToolbarActions repo={repo} />)
+    const html = renderToStaticMarkup(<RepoToolbarActions repoId={repo.id} />)
 
     expect(html).toContain('action.refresh-remote')
     expect(html).toContain('remote-ports.button')
@@ -60,8 +70,9 @@ describe('RepoToolbarActions', () => {
       }),
     ]
     repo.ui.selectedBranch = 'main'
+    storeMock.repos = { [repo.id]: repo }
 
-    const html = renderToStaticMarkup(<RepoToolbarActions repo={repo} />)
+    const html = renderToStaticMarkup(<RepoToolbarActions repoId={repo.id} />)
 
     expect(html).toContain('action.checkout-locally')
   })
@@ -89,8 +100,9 @@ describe('RepoToolbarActions', () => {
         localName: 'feature/x',
       }),
     ]
+    storeMock.repos = { [repo.id]: repo }
 
-    const html = renderToStaticMarkup(<RepoToolbarActions repo={repo} />)
+    const html = renderToStaticMarkup(<RepoToolbarActions repoId={repo.id} />)
 
     expect(html).toContain('action.checkout-on-server')
   })

@@ -7,22 +7,16 @@
 // tanstack ecosystem). PointerSensor with a small activation distance lets
 // a regular click still focus the repo without triggering a drag; keyboard
 // users use Arrow keys for tab activation.
-
-import { toast } from 'sonner'
-import { useShallow } from 'zustand/react/shallow'
 import { useStoreWithEqualityFn } from 'zustand/traditional'
 import { useReposStore } from '#/renderer/stores/repos/store.ts'
 import { useT } from '#/renderer/stores/i18n.ts'
 import { useSettingsStore } from '#/renderer/stores/settings.ts'
 import { RepoTabStrip } from '#/renderer/components/repo-tabs/RepoTabStrip.tsx'
-import { AddRemoteRepositoryDialog } from '#/renderer/components/AddRemoteRepositoryDialog.tsx'
-import { CloneRepositoryDialog, type CloneRepositoryRequest } from '#/renderer/components/CloneRepositoryDialog.tsx'
 import type { RepoTabConnectionStatus, RepoTabSummary } from '#/renderer/components/repo-tabs/types.ts'
+import { openRepoFromDialog } from '#/renderer/lib/open-repo-dialog.ts'
 import { resourceBusy } from '#/renderer/stores/repos/resources.ts'
 import type { RepoState } from '#/renderer/stores/repos/types.ts'
-import type { CloneRepoResult } from '#/shared/rpc.ts'
-import { remoteTargetSubtitle, type RemoteRepoTarget } from '#/shared/remote-repo.ts'
-import { rpc } from '#/renderer/rpc.ts'
+import { remoteTargetSubtitle } from '#/shared/remote-repo.ts'
 
 /** Equality fn for the summaries array. Zustand's `useShallow` does
  *  Object.is on each element — but we re-create the inner objects
@@ -42,9 +36,18 @@ function summariesEqual(a: RepoTabSummary[], b: RepoTabSummary[]): boolean {
       x.targetLabel !== y.targetLabel ||
       x.diagnosticStatus !== y.diagnosticStatus ||
       x.diagnosticCategory !== y.diagnosticCategory ||
-      x.diagnosticMessage !== y.diagnosticMessage
+      x.diagnosticMessage !== y.diagnosticMessage ||
+      x.unavailable !== y.unavailable ||
+      (x.remoteDetails?.length ?? 0) !== (y.remoteDetails?.length ?? 0)
     ) {
       return false
+    }
+    const xRemoteDetails = x.remoteDetails ?? []
+    const yRemoteDetails = y.remoteDetails ?? []
+    for (let j = 0; j < xRemoteDetails.length; j++) {
+      const xr = xRemoteDetails[j]!
+      const yr = yRemoteDetails[j]!
+      if (xr.name !== yr.name || xr.fetchUrl !== yr.fetchUrl || xr.pushUrl !== yr.pushUrl) return false
     }
   }
   return true
@@ -59,13 +62,11 @@ function remoteConnectionStatus(repo: RepoState): RepoTabConnectionStatus | unde
 }
 
 interface RepoTabsProps {
-  cloneOpen: boolean
-  onCloneOpenChange: (open: boolean) => void
-  remoteOpen: boolean
-  onRemoteOpenChange: (open: boolean) => void
+  onClone: () => void
+  onAddRemote: () => void
 }
 
-export function RepoTabs({ cloneOpen, onCloneOpenChange, remoteOpen, onRemoteOpenChange }: RepoTabsProps) {
+export function RepoTabs({ onClone, onAddRemote }: RepoTabsProps) {
   const t = useT()
   const shortcutsDisabled = useSettingsStore((s) => s.shortcutsDisabled)
   // Build the summary array inside the selector but compare with our
@@ -91,6 +92,8 @@ export function RepoTabs({ cloneOpen, onCloneOpenChange, remoteOpen, onRemoteOpe
             diagnosticCategory: r.kind === 'remote' && r.diagnostics?.ok === false ? r.diagnostics.category : undefined,
             diagnosticMessage:
               r.kind === 'remote' && r.diagnostics?.ok === false ? (r.diagnostics.message ?? null) : null,
+            remoteDetails: r.remote.remoteDetails ?? [],
+            unavailable: r.availability.phase === 'unavailable',
           }
         })
         .filter((x): x is RepoTabSummary => x !== null),
@@ -100,83 +103,34 @@ export function RepoTabs({ cloneOpen, onCloneOpenChange, remoteOpen, onRemoteOpe
   const setActive = useReposStore((s) => s.setActive)
   const closeRepo = useReposStore((s) => s.closeRepo)
   const openRepo = useReposStore((s) => s.openRepo)
-  const openRemoteRepo = useReposStore((s) => s.openRemoteRepo)
   const reorderRepos = useReposStore((s) => s.reorderRepos)
-  const missing = useReposStore(useShallow((s) => s.missingFromSession))
-  const dismissMissing = useReposStore((s) => s.dismissMissing)
 
   async function handleOpenLocal() {
-    const path = await rpc.repo.openDialog.mutate()
-    if (!path) return
-    const result = await openRepo(path)
-    if (!result.ok) {
-      toast.error(t('drop.open-failed'), {
-        description: t(result.message),
-      })
-    }
-  }
-
-  async function handleClone(request: CloneRepositoryRequest): Promise<CloneRepoResult> {
-    const result = await rpc.repo.clone.mutate(request)
-    if (!result.ok || !result.path) return result
-    const openResult = await openRepo(result.path)
-    if (!openResult.ok) {
-      toast.error(t('drop.open-failed'), {
-        description: `${result.path}\n${t(openResult.message)}`,
-      })
-      return { ok: false, message: openResult.message, path: result.path }
-    }
-    toast.success(t('repo-tabs.clone-opened'), { description: result.path })
-    return result
-  }
-
-  async function handleAddRemote(target: RemoteRepoTarget) {
-    const result = await openRemoteRepo(target)
-    if (!result.ok) {
-      toast.error(t('drop.open-failed'), {
-        description: t(result.message),
-      })
-      return
-    }
-    toast.success(t('repo-tabs.remote-opened'), { description: remoteTargetSubtitle(target) })
+    await openRepoFromDialog({ openRepo, t })
   }
 
   return (
-    <>
-      <RepoTabStrip
-        repos={summaries}
-        activeId={activeId}
-        missing={missing}
-        labels={{
-          repositories: t('repo-tabs.repos'),
-          emptyBefore: t('repo-tabs.empty.before'),
-          emptyOpenLabel: t('repo-tabs.empty.open-label'),
-          emptyAfter: t('repo-tabs.empty.after'),
-          close: t('repo-tabs.close'),
-          dragToReorder: t('repo-tabs.drag-to-reorder'),
-          open: t('topbar.open'),
-          openLocal: t('repo-tabs.open-local'),
-          openLocalShortcut: shortcutsDisabled ? null : '⌘O',
-          clone: t('repo-tabs.clone'),
-          cloneShortcut: shortcutsDisabled ? null : '⌘⇧O',
-          addRemote: t('repo-tabs.add-remote'),
-          missingTitle: t('repo-tabs.missing-title', { n: missing.length }),
-          missingDismiss: t('repo-tabs.missing-dismiss'),
-        }}
-        onActivate={setActive}
-        onClose={closeRepo}
-        onReorder={reorderRepos}
-        onOpenLocal={handleOpenLocal}
-        onClone={() => onCloneOpenChange(true)}
-        onAddRemote={() => onRemoteOpenChange(true)}
-        onDismissMissing={dismissMissing}
-      />
-      <CloneRepositoryDialog open={cloneOpen} onClose={() => onCloneOpenChange(false)} onClone={handleClone} />
-      <AddRemoteRepositoryDialog
-        open={remoteOpen}
-        onClose={() => onRemoteOpenChange(false)}
-        onAddRemote={handleAddRemote}
-      />
-    </>
+    <RepoTabStrip
+      repos={summaries}
+      activeId={activeId}
+      labels={{
+        repositories: t('repo-tabs.repos'),
+        close: t('repo-tabs.close'),
+        dragToReorder: t('repo-tabs.drag-to-reorder'),
+        open: t('topbar.open'),
+        openLocal: t('repo-tabs.open-local'),
+        openLocalShortcut: shortcutsDisabled ? null : '⌘O',
+        clone: t('repo-tabs.clone'),
+        cloneShortcut: shortcutsDisabled ? null : '⌘⇧O',
+        addRemote: t('repo-tabs.add-remote'),
+        unavailable: t('repo-unavailable.title'),
+      }}
+      onActivate={setActive}
+      onClose={closeRepo}
+      onReorder={reorderRepos}
+      onOpenLocal={handleOpenLocal}
+      onClone={onClone}
+      onAddRemote={onAddRemote}
+    />
   )
 }

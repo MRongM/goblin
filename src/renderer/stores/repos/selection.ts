@@ -36,7 +36,7 @@ function branchCanOpenTerminal(repo: RepoState, branchName: string | null): bool
   return (
     (repo.kind !== 'remote' || !!repo.remoteTarget) &&
     !!branchName &&
-    repo.data.branches.some((branch) => branch.name === branchName && !!branch.worktreePath)
+    repo.data.branches.some((branch) => branch.name === branchName && !!branch.worktree?.path)
   )
 }
 
@@ -223,6 +223,19 @@ export function createSelectionActions(set: ReposSet, get: ReposGet) {
       }
     },
 
+    setBranchSearchQuery(id: string, query: string) {
+      set((s) => {
+        if (!s.repos[id]) return s
+        const hasQuery = query.trim().length > 0
+        const currentQuery = s.branchSearchQueries[id]
+        if (hasQuery ? currentQuery === query : currentQuery === undefined) return s
+        const branchSearchQueries = { ...s.branchSearchQueries }
+        if (hasQuery) branchSearchQueries[id] = query
+        else delete branchSearchQueries[id]
+        return { branchSearchQueries }
+      })
+    },
+
     setDetailTab(id: string, tab: DetailTab) {
       let changed = false
       let token: number | undefined
@@ -257,7 +270,7 @@ export function createSelectionActions(set: ReposSet, get: ReposGet) {
         const repo = s.repos[id]
         if (!repo || repo.ui.detailTab !== 'terminal') return s
         const branch = repo.data.branches.find((branch) => branch.name === repo.ui.selectedBranch)
-        if (branch?.worktreePath !== worktreePath) return s
+        if (branch?.worktree?.path !== worktreePath) return s
         changed = true
         token = repo.instanceToken
         const nextRepo = replaceRepo(repo, (r) => {
@@ -323,11 +336,12 @@ export function createSelectionActions(set: ReposSet, get: ReposGet) {
       if (!id) return
       const repo = state.repos[id]
       if (!repo) return
+      if (repo.availability.phase === 'unavailable') return
       const token = repo.instanceToken
       const branch = repo.ui.selectedBranch
       if (!branch || branch === repo.data.currentBranch) return
       const branchInfo = repo.data.branches.find((b) => b.name === branch)
-      if (!branchInfo || branchInfo.worktreePath) return
+      if (!branchInfo || branchInfo.worktree?.path) return
       if (branchInfo.remoteTracking) {
         await get().runBranchAction(id, { kind: 'checkoutRemoteBranch', remoteBranch: branch }, { token })
         return
@@ -341,6 +355,7 @@ export function createSelectionActions(set: ReposSet, get: ReposGet) {
       if (!id) return
       const repo = state.repos[id]
       if (!repo || repo.ui.detailTab !== 'commits') return
+      if (repo.availability.phase === 'unavailable') return
       const branch = branchForVisibleLog(repo)
       if (!branch) return
       const branchLog = repo.data.logsByBranch[branch]

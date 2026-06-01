@@ -11,19 +11,16 @@
 // names up front; anything else is git's responsibility and its errors
 // are precise enough to show as-is.
 
+import { Loader2 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '#/renderer/components/ui/dialog.tsx'
+import { DialogFooter } from '#/renderer/components/ui/dialog.tsx'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '#/renderer/components/ui/select.tsx'
 import { Button } from '#/renderer/components/ui/button.tsx'
+import { DialogError } from '#/renderer/components/ui/dialog-error.tsx'
+import { FormDialog } from '#/renderer/components/ui/form-dialog.tsx'
+import { Field, FieldDescription, FieldError, FieldLabel } from '#/renderer/components/ui/field.tsx'
+import { Input } from '#/renderer/components/ui/input.tsx'
 import type { RepoState } from '#/renderer/stores/repos/types.ts'
-import { resourceBusy } from '#/renderer/stores/repos/resources.ts'
 import { useT } from '#/renderer/stores/i18n.ts'
 import {
   defaultRemoteWorktreePath,
@@ -32,6 +29,7 @@ import {
   tildify,
   untildify,
 } from '#/renderer/lib/paths.ts'
+import type { ExecResult } from '#/shared/git-types.ts'
 import { validateBranchName } from '#/shared/refnames.ts'
 
 export interface CreateWorktreeRequest {
@@ -44,7 +42,7 @@ interface Props {
   open: boolean
   repo: RepoState
   onClose: () => void
-  onCreate: (request: CreateWorktreeRequest) => void | Promise<void>
+  onCreate: (request: CreateWorktreeRequest) => ExecResult | null | Promise<ExecResult | null>
 }
 
 export function CreateWorktreeDialog({ open, repo, onClose, onCreate }: Props) {
@@ -53,6 +51,8 @@ export function CreateWorktreeDialog({ open, repo, onClose, onCreate }: Props) {
   const [base, setBase] = useState<string>('')
   const [branch, setBranch] = useState('')
   const [worktreePath, setWorktreePath] = useState('')
+  const [pending, setPending] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   // Reset on the rising edge of `open` only. Listing repo.data.branches /
   // repo.data.currentBranch in the deps would re-fire on every snapshot
@@ -66,6 +66,8 @@ export function CreateWorktreeDialog({ open, repo, onClose, onCreate }: Props) {
     setBase(initialBaseRef.current)
     setBranch('')
     setWorktreePath('')
+    setPending(false)
+    setError(null)
   }, [open])
 
   const branchTrimmed = branch.trim()
@@ -75,6 +77,8 @@ export function CreateWorktreeDialog({ open, repo, onClose, onCreate }: Props) {
       ? defaultRemoteWorktreePath(repo.remoteTarget.remotePath, branchTrimmed)
       : defaultWorktreePath(repo.id, branchTrimmed)
   const branchValidation = branchTrimmed ? validateBranchName(branchTrimmed) : { ok: true }
+  const baseExists = base ? repo.data.branches.some((b) => b.name === base) : false
+  const baseError = base && !baseExists ? t('action.create-worktree-base-missing') : ''
   const branchExists = branchTrimmed ? repo.data.branches.some((b) => b.name === branchTrimmed) : false
   const branchError = branchTrimmed
     ? !branchValidation.ok
@@ -89,42 +93,57 @@ export function CreateWorktreeDialog({ open, repo, onClose, onCreate }: Props) {
   const effectivePath = pathTrimmed || defaultPath
   const displayDefaultPath = repo.kind === 'remote' ? defaultPath : tildify(defaultPath)
   const displayEffectivePath = repo.kind === 'remote' ? effectivePath : tildify(effectivePath)
-  const branchActionBusy = resourceBusy(repo.resources.branchAction)
+  const branchActionBusy = repo.operations.branchAction.phase !== 'idle'
   const pathValid = repo.kind === 'remote' ? isRemoteAbsolutePath(effectivePath) : effectivePath.length > 0
-  const canSubmit = branchTrimmed.length > 0 && !branchError && pathValid && base.length > 0
+  const canSubmit = branchTrimmed.length > 0 && !branchError && pathValid && baseExists && !branchActionBusy && !pending
 
-  function handleSubmit() {
-    if (!canSubmit || branchActionBusy) return
-    void onCreate({ worktreePath: effectivePath, newBranch: branchTrimmed, baseBranch: base })
-    onClose()
+  async function handleSubmit() {
+    if (!canSubmit) return
+    setPending(true)
+    setError(null)
+    let result: ExecResult | null
+    try {
+      result = await onCreate({ worktreePath: effectivePath, newBranch: branchTrimmed, baseBranch: base })
+    } catch (err) {
+      setPending(false)
+      setError(err instanceof Error ? err.message : t('error.unknown'))
+      return
+    }
+    setPending(false)
+    if (!result || result.ok) {
+      onClose()
+      return
+    }
+    if (result.message === 'cancelled') return
+    setError(t(result.message || 'error.unknown'))
   }
 
   return (
-    <Dialog
+    <FormDialog
       open={open}
       onOpenChange={(o) => {
-        if (!o) onClose()
+        if (!o && !pending) onClose()
       }}
+      showCloseButton={!pending}
+      title={t('action.create-worktree-title')}
+      description={t('action.create-worktree-hint')}
     >
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{t('action.create-worktree-title')}</DialogTitle>
-          <DialogDescription>{t('action.create-worktree-hint')}</DialogDescription>
-        </DialogHeader>
-
-        <form
-          className="space-y-4"
-          onSubmit={(e) => {
-            e.preventDefault()
-            handleSubmit()
-          }}
-        >
-          <div>
-            <label className="block text-sm font-medium text-foreground" htmlFor="cwt-base">
-              {t('action.create-worktree-base-label')}
-            </label>
+      <form
+        className="space-y-0"
+        onSubmit={(e) => {
+          e.preventDefault()
+          handleSubmit()
+        }}
+      >
+          <Field data-invalid={baseError ? true : undefined}>
+            <FieldLabel htmlFor="cwt-base">{t('action.create-worktree-base-label')}</FieldLabel>
             <Select value={base} onValueChange={setBase}>
-              <SelectTrigger id="cwt-base" className="mt-1 w-full">
+              <SelectTrigger
+                id="cwt-base"
+                className="w-full"
+                aria-invalid={!!baseError}
+                aria-describedby={baseError ? 'cwt-base-error' : undefined}
+              >
                 <SelectValue placeholder={t('action.create-worktree-base-placeholder')} />
               </SelectTrigger>
               <SelectContent>
@@ -144,45 +163,49 @@ export function CreateWorktreeDialog({ open, repo, onClose, onCreate }: Props) {
                 ))}
               </SelectContent>
             </Select>
-          </div>
+            <FieldError id="cwt-base-error" reserveHeight aria-live="polite" aria-atomic="true">
+              {baseError}
+            </FieldError>
+          </Field>
 
-          <div>
-            <label className="block text-sm font-medium text-foreground" htmlFor="cwt-branch">
-              {t('action.create-worktree-branch-label')}
-            </label>
-            <input
+          <Field data-invalid={branchError ? true : undefined}>
+            <FieldLabel htmlFor="cwt-branch">{t('action.create-worktree-branch-label')}</FieldLabel>
+            <Input
               id="cwt-branch"
               autoFocus
+              disabled={pending}
               value={branch}
-              onChange={(e) => setBranch(e.target.value)}
+              onChange={(e) => {
+                setBranch(e.target.value)
+                setError(null)
+              }}
               placeholder={t('action.create-worktree-branch-placeholder')}
               aria-invalid={!!branchError}
               aria-describedby={branchError ? 'cwt-branch-error' : undefined}
-              className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring aria-invalid:border-destructive aria-invalid:ring-destructive/20"
             />
-            {branchError && (
-              <div id="cwt-branch-error" className="mt-1 text-xs text-destructive">
-                {branchError}
-              </div>
-            )}
-          </div>
+            <FieldError id="cwt-branch-error" reserveHeight aria-live="polite" aria-atomic="true">
+              {branchError}
+            </FieldError>
+          </Field>
 
-          <div>
-            <label className="block text-sm font-medium text-foreground" htmlFor="cwt-path">
-              {t('action.create-worktree-path-label')}
-            </label>
-            <input
+          <Field>
+            <FieldLabel htmlFor="cwt-path">{t('action.create-worktree-path-label')}</FieldLabel>
+            <Input
               id="cwt-path"
               value={worktreePath}
-              disabled={!branchTrimmed}
-              onChange={(e) => setWorktreePath(e.target.value)}
+              disabled={pending || !branchTrimmed}
+              onChange={(e) => {
+                setWorktreePath(e.target.value)
+                setError(null)
+              }}
               placeholder={displayDefaultPath}
               aria-describedby="cwt-path-hint"
-              className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
+              className="font-mono text-xs"
             />
-            <div
+            <FieldDescription
               id="cwt-path-hint"
-              className="mt-1 text-xs text-muted-foreground truncate"
+              reserveHeight
+              className="truncate"
               title={displayEffectivePath || undefined}
             >
               {!branchTrimmed
@@ -190,18 +213,23 @@ export function CreateWorktreeDialog({ open, repo, onClose, onCreate }: Props) {
                 : effectivePath
                   ? displayEffectivePath
                   : ''}
-            </div>
-          </div>
-          <DialogFooter>
-            <Button type="button" variant="ghost" onClick={onClose}>
+            </FieldDescription>
+          </Field>
+          {error && (
+            <DialogError>
+              {error}
+            </DialogError>
+          )}
+          <DialogFooter className="pt-4">
+            <Button type="button" variant="ghost" disabled={pending} onClick={onClose}>
               {t('dialog.cancel')}
             </Button>
-            <Button type="submit" disabled={!canSubmit || branchActionBusy}>
+            <Button type="submit" disabled={!canSubmit} aria-busy={pending ? true : undefined}>
+              {pending && <Loader2 className="animate-spin" />}
               {t('action.create-worktree-confirm')}
             </Button>
           </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
+      </form>
+    </FormDialog>
   )
 }

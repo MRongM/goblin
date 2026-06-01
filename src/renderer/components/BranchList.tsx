@@ -1,13 +1,8 @@
-// Persistent branch list. Each row shows branch name, lightweight
-// scan signals, and the head commit subject, author, and relative date. The
-// selected row scrolls into view automatically when the user moves with
-// j/k or arrows so a long branch list doesn't strand the cursor offscreen.
-//
-// Worktree branches use a folder-tree glyph and a compact chip beside the
-// name. We avoid tinting the whole row so selection, hover, and status
-// semantics don't compete for background colour.
+// Persistent branch list. Each row shows branch name, worktree state, and
+// lightweight sync metadata. The list supports manual ordering in the active
+// branch filter while keeping row action menus controlled by the parent list.
 
-import { useCallback, useEffect, useRef, type ComponentProps, type RefObject } from 'react'
+import { useCallback, useEffect, useRef, useState, type ComponentProps, type ReactElement, type RefObject } from 'react'
 import { RefreshCw } from 'lucide-react'
 import {
   DndContext,
@@ -29,13 +24,15 @@ import { Button } from '#/renderer/components/ui/button.tsx'
 import { ScrollArea } from '#/renderer/components/ui/scroll-area.tsx'
 import { branchActionsAvailable } from '#/renderer/hooks/branch-action-state.ts'
 import { resourceBusy } from '#/renderer/stores/repos/resources.ts'
-import type { RepoState } from '#/renderer/stores/repos/types.ts'
+import type { RepoBranchState, RepoState } from '#/renderer/stores/repos/types.ts'
 
 interface Props {
   repoId: string
   showActions?: boolean
   variant?: 'list' | 'selected-strip'
 }
+
+type OpenActionMenu = { repoId: string; branch: string }
 
 export function BranchList({ repoId, showActions = true, variant = 'list' }: Props) {
   const t = useT()
@@ -47,6 +44,7 @@ export function BranchList({ repoId, showActions = true, variant = 'list' }: Pro
   const refreshSnapshot = useReposStore((s) => s.refreshSnapshot)
   const selectedRef = useRef<HTMLLIElement | null>(null)
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }))
+  const [openActionMenu, setOpenActionMenu] = useState<OpenActionMenu | null>(null)
   const handleSelectBranch = useCallback(
     (branch: string) => {
       selectBranch(repoId, branch)
@@ -73,46 +71,72 @@ export function BranchList({ repoId, showActions = true, variant = 'list' }: Pro
     useReposStore,
     (s) => {
       const repo = s.repos[repoId]
+      const branchSearchQuery = s.branchSearchQueries[repoId] ?? ''
       return {
         repo,
-        branches: repo ? visibleBranches(repo) : [],
+        branches: repo
+          ? visibleBranches({
+            branches: repo.data.branches,
+            viewMode: repo.ui.branchViewMode,
+            branchOrder: repo.ui.branchOrder,
+            searchQuery: branchSearchQuery,
+          })
+          : [],
         branchCount: repo?.data.branches.length ?? 0,
+        branchSearchQuery,
         selected: repo?.ui.selectedBranch ?? null,
         current: repo?.data.currentBranch ?? '',
       }
     },
     (a, b) =>
-      a.repo === b.repo ||
-      (!!a.repo &&
-        !!b.repo &&
-        a.repo.id === b.repo.id &&
-        a.repo.instanceToken === b.repo.instanceToken &&
-        a.repo.data.branches === b.repo.data.branches &&
-        a.repo.ui.branchViewMode === b.repo.ui.branchViewMode &&
-        a.repo.ui.branchOrder === b.repo.ui.branchOrder &&
-        a.repo.data.status === b.repo.data.status &&
-        a.repo.resources.snapshot === b.repo.resources.snapshot &&
-        a.repo.resources.branchAction === b.repo.resources.branchAction &&
-        a.branchCount === b.branchCount &&
-        a.selected === b.selected &&
-        a.current === b.current),
+      a.repo === b.repo
+        ? a.branchSearchQuery === b.branchSearchQuery
+        : !!a.repo &&
+          !!b.repo &&
+          a.repo.id === b.repo.id &&
+          a.repo.instanceToken === b.repo.instanceToken &&
+          a.repo.data.branches === b.repo.data.branches &&
+          a.repo.ui.branchViewMode === b.repo.ui.branchViewMode &&
+          a.repo.ui.branchOrder === b.repo.ui.branchOrder &&
+          a.branchSearchQuery === b.branchSearchQuery &&
+          a.repo.data.worktreesByPath === b.repo.data.worktreesByPath &&
+          a.repo.operations.branchAction === b.repo.operations.branchAction &&
+          a.repo.resources.snapshot === b.repo.resources.snapshot &&
+          a.branchCount === b.branchCount &&
+          a.selected === b.selected &&
+          a.current === b.current,
   )
 
-  // Keep the selected row in view as the user navigates with j/k.
   useEffect(() => {
     const selectedEl = selectedRef.current
     if (selectedEl && variant === 'list') selectedEl.scrollIntoView({ block: 'nearest' })
   }, [selected, variant])
 
-  if (!repo) return null
+  const selectedBranch =
+    repo && selected
+      ? (branches.find((branch) => branch.name === selected) ??
+        repo.data.branches.find((branch) => branch.name === selected))
+      : null
+  const renderedBranches = repo
+    ? variant === 'selected-strip'
+      ? selectedBranch
+        ? [selectedBranch]
+        : []
+      : branches
+    : []
 
-  const selectedBranch = selected
-    ? (branches.find((branch) => branch.name === selected) ??
-      repo.data.branches.find((branch) => branch.name === selected))
-    : null
-  const renderedBranches = variant === 'selected-strip' ? (selectedBranch ? [selectedBranch] : []) : branches
-  const renderedBranchIds = renderedBranches.map((branch) => branch.name)
-  const sortable = variant === 'list' && renderedBranches.length > 1
+  useEffect(() => {
+    if (!openActionMenu) return
+    if (
+      openActionMenu.repoId !== repoId ||
+      !showActions ||
+      !renderedBranches.some((branch) => branch.name === openActionMenu.branch)
+    ) {
+      setOpenActionMenu(null)
+    }
+  }, [openActionMenu, renderedBranches, repoId, showActions])
+
+  if (!repo) return null
 
   if (renderedBranches.length === 0) {
     if (repo.kind === 'remote' && repo.data.branches.length === 0 && repo.resources.snapshot.error) {
@@ -131,6 +155,8 @@ export function BranchList({ repoId, showActions = true, variant = 'list' }: Pro
     return <EmptyState title={t(repo.data.branches.length === 0 ? 'branches.empty' : 'branches.filter-empty')} />
   }
 
+  const renderedBranchIds = renderedBranches.map((branch) => branch.name)
+  const sortable = variant === 'list' && renderedBranches.length > 1
   const list = (
     <>
       {repo.kind === 'remote' && repo.resources.snapshot.stale && repo.resources.snapshot.error && (
@@ -147,6 +173,8 @@ export function BranchList({ repoId, showActions = true, variant = 'list' }: Pro
               lang={lang}
               selectedRef={selectedRef}
               showActions={showActions}
+              openActionMenu={openActionMenu}
+              setOpenActionMenu={setOpenActionMenu}
               onSelectBranch={handleSelectBranch}
               onOpenBranchStatus={handleOpenBranchStatus}
               sortable
@@ -162,6 +190,8 @@ export function BranchList({ repoId, showActions = true, variant = 'list' }: Pro
           lang={lang}
           selectedRef={selectedRef}
           showActions={showActions}
+          openActionMenu={openActionMenu}
+          setOpenActionMenu={setOpenActionMenu}
           onSelectBranch={handleSelectBranch}
           onOpenBranchStatus={handleOpenBranchStatus}
         />
@@ -187,38 +217,29 @@ function BranchRows({
   lang,
   selectedRef,
   showActions,
+  openActionMenu,
+  setOpenActionMenu,
   onSelectBranch,
   onOpenBranchStatus,
   sortable = false,
 }: {
   repo: RepoState
-  branches: ReturnType<typeof visibleBranches>
+  branches: RepoBranchState[]
   selected: string | null
   current: string
   lang: Lang
   selectedRef: RefObject<HTMLLIElement | null>
   showActions: boolean
+  openActionMenu: OpenActionMenu | null
+  setOpenActionMenu: (value: OpenActionMenu | null | ((current: OpenActionMenu | null) => OpenActionMenu | null)) => void
   onSelectBranch: (branch: string) => void
   onOpenBranchStatus: (branch: string) => void
   sortable?: boolean
 }) {
   return (
     <ul className="divide-y divide-separator">
-      {branches.map((branch) =>
-        sortable ? (
-          <SortableBranchRow
-            key={branch.name}
-            repo={repo}
-            branch={branch}
-            selected={selected}
-            current={current}
-            lang={lang}
-            selectedRef={selectedRef}
-            showActions={showActions && branchActionsAvailable(repo, branch)}
-            onSelectBranch={onSelectBranch}
-            onOpenBranchStatus={onOpenBranchStatus}
-          />
-        ) : (
+      {branches.map((branch) => {
+        const row = (
           <BranchRow
             key={branch.name}
             repo={repo}
@@ -230,21 +251,36 @@ function BranchRows({
             showActions={showActions && branchActionsAvailable(repo, branch)}
             onSelectBranch={onSelectBranch}
             onOpenBranchStatus={onOpenBranchStatus}
+            actionMenuOpen={openActionMenu?.repoId === repo.id && openActionMenu.branch === branch.name}
+            onActionMenuOpenChange={(open) =>
+              setOpenActionMenu((current) =>
+                open
+                  ? { repoId: repo.id, branch: branch.name }
+                  : current?.repoId === repo.id && current.branch === branch.name
+                    ? null
+                    : current,
+              )
+            }
           />
-        ),
-      )}
+        )
+        return sortable ? <SortableBranchRow key={branch.name} row={row} branchName={branch.name} /> : row
+      })}
     </ul>
   )
 }
 
-function SortableBranchRow(props: Omit<ComponentProps<typeof BranchRow>, 'drag'>) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-    id: props.branch.name,
-  })
+function SortableBranchRow({
+  row,
+  branchName,
+}: {
+  row: ReactElement<ComponentProps<typeof BranchRow>>
+  branchName: string
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: branchName })
   const stableTransform = transform ? { ...transform, scaleX: 1, scaleY: 1 } : null
   return (
     <BranchRow
-      {...props}
+      {...row.props}
       drag={{
         attributes,
         listeners,

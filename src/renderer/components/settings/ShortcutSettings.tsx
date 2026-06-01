@@ -1,6 +1,8 @@
-import { useState, type KeyboardEvent } from 'react'
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { RefreshCw } from 'lucide-react'
+import { Button } from '#/renderer/components/ui/button.tsx'
 import { Switch } from '#/renderer/components/ui/switch.tsx'
+import { registerWindowFlusher } from '#/renderer/lib/window-flush-registry.ts'
 import { useT } from '#/renderer/stores/i18n.ts'
 import { useSettingsStore } from '#/renderer/stores/settings.ts'
 import { cn } from '#/renderer/lib/cn.ts'
@@ -11,11 +13,29 @@ export function ShortcutSettings() {
   const shortcutStatusId = 'global-shortcut-status'
   const shortcutsDisabled = useSettingsStore((s) => s.shortcutsDisabled)
   const setShortcutsDisabled = useSettingsStore((s) => s.setShortcutsDisabled)
+  const globalShortcutDisabled = useSettingsStore((s) => s.globalShortcutDisabled)
+  const setGlobalShortcutDisabled = useSettingsStore((s) => s.setGlobalShortcutDisabled)
+  const swapCloseShortcuts = useSettingsStore((s) => s.swapCloseShortcuts)
+  const setSwapCloseShortcuts = useSettingsStore((s) => s.setSwapCloseShortcuts)
   const globalShortcut = useSettingsStore((s) => s.globalShortcut)
   const globalShortcutRegistered = useSettingsStore((s) => s.globalShortcutRegistered)
   const setGlobalShortcut = useSettingsStore((s) => s.setGlobalShortcut)
   const [recordingShortcut, setRecordingShortcut] = useState(false)
   const [shortcutError, setShortcutError] = useState<string | null>(null)
+  const recordingShortcutRef = useRef(recordingShortcut)
+
+  useEffect(() => {
+    recordingShortcutRef.current = recordingShortcut
+  }, [recordingShortcut])
+
+  useEffect(() => {
+    return registerWindowFlusher(async () => {
+      if (!recordingShortcutRef.current) return
+      recordingShortcutRef.current = false
+      setRecordingShortcut(false)
+      setShortcutError(null)
+    })
+  }, [])
 
   const saveShortcutsDisabled = (disabled: boolean) => {
     void setShortcutsDisabled(disabled).catch((err) => {
@@ -23,10 +43,22 @@ export function ShortcutSettings() {
     })
   }
 
+  const saveGlobalShortcutDisabled = (disabled: boolean) => {
+    void setGlobalShortcutDisabled(disabled).catch((err) => {
+      console.warn('[settings] global shortcut disabled update failed', err)
+    })
+  }
+
+  const saveSwapCloseShortcuts = (swapped: boolean) => {
+    void setSwapCloseShortcuts(swapped).catch((err) => {
+      console.warn('[settings] swap close shortcuts update failed', err)
+    })
+  }
+
   const saveGlobalShortcut = (accelerator: string) => {
     void setGlobalShortcut(accelerator)
       .then((state) => {
-        const failedToUseRequested = state.accelerator !== accelerator || (!shortcutsDisabled && !state.registered)
+        const failedToUseRequested = state.accelerator !== accelerator || (!globalShortcutDisabled && !state.registered)
         setShortcutError(failedToUseRequested ? t('settings.global-shortcut-conflict') : null)
       })
       .catch((err) => {
@@ -59,11 +91,11 @@ export function ShortcutSettings() {
 
   const shortcutStatus = shortcutError
     ? { text: shortcutError, tone: 'error' as const }
-    : !shortcutsDisabled && !globalShortcutRegistered
+    : !globalShortcutDisabled && !globalShortcutRegistered
       ? { text: t('settings.global-shortcut-conflict'), tone: 'error' as const }
       : recordingShortcut
         ? { text: t('settings.global-shortcut-hint'), tone: 'muted' as const }
-        : shortcutsDisabled
+        : globalShortcutDisabled
           ? { text: t('settings.global-shortcut-disabled-hint'), tone: 'muted' as const }
           : null
 
@@ -74,13 +106,43 @@ export function ShortcutSettings() {
           htmlFor="shortcuts-disabled-switch"
           className="min-w-0 cursor-pointer select-none text-sm text-foreground"
         >
-          {t('settings.shortcuts-disable-all')}
+          {t('settings.shortcuts-disable-app')}
         </label>
         <Switch
           id="shortcuts-disabled-switch"
           checked={shortcutsDisabled}
           onCheckedChange={saveShortcutsDisabled}
-          aria-label={t('settings.shortcuts-disable-all')}
+          aria-label={t('settings.shortcuts-disable-app')}
+        />
+      </div>
+
+      <div className="flex min-h-11 items-center justify-between gap-4 border-t border-separator px-3 py-2">
+        <label
+          htmlFor="global-shortcut-disabled-switch"
+          className="min-w-0 cursor-pointer select-none text-sm text-foreground"
+        >
+          {t('settings.shortcuts-disable-global')}
+        </label>
+        <Switch
+          id="global-shortcut-disabled-switch"
+          checked={globalShortcutDisabled}
+          onCheckedChange={saveGlobalShortcutDisabled}
+          aria-label={t('settings.shortcuts-disable-global')}
+        />
+      </div>
+
+      <div className="flex min-h-11 items-center justify-between gap-4 border-t border-separator px-3 py-2">
+        <label
+          htmlFor="swap-close-shortcuts-switch"
+          className="min-w-0 cursor-pointer select-none text-sm text-foreground"
+        >
+          {t('settings.swap-close-shortcuts')}
+        </label>
+        <Switch
+          id="swap-close-shortcuts-switch"
+          checked={swapCloseShortcuts}
+          onCheckedChange={saveSwapCloseShortcuts}
+          aria-label={t('settings.swap-close-shortcuts')}
         />
       </div>
 
@@ -92,9 +154,10 @@ export function ShortcutSettings() {
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
-          <button
+          <Button
             type="button"
             data-interactive
+            variant="ghost"
             onClick={() => {
               setRecordingShortcut(true)
               setShortcutError(null)
@@ -103,9 +166,9 @@ export function ShortcutSettings() {
             onBlur={() => setRecordingShortcut(false)}
             title={shortcutStatus?.text ?? t('settings.global-shortcut-record')}
             className={cn(
-              'relative inline-flex h-7 w-20 items-center justify-center rounded-md border px-2 font-mono text-[12px] leading-none shadow-[var(--shadow-control-inset-highlight)] transition-colors duration-100',
+              'relative h-7 w-20 border px-2 font-mono text-[12px] font-normal leading-none shadow-[var(--shadow-control-inset-highlight)]',
               shortcutStatus?.tone === 'error'
-                ? 'border-destructive/55 bg-destructive/10 text-destructive hover:bg-destructive/15'
+                ? 'border-danger-border bg-danger-surface text-danger hover:bg-danger-surface'
                 : recordingShortcut
                   ? 'border-primary/70 bg-primary/10 text-primary hover:bg-primary/15'
                   : 'border-border bg-muted/50 text-foreground hover:bg-accent',
@@ -118,20 +181,22 @@ export function ShortcutSettings() {
             <span
               className={cn(
                 'absolute -right-0.5 -top-0.5 size-2 rounded-full border border-background',
-                shortcutStatus?.tone === 'error' ? 'bg-destructive' : recordingShortcut ? 'bg-primary' : 'hidden',
+                shortcutStatus?.tone === 'error' ? 'bg-danger' : recordingShortcut ? 'bg-primary' : 'hidden',
               )}
             />
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
             data-interactive
+            variant="ghost"
+            size="icon"
             onClick={() => saveGlobalShortcut(DEFAULT_GLOBAL_SHORTCUT)}
-            className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors duration-100 hover:bg-accent hover:text-foreground"
+            className="text-muted-foreground hover:text-foreground"
             aria-label={t('settings.global-shortcut-reset')}
             title={t('settings.global-shortcut-reset')}
           >
             <RefreshCw className="size-3.5" aria-hidden="true" />
-          </button>
+          </Button>
         </div>
       </div>
     </div>

@@ -4,10 +4,17 @@ import {
   normalizeBranchOrder,
   selectedBranchForBranchSet,
 } from '#/renderer/stores/repos/branch-view-mode.ts'
+import { isRepoUnavailableReason, markRepoAvailable, markRepoUnavailable } from '#/renderer/stores/repos/availability.ts'
 import { runExclusiveOperation, runLatestOperation } from '#/renderer/stores/repos/operation-runner.ts'
+import { pruneRepoOperationViewsForBranches } from '#/renderer/stores/repos/operations.ts'
 import { persistRepoCache } from '#/renderer/stores/repos/persistence.ts'
 import { runLatestResourceOperation } from '#/renderer/stores/repos/resource-runner.ts'
 import { canStartManualFetch, canStartRemoteFetch } from '#/renderer/stores/repos/sync-state.ts'
+import {
+  applyStatusToWorktreeStates,
+  stripBranchWorktreeMetadata,
+  worktreeStatesFromBranches,
+} from '#/renderer/stores/repos/worktree-state.ts'
 import {
   pruneRepoBranchLogOperations,
   pruneRepoBranchPullRequestOperations,
@@ -61,11 +68,13 @@ function mergePullRequest(
   mode: PullRequestFetchMode,
 ): PullRequestInfo {
   const existing = previous.pullRequest
-  if (mode === 'full' || !existing || existing.number !== next.number || existing.url !== next.url) return next
+  const preserveExistingDetails =
+    mode !== 'full' && !!existing && existing.number === next.number && existing.url === next.url
+  if (!preserveExistingDetails) return next
   return {
     ...next,
     checks: existing.checks ?? next.checks,
-    reviewDecision: existing.reviewDecision !== undefined ? existing.reviewDecision : next.reviewDecision,
+    reviewDecision: existing.reviewDecision === undefined ? next.reviewDecision : existing.reviewDecision,
     mergeable: existing.mergeable ?? next.mergeable,
   }
 }
@@ -123,6 +132,7 @@ export function createRefreshActions(set: ReposSet, get: ReposGet) {
       startResource(r.resources.fetch, { hasData: r.resources.fetch.loadedAt !== null })
     })
     return runExclusiveOperation({
+      set,
       get,
       id,
       token,
@@ -208,7 +218,6 @@ export function createRefreshActions(set: ReposSet, get: ReposGet) {
       selectResource: (r) => (r.resources.logsByBranch[branch] ??= idleResource()),
       start: (r) => {
         r.data.logsByBranch[branch] ??= emptyBranchLog()
-        r.resources.logsByBranch[branch] ??= idleResource()
         return { hasData: (r.data.logsByBranch[branch]?.entries.length ?? 0) > 0 }
       },
       task: logTask,
@@ -249,6 +258,7 @@ export function createRefreshActions(set: ReposSet, get: ReposGet) {
         startResource(r.resources.snapshot, { hasData: r.data.branches.length > 0 })
       })
       await runLatestOperation({
+        set,
         get,
         id,
         token,
@@ -271,20 +281,27 @@ export function createRefreshActions(set: ReposSet, get: ReposGet) {
             const logsByBranch = Object.fromEntries(
               Object.entries(r.data.logsByBranch).filter(([branch]) => validBranches.has(branch)),
             )
-            const pullRequestsByBranch = new Map(
-              r.data.branches.flatMap((branch) =>
-                branch.pullRequest ? [[branch.name, branch.pullRequest] as const] : [],
-              ),
-            )
+            const preservePullRequests = snap.remote
+              ? snap.remote.hasGitHubRemote === true
+              : r.remote.hasGitHubRemote === true
+            const pullRequestsByBranch = preservePullRequests
+              ? new Map(
+                  r.data.branches.flatMap((branch) =>
+                    branch.pullRequest ? [[branch.name, branch.pullRequest] as const] : [],
+                  ),
+                )
+              : new Map()
             // Preserve the last known PR while the async GitHub refresh below
             // runs. If GitHub is unavailable, refreshPullRequests keeps this
-            // metadata instead of making the row flicker to "no PR".
-            const branches = snap.branches.map((branch) => {
+            // metadata instead of making the row flicker to "no PR"; local-only
+            // repos clear it because there is no PR source to refresh.
+            const branchesWithSnapshotWorktreeMetadata = snap.branches.map((branch) => {
               const pullRequest = branch.pullRequest ?? pullRequestsByBranch.get(branch.name)
               return pullRequest && branchPullRequestBelongsToBranch(branch, pullRequest)
                 ? { ...branch, pullRequest }
                 : branch
             })
+            const branches = stripBranchWorktreeMetadata(branchesWithSnapshotWorktreeMetadata)
             const branchOrder = normalizeBranchOrder(branches, r.ui.branchOrder)
             // Default selection: current branch on first load. Keep the
             // user's pick if it still exists, otherwise fall back so the
@@ -299,17 +316,37 @@ export function createRefreshActions(set: ReposSet, get: ReposGet) {
             r.data.branches = branches
             r.data.currentBranch = snap.current
             r.data.logsByBranch = logsByBranch
+            r.data.worktreesByPath = worktreeStatesFromBranches(
+              branchesWithSnapshotWorktreeMetadata,
+              r.data.worktreesByPath,
+              r.data.status,
+            )
             r.resources.logsByBranch = Object.fromEntries(
               Object.entries(r.resources.logsByBranch).filter(([branch]) => validBranches.has(branch)),
             )
             r.resources.pullRequestsByBranch = Object.fromEntries(
               Object.entries(r.resources.pullRequestsByBranch).filter(([branch]) => validBranches.has(branch)),
             )
+            pruneRepoOperationViewsForBranches(r.operations, validBranches)
             r.ui.selectedBranch = selected
             r.ui.branchOrder = branchOrder
+            if (snap.remote) {
+              r.remote.remotes = snap.remote.remotes.map((remote) => remote.name)
+              r.remote.remoteDetails = snap.remote.remotes
+              r.remote.hasRemotes = snap.remote.hasRemotes
+              r.remote.hasBrowserRemote = snap.remote.hasBrowserRemote
+              r.remote.browserRemoteProvider = snap.remote.browserRemoteProvider
+              r.remote.remoteProviders = snap.remote.remoteProviders
+              r.remote.hasGitHubRemote = snap.remote.hasGitHubRemote
+              if (!snap.remote.hasRemotes) {
+                r.remote.fetchFailed = false
+                r.remote.fetchError = null
+              }
+            }
+            markRepoAvailable(r)
             if (
               r.ui.detailTab === 'terminal' &&
-              (r.kind === 'remote' || !branches.some((branch) => branch.name === selected && branch.worktreePath))
+              !branches.some((branch) => branch.name === selected && branch.worktree?.path)
             ) {
               r.ui.detailTab = 'status'
             }
@@ -321,7 +358,7 @@ export function createRefreshActions(set: ReposSet, get: ReposGet) {
           pruneRepoBranchPullRequestOperations(id, validBranches)
           const branchNames = snap.branches.map((branch) => branch.name)
           const worktreePaths = snap.branches
-            .map((branch) => branch.worktreePath)
+            .map((branch) => branch.worktree?.path)
             .filter((p): p is string => typeof p === 'string' && p.length > 0)
           runSnapshotSuccessWorkflow(set, get, {
             id,
@@ -334,6 +371,7 @@ export function createRefreshActions(set: ReposSet, get: ReposGet) {
         },
         onError: (message) => {
           updateIfFresh(set, id, token, (r) => {
+            if (isRepoUnavailableReason(message)) markRepoUnavailable(r, message)
             finishResourceError(r.resources.snapshot, message)
             r.events = appendRepoEvent(r.events, errorEvent(message))
           })
@@ -355,10 +393,12 @@ export function createRefreshActions(set: ReposSet, get: ReposGet) {
       if (!localRepoAvailable(repoBefore)) return
       const token = options?.token ?? repoBefore.instanceToken
       if (repoBefore.instanceToken !== token) return
+      if (repoBefore.availability.phase === 'unavailable') return
       const mode = options?.mode ?? 'full'
       const clearMissing = options?.clearMissing ?? mode === 'full'
       const branchNames = branchesArg ?? repoBefore.data.branches.map((branch) => branch.name)
       if (branchNames.length === 0) return
+      if (repoBefore.remote.hasGitHubRemote !== true) return
       const requested = new Set(branchNames)
       updateIfFresh(set, id, token, (r) => {
         startPullRequestResource(r.resources.pullRequests, mode, {
@@ -373,6 +413,7 @@ export function createRefreshActions(set: ReposSet, get: ReposGet) {
         }
       })
       await runLatestOperation({
+        set,
         get,
         id,
         token,
@@ -478,10 +519,14 @@ export function createRefreshActions(set: ReposSet, get: ReposGet) {
         applyResult: (r, status) => {
           r.data.status = status
           r.data.statusLoaded = true
+          r.data.worktreesByPath = applyStatusToWorktreeStates(r.data.worktreesByPath, status)
         },
         onSuccess: (_status, ctx) => {
           const repoAfterStatus = get().repos[id]
           if (ctx.isCurrent()) persistRepoCache(set, repoAfterStatus, token)
+        },
+        onError: (message, r) => {
+          if (isRepoUnavailableReason(message)) markRepoUnavailable(r, message)
         },
         errorLog: '[refreshStatus] failed',
       })
@@ -500,9 +545,13 @@ export function createRefreshActions(set: ReposSet, get: ReposGet) {
       if (!repoBefore) return
       const token = options?.token ?? repoBefore.instanceToken
       if (repoBefore.instanceToken !== token) return
+      if (repoBefore.availability.phase === 'unavailable') {
+        await get().refreshAll(id, { token })
+        return
+      }
+      if (!canStartRemoteFetch(repoBefore)) return
       const fetchTask = fetchTaskForRepo(repoBefore, 'user')
       if (!fetchTask) return
-      if (!canStartManualFetch(repoBefore)) return
       let result: ExecResult | null
       try {
         result = await runNetworkTask(id, fetchTask, {
