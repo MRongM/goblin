@@ -176,6 +176,38 @@ describe('runBranchAction', () => {
     expect(useReposStore.getState().repos[REPO_ID]?.resources.fetch.phase).toBe('idle')
   })
 
+  test('routes remote tracking checkout for SSH repositories through remote RPC', async () => {
+    resetReposStore()
+    const remote = emptyRepo(REMOTE_TARGET.id, REMOTE_TARGET.displayName, {
+      kind: 'remote',
+      remoteTarget: REMOTE_TARGET,
+    })
+    useReposStore.setState({
+      repos: { [REMOTE_TARGET.id]: remote },
+      order: [REMOTE_TARGET.id],
+      activeId: REMOTE_TARGET.id,
+      sessionReady: true,
+    })
+    const calls: string[] = []
+    installGoblinTestBridge({
+      'remote.checkoutRemoteBranch': async ({ remoteBranch }: { remoteBranch: string }) => {
+        calls.push(remoteBranch)
+        return { ok: true, message: 'checked out on server' }
+      },
+      'remote.snapshot': async () => ({ branches: [], current: '' }),
+      'remote.status': async () => [],
+    })
+
+    const result = await useReposStore.getState().runBranchAction(REMOTE_TARGET.id, {
+      kind: 'checkoutRemoteBranch',
+      remoteBranch: 'origin/feature/x',
+    })
+
+    expect(result).toEqual({ ok: true, message: 'checked out on server' })
+    expect(calls).toEqual(['origin/feature/x'])
+    expect(useReposStore.getState().repos[REMOTE_TARGET.id]?.resources.fetch.phase).toBe('idle')
+  })
+
   test('routes remote remove worktree through remote RPC', async () => {
     resetReposStore()
     const remote = emptyRepo(REMOTE_TARGET.id, REMOTE_TARGET.displayName, {

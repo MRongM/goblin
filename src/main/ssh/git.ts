@@ -4,12 +4,14 @@ import {
   REMOTE_SNAPSHOT_BRANCHES_MARKER,
   REMOTE_SNAPSHOT_CURRENT_MARKER,
   REMOTE_SNAPSHOT_DEFAULT_MARKER,
+  REMOTE_SNAPSHOT_TRACKING_BRANCHES_MARKER,
   runRemoteCommand,
   type RemoteCommandKind,
   type RemoteCommandResult,
 } from '#/main/ssh/commands.ts'
 import { PROTECTED_BRANCHES, type BranchInfo, type ExecResult, type LogEntry, type WorktreeInfo, type WorktreeStatus } from '#/shared/git-types.ts'
 import type { RemoteRepoTarget } from '#/shared/remote-repo.ts'
+import { isSafeBranchName } from '#/shared/refnames.ts'
 
 type RemoteGitRunner = (
   command: RemoteCommandKind,
@@ -31,6 +33,7 @@ interface SnapshotSections {
   current: string[]
   defaultBranch: string[]
   branches: string[]
+  trackingBranches: string[]
 }
 
 export async function getRemoteSnapshot(
@@ -154,6 +157,22 @@ export async function checkoutRemoteBranch(
   const run: RemoteGitRunner = options.run ?? ((command, t, runOptions) => runRemoteCommand(t, command, runOptions))
   const result = await run(
     { type: 'gitCheckout', path: worktreePath ?? target.remotePath, branch },
+    target,
+    { signal: options.signal, timeoutMs: REMOTE_BRANCH_OP_TIMEOUT_MS },
+  )
+  return remoteExecResult(result)
+}
+
+export async function checkoutRemoteTrackingBranchOnRemote(
+  target: RemoteRepoTarget,
+  remoteBranch: string,
+  options: { signal?: AbortSignal; run?: RemoteGitRunner } = {},
+): Promise<ExecResult> {
+  const localBranch = localNameFromRemoteTrackingBranch(remoteBranch)
+  if (!localBranch) return { ok: false, message: 'error.invalid-arguments' }
+  const run: RemoteGitRunner = options.run ?? ((command, t, runOptions) => runRemoteCommand(t, command, runOptions))
+  const result = await run(
+    { type: 'gitCheckoutRemoteTracking', path: target.remotePath, remoteBranch, localBranch },
     target,
     { signal: options.signal, timeoutMs: REMOTE_BRANCH_OP_TIMEOUT_MS },
   )
@@ -335,7 +354,16 @@ export function parseRemoteSnapshot(output: string, worktrees: WorktreeInfo[] = 
   const current = firstLine(sections.current)
   const defaultBranch = firstLine(sections.defaultBranch)
   const branchOutput = sections.branches.join('\n')
-  const branches = parseBranches(branchOutput, current, worktrees)
+  const localBranches = parseBranches(branchOutput, current, worktrees)
+  const localBranchNames = new Set(localBranches.map((branch) => branch.name))
+  const remoteTrackingBranches = parseBranches(sections.trackingBranches.join('\n'), '', [], {
+    remoteTracking: true,
+  }).filter((branch) => {
+    if (!branch.localName || !branch.remoteName) return false
+    if (!localNameFromRemoteTrackingBranch(branch.name)) return false
+    return !localBranchNames.has(branch.localName)
+  })
+  const branches = [...localBranches, ...remoteTrackingBranches]
   const markedBranches = markDefaultBranch(branches, defaultBranch)
   return {
     branches: prioritizeDefaultBranch(markedBranches, defaultBranch),
@@ -373,7 +401,7 @@ async function getRemoteWorktrees(
 }
 
 function splitSnapshotSections(output: string): SnapshotSections | null {
-  const sections: SnapshotSections = { current: [], defaultBranch: [], branches: [] }
+  const sections: SnapshotSections = { current: [], defaultBranch: [], branches: [], trackingBranches: [] }
   let active: keyof SnapshotSections | null = null
   for (const line of output.split('\n')) {
     if (line === REMOTE_SNAPSHOT_CURRENT_MARKER) {
@@ -388,6 +416,10 @@ function splitSnapshotSections(output: string): SnapshotSections | null {
       active = 'branches'
       continue
     }
+    if (line === REMOTE_SNAPSHOT_TRACKING_BRANCHES_MARKER) {
+      active = 'trackingBranches'
+      continue
+    }
     if (active) sections[active].push(line)
   }
   if (!output.includes(REMOTE_SNAPSHOT_BRANCHES_MARKER)) return null
@@ -396,6 +428,17 @@ function splitSnapshotSections(output: string): SnapshotSections | null {
 
 function firstLine(lines: string[]): string {
   return lines.find((line) => line.trim().length > 0)?.trim() ?? ''
+}
+
+function localNameFromRemoteTrackingBranch(remoteBranch: string): string | null {
+  if (!isSafeBranchName(remoteBranch)) return null
+  const slash = remoteBranch.indexOf('/')
+  if (slash <= 0 || slash >= remoteBranch.length - 1) return null
+  const remoteName = remoteBranch.slice(0, slash)
+  const localName = remoteBranch.slice(slash + 1)
+  if (localName === 'HEAD') return null
+  if (!isSafeBranchName(remoteName) || !isSafeBranchName(localName)) return null
+  return localName
 }
 
 async function resolveKnownRemoteWorktree(

@@ -4,17 +4,24 @@
 //   Refresh — local repos fetch before rebuilding repository state; remote
 //             repos run read-only SSH refreshes only.
 //
-// Branch-scoped operations (Checkout / Pull / Push / Open in Terminal
-// / Open in GitHub) live with the selected-branch detail, not here —
-// those need a branch context to be meaningful.
+// Most branch-scoped operations (Checkout / Pull / Push / Open in Terminal
+// / Open in GitHub) live with the selected-branch detail. Remote-tracking
+// checkout is duplicated here so these branches can be promoted without
+// relying on branch-row actions being visible.
 
 import { useEffect, useState } from 'react'
-import { FolderPlus, RefreshCw } from 'lucide-react'
+import { ChevronDown, FolderPlus, GitBranch, RefreshCw } from 'lucide-react'
 import { useReposStore } from '#/renderer/stores/repos/store.ts'
 import type { RepoState } from '#/renderer/stores/repos/types.ts'
 import { useT } from '#/renderer/stores/i18n.ts'
 import { Tip } from '#/renderer/components/Tip.tsx'
 import { Button } from '#/renderer/components/ui/button.tsx'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '#/renderer/components/ui/dropdown-menu.tsx'
 import { CreateWorktreeDialog, type CreateWorktreeRequest } from '#/renderer/components/CreateWorktreeDialog.tsx'
 import { RemotePortsPopover } from '#/renderer/components/repo-toolbar/RemotePortsPopover.tsx'
 import { RepoSyncControl } from '#/renderer/components/repo-sync/RepoSyncControl.tsx'
@@ -32,6 +39,9 @@ export function RepoToolbarActions({ repo }: Props) {
   const [createOpen, setCreateOpen] = useState(false)
   const branchActionBusy = resourceBusy(repo.resources.branchAction)
   const diagnosticsBusy = resourceBusy(repo.resources.diagnostics)
+  const checkoutRemoteBranches = repo.data.branches.filter(
+    (branch) => branch.remoteTracking && !branch.worktreePath && branch.name !== repo.data.currentBranch,
+  )
   const remoteRefreshBusy =
     resourceBusy(repo.resources.snapshot) ||
     resourceBusy(repo.resources.status) ||
@@ -62,9 +72,50 @@ export function RepoToolbarActions({ repo }: Props) {
     )
   }
 
+  async function handleCheckoutRemoteBranch(remoteBranch: string) {
+    const targetRepoId = repo.id
+    const token = repo.instanceToken
+    if (branchActionBusy) return
+    await runBranchAction(targetRepoId, { kind: 'checkoutRemoteBranch', remoteBranch }, { token })
+  }
+
   const createTip = t('action.create-worktree-title')
+  const checkoutTip = repo.kind === 'remote' ? t('action.checkout-on-server') : t('action.checkout-locally')
   const retryTip = t('action.retry-diagnostics')
   const remoteRefreshTip = t('action.refresh-remote-title')
+
+  function renderCheckoutRemoteBranches(buttonText: string) {
+    if (checkoutRemoteBranches.length === 0) return null
+    return (
+      <DropdownMenu>
+        <Tip label={checkoutTip}>
+          <span className="inline-flex">
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" disabled={branchActionBusy} aria-label={checkoutTip}>
+                <GitBranch />
+                {buttonText}
+                <ChevronDown />
+              </Button>
+            </DropdownMenuTrigger>
+          </span>
+        </Tip>
+        <DropdownMenuContent align="end">
+          {checkoutRemoteBranches.map((branch) => (
+            <DropdownMenuItem
+              key={branch.name}
+              disabled={branchActionBusy}
+              onClick={() => {
+                void handleCheckoutRemoteBranch(branch.name)
+              }}
+            >
+              <GitBranch />
+              {branch.name}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    )
+  }
 
   if (repo.kind === 'remote') {
     return (
@@ -85,6 +136,7 @@ export function RepoToolbarActions({ repo }: Props) {
             </Button>
           </span>
         </Tip>
+        {renderCheckoutRemoteBranches(t('action.checkout-on-server'))}
         <Tip label={createTip}>
           <span className="inline-flex">
             <Button
@@ -130,6 +182,7 @@ export function RepoToolbarActions({ repo }: Props) {
   return (
     <div className="flex items-center gap-1">
       <RepoSyncControl repo={repo} />
+      {renderCheckoutRemoteBranches(t('action.checkout-locally'))}
       <Tip label={createTip}>
         <span className="inline-flex">
           <Button

@@ -74,7 +74,7 @@ export function useBranchActionItems(repo: RepoState, branch: BranchInfo): Branc
     },
     {
       id: 'checkoutRemoteBranch',
-      label: t('action.checkout-locally'),
+      label: repo.kind === 'remote' ? t('action.checkout-on-server') : t('action.checkout-locally'),
       disabled,
       busy: busy('checkoutRemoteBranch'),
       visible: capabilities.canCheckoutRemoteBranch,

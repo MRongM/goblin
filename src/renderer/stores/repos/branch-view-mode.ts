@@ -15,6 +15,10 @@ export function branchMatchesViewMode(branch: BranchInfo, viewMode: BranchViewMo
   return true
 }
 
+function branchVisibleInMainList(branch: BranchInfo, viewMode: BranchViewMode): boolean {
+  return branch.remoteTracking !== true && branchMatchesViewMode(branch, viewMode)
+}
+
 function moveItem<T>(items: T[], from: number, to: number): T[] {
   const next = [...items]
   const [item] = next.splice(from, 1)
@@ -45,8 +49,7 @@ export function orderedBranches(branches: BranchInfo[], branchOrder: string[]): 
 
 export function visibleBranches(repo: RepoState): BranchInfo[] {
   const branches = orderedBranches(repo.data.branches, repo.ui.branchOrder)
-  if (repo.ui.branchViewMode === 'all') return branches
-  return branches.filter((branch) => branchMatchesViewMode(branch, repo.ui.branchViewMode))
+  return branches.filter((branch) => branchVisibleInMainList(branch, repo.ui.branchViewMode))
 }
 
 export function reorderedBranchOrder(
@@ -59,7 +62,7 @@ export function reorderedBranchOrder(
   if (fromBranch === toBranch) return branchOrder
   const allNames = completeBranchOrder(branches, branchOrder)
   const visibleNames = orderedBranches(branches, allNames)
-    .filter((branch) => branchMatchesViewMode(branch, viewMode))
+    .filter((branch) => branchVisibleInMainList(branch, viewMode))
     .map((branch) => branch.name)
   const from = visibleNames.indexOf(fromBranch)
   const to = visibleNames.indexOf(toBranch)
@@ -82,7 +85,7 @@ export function selectedBranchForBranchSet({
   viewMode,
   branchOrder = [],
 }: BranchSelectionInput): string | null {
-  const visible = orderedBranches(branches, branchOrder).filter((branch) => branchMatchesViewMode(branch, viewMode))
+  const visible = orderedBranches(branches, branchOrder).filter((branch) => branchVisibleInMainList(branch, viewMode))
   if (selectedBranch && visible.some((branch) => branch.name === selectedBranch)) return selectedBranch
   return visible.find((branch) => branch.name === currentBranch)?.name ?? visible[0]?.name ?? null
 }

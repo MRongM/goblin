@@ -208,7 +208,7 @@ export function useBranchActions(repo: RepoState, branch: BranchInfo) {
   }
 
   const isCurrent = branch.name === repo.data.currentBranch
-  const isRemoteTrackingBranch = repo.kind !== 'remote' && branch.remoteTracking === true
+  const isRemoteTrackingBranch = branch.remoteTracking === true
   const checkedOutInAnotherWorktree = !!branch.worktreePath && !isCurrent
   const canRemoveWorktree = checkedOutInAnotherWorktree && !branch.worktreeIsPrimary
   const isProtected = PROTECTED_BRANCHES.has(branch.name)

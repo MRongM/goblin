@@ -6,6 +6,7 @@ import { getWorkingStatus } from '#/main/git/status.ts'
 import { resolveRemovableWorktree } from '#/main/git/guards.ts'
 import {
   checkoutRemoteBranch,
+  checkoutRemoteTrackingBranchOnRemote,
   createRemoteWorktree,
   deleteRemoteBranch,
   fetchRemoteRepository,
@@ -224,6 +225,7 @@ vi.mock('#/main/ssh/diagnostics.ts', () => ({
 
 vi.mock('#/main/ssh/git.ts', () => ({
   checkoutRemoteBranch: vi.fn(() => ({ ok: true, message: 'checked out' })),
+  checkoutRemoteTrackingBranchOnRemote: vi.fn(() => ({ ok: true, message: 'checked out on server' })),
   createRemoteWorktree: vi.fn(() => ({ ok: true, message: 'created' })),
   deleteRemoteBranch: vi.fn(() => ({ ok: true, message: 'deleted' })),
   fetchRemoteRepository: vi.fn(() => ({ ok: true, message: 'fetched' })),
@@ -582,6 +584,9 @@ describe('main repo rpc cancellation', () => {
     await expect(invokeRpc('remote.checkout', { target: REMOTE_TARGET, branch: 'feature/x' })).resolves.toMatchObject({
       ok: true,
     })
+    await expect(
+      invokeRpc('remote.checkoutRemoteBranch', { target: REMOTE_TARGET, remoteBranch: 'origin/feature/x' }),
+    ).resolves.toEqual({ ok: true, data: { ok: true, message: 'checked out on server' } })
     await expect(invokeRpc('remote.push', { target: REMOTE_TARGET, branch: 'feature/x' })).resolves.toMatchObject({
       ok: true,
     })
@@ -598,6 +603,11 @@ describe('main repo rpc cancellation', () => {
       expect.objectContaining({ id: REMOTE_TARGET.id }),
       'feature/x',
       undefined,
+      { signal: expect.any(AbortSignal) },
+    )
+    expect(checkoutRemoteTrackingBranchOnRemote).toHaveBeenCalledWith(
+      expect.objectContaining({ id: REMOTE_TARGET.id }),
+      'origin/feature/x',
       { signal: expect.any(AbortSignal) },
     )
     expect(pushRemoteBranch).toHaveBeenCalledWith(expect.objectContaining({ id: REMOTE_TARGET.id }), 'feature/x', {
@@ -624,6 +634,20 @@ describe('main repo rpc cancellation', () => {
 
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.error.code).toBe('BAD_REQUEST')
+  })
+
+  test('rejects invalid remote tracking checkout inputs before handler execution', async () => {
+    const result = await invokeRpc('remote.checkoutRemoteBranch', {
+      target: REMOTE_TARGET,
+      remoteBranch: 'origin/bad branch',
+    })
+
+    expect(result).toEqual({ ok: true, data: { ok: false, message: 'error.invalid-arguments' } })
+    expect(checkoutRemoteTrackingBranchOnRemote).not.toHaveBeenCalledWith(
+      expect.objectContaining({ id: REMOTE_TARGET.id }),
+      'origin/bad branch',
+      expect.anything(),
+    )
   })
 
   test('routes local remote tracking checkout through typed repo RPC', async () => {

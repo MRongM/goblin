@@ -312,6 +312,7 @@ export const en = {
   // ---- Repo actions -------------------------------------------------------
   'action.checkout': 'Checkout',
   'action.checkout-locally': 'Checkout locally',
+  'action.checkout-on-server': 'Checkout on server',
   'action.pull': 'Pull',
   'action.push': 'Push',
   'action.fetch': 'Fetch',

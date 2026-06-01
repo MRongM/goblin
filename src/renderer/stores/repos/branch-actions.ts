@@ -92,7 +92,10 @@ function runBranchActionRpc(action: RepoBranchAction, repo: RepoState, signal?: 
       case 'checkout':
         return rpc.remote.checkout.mutate({ target: repo.remoteTarget, branch: action.branch }, { signal })
       case 'checkoutRemoteBranch':
-        return Promise.resolve({ ok: false, message: 'error.invalid-arguments' })
+        return rpc.remote.checkoutRemoteBranch.mutate(
+          { target: repo.remoteTarget, remoteBranch: action.remoteBranch },
+          { signal },
+        )
       case 'pull':
         return rpc.remote.pull.mutate(
           { target: repo.remoteTarget, branch: action.branch, worktreePath: action.worktreePath },

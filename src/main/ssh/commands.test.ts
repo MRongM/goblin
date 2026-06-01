@@ -178,6 +178,12 @@ describe('remote ssh command runner', () => {
       path: "/srv/team's app",
       branch: 'feature/x',
     })
+    const checkoutRemoteTracking = buildRemoteCommandInvocation(MANUAL_TARGET, {
+      type: 'gitCheckoutRemoteTracking',
+      path: "/srv/team's app",
+      remoteBranch: "origin/feature/quote's",
+      localBranch: "feature/quote's",
+    })
     const push = buildRemoteCommandInvocation(MANUAL_TARGET, {
       type: 'gitPush',
       path: '/srv/goblin',
@@ -197,6 +203,9 @@ describe('remote ssh command runner', () => {
 
     expect(fetchAll.script).toBe("git -C '/srv/team'\\''s app' fetch --all --prune")
     expect(checkout.script).toBe("git -C '/srv/team'\\''s app' switch -- 'feature/x'")
+    expect(checkoutRemoteTracking.script).toBe(
+      "git -C '/srv/team'\\''s app' switch -c 'feature/quote'\\''s' --track 'origin/feature/quote'\\''s'",
+    )
     expect(push.script).toBe("git -C '/srv/goblin' push -u origin 'feature/quote'\\''s'")
     expect(currentPull.script).toBe("git -C '/srv/goblin-feature-x' pull --ff-only")
     expect(fetchBranch.script).toBe("git -C '/srv/goblin' fetch -- 'origin' 'feature/x:feature/x'")

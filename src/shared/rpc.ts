@@ -253,6 +253,7 @@ export interface AppRpcHandlers {
     log: (input: { target: RemoteRepoTarget; branch: string; count?: number; skip?: number }) => Promise<LogEntry[]>
     patch: (input: { target: RemoteRepoTarget; worktreePath: string }) => Promise<ExecResult>
     checkout: (input: { target: RemoteRepoTarget; branch: string; worktreePath?: string }) => Promise<ExecResult>
+    checkoutRemoteBranch: (input: { target: RemoteRepoTarget; remoteBranch: string }) => Promise<ExecResult>
     pull: (input: { target: RemoteRepoTarget; branch: string; worktreePath?: string }) => Promise<ExecResult>
     push: (input: { target: RemoteRepoTarget; branch: string }) => Promise<ExecResult>
     createWorktree: (input: {
@@ -524,6 +525,9 @@ export function createAppRouter(handlers: AppRpcHandlers) {
       checkout: p
         .input(v.object({ target: RemoteTargetSchema, branch: v.string(), worktreePath: v.optional(RemoteAbsolutePath) }))
         .mutation(({ input }) => handlers.remote.checkout(input)),
+      checkoutRemoteBranch: p
+        .input(v.object({ target: RemoteTargetSchema, remoteBranch: v.string() }))
+        .mutation(({ input }) => handlers.remote.checkoutRemoteBranch(input)),
       pull: p
         .input(v.object({ target: RemoteTargetSchema, branch: v.string(), worktreePath: v.optional(RemoteAbsolutePath) }))
         .mutation(({ input }) => handlers.remote.pull(input)),

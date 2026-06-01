@@ -51,6 +51,42 @@ describe('remote git snapshot', () => {
     await expect(getRemoteSnapshot(TARGET, { run })).resolves.toEqual({ branches: [], current: '' })
   })
 
+  test('includes remote tracking branches that do not already have local branches', async () => {
+    const { getRemoteSnapshot } = await import('#/main/ssh/git.ts')
+    const run = vi.fn(async (command) => {
+      if (command.type === 'gitSnapshot') {
+        return {
+          ok: true,
+          stderr: '',
+          stdout: [
+            '__GOBLIN_REMOTE_CURRENT__',
+            'main',
+            '__GOBLIN_REMOTE_DEFAULT__',
+            'main',
+            '__GOBLIN_REMOTE_BRANCHES__',
+            ['main', 'abc1234', 'initial commit', '2026-05-28T10:00:00Z', 'Ada', 'origin/main', ''].join(FIELD_SEP),
+            ['feature/x', 'def5678', 'feature work', '2026-05-28T11:00:00Z', 'Lin', '', ''].join(FIELD_SEP),
+            '__GOBLIN_REMOTE_TRACKING_BRANCHES__',
+            ['origin/HEAD', 'abc1234', 'origin head', '2026-05-28T10:00:00Z', 'Ada', '', ''].join(FIELD_SEP),
+            ['origin/feature/x', 'def5678', 'existing local', '2026-05-28T11:00:00Z', 'Lin', '', ''].join(FIELD_SEP),
+            ['origin/feature/y', 'fed9876', 'remote only', '2026-05-28T12:00:00Z', 'Grace', '', ''].join(FIELD_SEP),
+          ].join('\n'),
+        }
+      }
+      return { ok: true, stderr: '', stdout: '' }
+    })
+
+    const snapshot = await getRemoteSnapshot(TARGET, { run })
+
+    expect(snapshot?.branches.map((branch) => branch.name)).toEqual(['main', 'feature/x', 'origin/feature/y'])
+    expect(snapshot?.branches.find((branch) => branch.name === 'origin/feature/y')).toMatchObject({
+      remoteTracking: true,
+      remoteName: 'origin',
+      localName: 'feature/y',
+      isCurrent: false,
+    })
+  })
+
   test('remote snapshot merges worktree metadata and dirty counts', async () => {
     const { getRemoteSnapshot } = await import('#/main/ssh/git.ts')
     const run = vi.fn(async (command) => {
@@ -229,6 +265,42 @@ describe('remote git branch actions', () => {
       TARGET,
       { signal: undefined, timeoutMs: 180_000 },
     )
+  })
+
+  test('checks out a remote tracking branch on the SSH host repository path', async () => {
+    const { checkoutRemoteTrackingBranchOnRemote } = await import('#/main/ssh/git.ts')
+    const run = vi.fn(async () => ({ ok: true, stdout: 'branch set up', stderr: '' }))
+
+    await expect(checkoutRemoteTrackingBranchOnRemote(TARGET, 'origin/feature/x', { run })).resolves.toEqual({
+      ok: true,
+      message: 'branch set up',
+    })
+
+    expect(run).toHaveBeenCalledWith(
+      {
+        type: 'gitCheckoutRemoteTracking',
+        path: '/srv/goblin',
+        remoteBranch: 'origin/feature/x',
+        localBranch: 'feature/x',
+      },
+      TARGET,
+      { signal: undefined, timeoutMs: 180_000 },
+    )
+  })
+
+  test('rejects malformed remote tracking branch checkout refs', async () => {
+    const { checkoutRemoteTrackingBranchOnRemote } = await import('#/main/ssh/git.ts')
+    const run = vi.fn()
+
+    await expect(checkoutRemoteTrackingBranchOnRemote(TARGET, 'origin/HEAD', { run })).resolves.toEqual({
+      ok: false,
+      message: 'error.invalid-arguments',
+    })
+    await expect(checkoutRemoteTrackingBranchOnRemote(TARGET, 'feature', { run })).resolves.toEqual({
+      ok: false,
+      message: 'error.invalid-arguments',
+    })
+    expect(run).not.toHaveBeenCalled()
   })
 
   test('pushes a branch from the remote repository path', async () => {

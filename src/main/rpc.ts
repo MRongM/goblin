@@ -86,6 +86,7 @@ import { listSshConfigHosts, resolveRemoteTarget as resolveSshRemoteTarget } fro
 import { testRemoteRepository } from '#/main/ssh/diagnostics.ts'
 import {
   checkoutRemoteBranch,
+  checkoutRemoteTrackingBranchOnRemote,
   createRemoteWorktree,
   deleteRemoteBranch,
   fetchRemoteRepository,
@@ -507,6 +508,15 @@ function createRpcHandlers(): AppRpcHandlers {
         const normalized = normalizedRemoteTargetOrThrow(target)
         return runCancellable(normalized.id, 'user', (signal) =>
           checkoutRemoteBranch(normalized, branch, worktreePath, { signal }),
+        )
+      },
+      checkoutRemoteBranch: async ({ target, remoteBranch }) => {
+        if (!isValidBranch(remoteBranch) || !remoteBranch.includes('/')) {
+          return { ok: false, message: 'error.invalid-arguments' }
+        }
+        const normalized = normalizedRemoteTargetOrThrow(target)
+        return runCancellable(normalized.id, 'user', (signal) =>
+          checkoutRemoteTrackingBranchOnRemote(normalized, remoteBranch, { signal }),
         )
       },
       pull: async ({ target, branch, worktreePath }) => {

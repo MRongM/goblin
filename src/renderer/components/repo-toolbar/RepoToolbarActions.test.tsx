@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, test, vi } from 'vitest'
 import { RepoToolbarActions } from '#/renderer/components/repo-toolbar/RepoToolbarActions.tsx'
 import { emptyRepo } from '#/renderer/stores/repos/helpers.ts'
+import { createBranch, installGoblinTestBridge } from '#/renderer/stores/repos/test-utils.ts'
 
 vi.mock('#/renderer/stores/i18n.ts', () => ({
   useT: () => (key: string) => key,
@@ -44,5 +45,53 @@ describe('RepoToolbarActions', () => {
     expect(html).not.toContain('action.fetch')
     expect(html).toContain('action.create-worktree')
     expect(html).toContain('action.retry')
+  })
+
+  test('shows checkout locally when local remote tracking branches are available', () => {
+    installGoblinTestBridge({})
+    const repo = emptyRepo('/tmp/goblin', 'goblin')
+    repo.data.currentBranch = 'main'
+    repo.data.branches = [
+      createBranch('main', { worktreePath: '/tmp/goblin' }),
+      createBranch('origin/feature/x', {
+        remoteTracking: true,
+        remoteName: 'origin',
+        localName: 'feature/x',
+      }),
+    ]
+    repo.ui.selectedBranch = 'main'
+
+    const html = renderToStaticMarkup(<RepoToolbarActions repo={repo} />)
+
+    expect(html).toContain('action.checkout-locally')
+  })
+
+  test('shows server checkout when remote repository tracking branches are available', () => {
+    installGoblinTestBridge({})
+    const repo = emptyRepo('ssh://deploy@prod:22/srv/goblin', 'prod:goblin', {
+      kind: 'remote',
+      remoteTarget: {
+        id: 'ssh://deploy@prod:22/srv/goblin',
+        alias: null,
+        host: 'prod',
+        user: 'deploy',
+        port: 22,
+        remotePath: '/srv/goblin',
+        displayName: 'prod:goblin',
+      },
+    })
+    repo.data.currentBranch = 'main'
+    repo.data.branches = [
+      createBranch('main', { worktreePath: '/srv/goblin' }),
+      createBranch('origin/feature/x', {
+        remoteTracking: true,
+        remoteName: 'origin',
+        localName: 'feature/x',
+      }),
+    ]
+
+    const html = renderToStaticMarkup(<RepoToolbarActions repo={repo} />)
+
+    expect(html).toContain('action.checkout-on-server')
   })
 })

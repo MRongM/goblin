@@ -302,6 +302,7 @@ export const zh: Record<DictKey, string> = {
   // ---- Repo actions ------------------------------------------------------
   'action.checkout': '切换',
   'action.checkout-locally': '检出到本地',
+  'action.checkout-on-server': '检出到服务器',
   'action.pull': '拉取',
   'action.push': '推送',
   'action.fetch': '同步',

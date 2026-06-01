@@ -37,6 +37,15 @@ function repo(overrides: RepoOverrides = {}): RepoState {
   }
 }
 
+function remoteTrackingBranch(name: string): BranchInfo {
+  const slash = name.indexOf('/')
+  return branch(name, {
+    remoteTracking: true,
+    remoteName: slash > 0 ? name.slice(0, slash) : undefined,
+    localName: slash > 0 ? name.slice(slash + 1) : undefined,
+  })
+}
+
 describe('branchMatchesViewMode', () => {
   test('matches worktree and no-worktree view modes from worktreePath', () => {
     const worktree = branch('feature/worktree', { worktreePath: '/tmp/feature-worktree' })
@@ -96,6 +105,42 @@ describe('visibleBranches', () => {
       ).map((b) => b.name),
     ).toEqual(['feature/wt', 'main'])
   })
+
+  test('hides remote-tracking branches from every branch list view mode', () => {
+    const branches = [
+      branch('main', { worktreePath: '/repo' }),
+      branch('feature/plain'),
+      remoteTrackingBranch('origin/feature/x'),
+    ]
+
+    expect(visibleBranches(repo({ branches, branchViewMode: 'all' })).map((b) => b.name)).toEqual([
+      'main',
+      'feature/plain',
+    ])
+    expect(visibleBranches(repo({ branches, branchViewMode: 'worktrees' })).map((b) => b.name)).toEqual(['main'])
+    expect(visibleBranches(repo({ branches, branchViewMode: 'no-worktree' })).map((b) => b.name)).toEqual([
+      'feature/plain',
+    ])
+  })
+
+  test('manual order ignores hidden remote-tracking branches in the visible list', () => {
+    const branches = [
+      branch('main'),
+      remoteTrackingBranch('origin/feature/x'),
+      branch('feature/a'),
+      branch('feature/b'),
+    ]
+
+    expect(
+      visibleBranches(
+        repo({
+          branches,
+          branchViewMode: 'all',
+          branchOrder: ['origin/feature/x', 'feature/b', 'main', 'feature/a'],
+        }),
+      ).map((b) => b.name),
+    ).toEqual(['feature/b', 'main', 'feature/a'])
+  })
 })
 
 describe('selectedBranchForViewMode', () => {
@@ -153,6 +198,31 @@ describe('selectedBranchForBranchSet', () => {
         branches,
         currentBranch: 'main',
         selectedBranch: 'deleted-branch',
+        viewMode: 'no-worktree',
+      }),
+    ).toBe('feature/plain')
+  })
+
+  test('falls back when the selected branch is a hidden remote-tracking branch', () => {
+    const branches = [
+      branch('main', { worktreePath: '/repo' }),
+      branch('feature/plain'),
+      remoteTrackingBranch('origin/feature/x'),
+    ]
+
+    expect(
+      selectedBranchForBranchSet({
+        branches,
+        currentBranch: 'main',
+        selectedBranch: 'origin/feature/x',
+        viewMode: 'all',
+      }),
+    ).toBe('main')
+    expect(
+      selectedBranchForBranchSet({
+        branches,
+        currentBranch: 'main',
+        selectedBranch: 'origin/feature/x',
         viewMode: 'no-worktree',
       }),
     ).toBe('feature/plain')

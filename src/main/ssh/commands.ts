@@ -9,6 +9,7 @@ const SSH_CONNECT_TIMEOUT_SEC = 10
 export const REMOTE_SNAPSHOT_CURRENT_MARKER = '__GOBLIN_REMOTE_CURRENT__'
 export const REMOTE_SNAPSHOT_DEFAULT_MARKER = '__GOBLIN_REMOTE_DEFAULT__'
 export const REMOTE_SNAPSHOT_BRANCHES_MARKER = '__GOBLIN_REMOTE_BRANCHES__'
+export const REMOTE_SNAPSHOT_TRACKING_BRANCHES_MARKER = '__GOBLIN_REMOTE_TRACKING_BRANCHES__'
 
 export type RemoteCommandKind =
   | { type: 'printHome' }
@@ -26,6 +27,7 @@ export type RemoteCommandKind =
   | { type: 'gitStatusAll'; path: string }
   | { type: 'gitDiffNoIndex'; path: string; filePath: string }
   | { type: 'gitCheckout'; path: string; branch: string }
+  | { type: 'gitCheckoutRemoteTracking'; path: string; remoteBranch: string; localBranch: string }
   | { type: 'gitPullCurrent'; path: string }
   | { type: 'gitFetchBranch'; path: string; remote: string; remoteBranch: string; branch: string }
   | { type: 'gitPush'; path: string; branch: string }
@@ -157,6 +159,8 @@ function scriptForCommand(command: RemoteCommandKind): string {
         `git -C ${repo} symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##'`,
         `printf '%s\\n' ${shellQuote(REMOTE_SNAPSHOT_BRANCHES_MARKER)}`,
         `git -C ${repo} for-each-ref --format=${shellQuote(branchFormat)} refs/heads/`,
+        `printf '%s\\n' ${shellQuote(REMOTE_SNAPSHOT_TRACKING_BRANCHES_MARKER)}`,
+        `git -C ${repo} for-each-ref --format=${shellQuote(branchFormat)} refs/remotes/`,
       ].join('\n')
     }
     case 'gitPatch':
@@ -188,6 +192,10 @@ function scriptForCommand(command: RemoteCommandKind): string {
     }
     case 'gitCheckout':
       return `git -C ${shellQuote(command.path)} switch -- ${shellQuote(command.branch)}`
+    case 'gitCheckoutRemoteTracking':
+      return `git -C ${shellQuote(command.path)} switch -c ${shellQuote(command.localBranch)} --track ${shellQuote(
+        command.remoteBranch,
+      )}`
     case 'gitFetchAll':
       return `git -C ${shellQuote(command.path)} fetch --all --prune`
     case 'gitPullCurrent':
