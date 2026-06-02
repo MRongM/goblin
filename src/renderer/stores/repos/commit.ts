@@ -14,7 +14,7 @@ export function createCommitActions(set: ReposSet, get: ReposGet) {
     async openCommit(id: string, hash: string) {
       const repoBefore = get().repos[id]
       if (!repoBefore) return
-      if (repoBefore.kind === 'remote') return
+      if (repoBefore.kind === 'remote' && !repoBefore.remoteTarget) return
       if (repoBefore.availability.phase === 'unavailable') return
       const token = repoBefore.instanceToken
       set((s) => {
@@ -29,7 +29,10 @@ export function createCommitActions(set: ReposSet, get: ReposGet) {
         return { repos: { ...s.repos, [id]: nextRepo }, detailCollapsed }
       })
       try {
-        const detail = await rpc.repo.commit.query({ cwd: id, hash })
+        const detail =
+          repoBefore.kind === 'remote'
+            ? await rpc.remote.commit.query({ target: repoBefore.remoteTarget!, hash })
+            : await rpc.repo.commit.query({ cwd: id, hash })
         updateIfFresh(set, id, token, (r) => {
           if (r.ui.commitDetail.phase !== 'opening' || r.ui.commitDetail.hash !== hash) return
           r.ui.commitDetail = detail ? { phase: 'open', detail } : { phase: 'idle' }

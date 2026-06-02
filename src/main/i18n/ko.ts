@@ -205,6 +205,8 @@ export const ko: Record<DictKey, string> = {
   'branches.gone': '원격 사라짐',
   'branches.dirty': '변경',
   'branches.worktree': '워크트리',
+  'branches.source-exact': '{branch}에서',
+  'branches.source-inferred': '{branch}에서 추정',
   'branches.default': '기본',
   'branches.no-upstream': '업스트림 없음',
 
@@ -375,7 +377,7 @@ export const ko: Record<DictKey, string> = {
   'action.refresh': '새로 고침',
   'action.refresh-title': 'git branch · git status · git log',
   'action.refresh-remote': '원격 데이터 새로 고침',
-  'action.refresh-remote-title': 'SSH 로 브랜치, 상태, 표시 중인 로그 새로 고침',
+  'action.refresh-remote-title': 'SSH 로 브랜치, 상태, 표시 중인 로그 동기화 및 새로 고침',
 
   // ---- Remote ports -----------------------------------------------------
   'remote-ports.button': '포트',

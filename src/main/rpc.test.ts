@@ -5,6 +5,7 @@ import {
   getDefaultBranch,
   isAncestor,
   getCurrentBranch,
+  getWorktreeSourceInferences,
   getUpstream,
   isGitRepo,
 } from '#/main/git/branches.ts'
@@ -20,7 +21,9 @@ import {
   createRemoteWorktree,
   deleteRemoteBranch,
   fetchRemoteRepository,
+  getRemoteCommitDetail,
   getRemoteGitHubUrl,
+  getRemoteWorktreeSourceInferences,
   pushRemoteBranch,
 } from '#/main/ssh/git.ts'
 import {
@@ -77,6 +80,7 @@ vi.mock('#/main/git/branches.ts', () => ({
   getLog: vi.fn(),
   getRepoName: vi.fn(),
   getRepoRoot: vi.fn(() => '/repo'),
+  getWorktreeSourceInferences: vi.fn(() => []),
   getUpstream: vi.fn(),
   isAncestor: vi.fn(),
   isGitRepo: vi.fn(),
@@ -287,11 +291,25 @@ vi.mock('#/main/ssh/git.ts', () => ({
   createRemoteWorktree: vi.fn(() => ({ ok: true, message: 'created' })),
   deleteRemoteBranch: vi.fn(() => ({ ok: true, message: 'deleted' })),
   fetchRemoteRepository: vi.fn(() => ({ ok: true, message: 'fetched' })),
+  getRemoteCommitDetail: vi.fn(() => ({
+    meta: {
+      hash: 'abc1234',
+      shortHash: 'abc1234',
+      subject: 'Subject',
+      body: '',
+      author: 'Ada',
+      email: 'ada@example.com',
+      date: '2026-05-28T10:00:00Z',
+      parents: [],
+    },
+    files: [],
+  })),
   getRemoteGitHubUrl: vi.fn(() => 'https://github.com/nano-props/goblin/pull/new/feature/x'),
   getRemoteLog: vi.fn(() => []),
   getRemotePatch: vi.fn(() => ({ ok: true, message: 'patch' })),
   getRemoteSnapshot: vi.fn(() => ({ branches: [], current: '' })),
   getRemoteStatus: vi.fn(() => []),
+  getRemoteWorktreeSourceInferences: vi.fn(() => []),
   pullRemoteBranch: vi.fn(() => ({ ok: true, message: 'pulled' })),
   pushRemoteBranch: vi.fn(() => ({ ok: true, message: 'pushed' })),
   removeRemoteWorktree: vi.fn(() => ({ ok: true, message: 'removed' })),
@@ -712,6 +730,49 @@ describe('main repo rpc cancellation', () => {
     ).resolves.toMatchObject({ ok: true })
   })
 
+  test('exposes worktree source inference procedures for local and remote repositories', async () => {
+    vi.mocked(getWorktreeSourceInferences).mockResolvedValue([{ branch: 'feature/x', sourceBranch: 'main' }])
+    vi.mocked(getRemoteWorktreeSourceInferences).mockResolvedValue([{ branch: 'feature/y', sourceBranch: 'main' }])
+
+    await expect(
+      invokeRpc('repo.worktreeSourceInferences', { cwd: '/repo', branches: ['feature/x', 'bad branch'] }),
+    ).resolves.toEqual({ ok: true, data: [{ branch: 'feature/x', sourceBranch: 'main' }] })
+    await expect(
+      invokeRpc('remote.worktreeSourceInferences', { target: REMOTE_TARGET, branches: ['feature/y'] }),
+    ).resolves.toEqual({ ok: true, data: [{ branch: 'feature/y', sourceBranch: 'main' }] })
+
+    expect(getWorktreeSourceInferences).toHaveBeenCalledWith('/repo', ['feature/x'], { signal: undefined })
+    expect(getRemoteWorktreeSourceInferences).toHaveBeenCalledWith(
+      expect.objectContaining({ id: REMOTE_TARGET.id }),
+      ['feature/y'],
+      { signal: undefined },
+    )
+  })
+
+  test('exposes typed remote commit detail procedure', async () => {
+    await expect(invokeRpc('remote.commit', { target: REMOTE_TARGET, hash: 'abc1234' })).resolves.toEqual({
+      ok: true,
+      data: {
+        meta: {
+          hash: 'abc1234',
+          shortHash: 'abc1234',
+          subject: 'Subject',
+          body: '',
+          author: 'Ada',
+          email: 'ada@example.com',
+          date: '2026-05-28T10:00:00Z',
+          parents: [],
+        },
+        files: [],
+      },
+    })
+    expect(getRemoteCommitDetail).toHaveBeenCalledWith(
+      expect.objectContaining({ id: REMOTE_TARGET.id }),
+      'abc1234',
+      { signal: undefined },
+    )
+  })
+
   test('exposes typed remote fetch procedure', async () => {
     await expect(invokeRpc('remote.fetch', { target: REMOTE_TARGET, kind: 'background' })).resolves.toEqual({
       ok: true,
@@ -826,7 +887,12 @@ describe('main repo rpc cancellation', () => {
     vi.mocked(openHttpsExternal).mockResolvedValueOnce(true)
 
     await expect(
-      invokeRpc('remote.deleteBranch', { target: REMOTE_TARGET, branch: 'feature/x', force: false }),
+      invokeRpc('remote.deleteBranch', {
+        target: REMOTE_TARGET,
+        branch: 'feature/x',
+        force: false,
+        alsoDeleteUpstream: true,
+      }),
     ).resolves.toEqual({ ok: true, data: { ok: true, message: 'deleted' } })
     await expect(invokeRpc('remote.openGitHub', { target: REMOTE_TARGET, branch: 'feature/x' })).resolves.toEqual({
       ok: true,
@@ -835,7 +901,12 @@ describe('main repo rpc cancellation', () => {
 
     expect(deleteRemoteBranch).toHaveBeenCalledWith(
       expect.objectContaining({ id: REMOTE_TARGET.id }),
-      expect.objectContaining({ branch: 'feature/x', force: false, signal: expect.any(AbortSignal) }),
+      expect.objectContaining({
+        branch: 'feature/x',
+        force: false,
+        alsoDeleteUpstream: true,
+        signal: expect.any(AbortSignal),
+      }),
     )
     expect(getRemoteGitHubUrl).toHaveBeenCalledWith(
       expect.objectContaining({ id: REMOTE_TARGET.id }),

@@ -26,6 +26,7 @@ import type { RepoEventAction, RepoState, ReposGet, ReposSet } from '#/renderer/
 import type { ExecResult } from '#/renderer/types.ts'
 import { runBranchActionRefreshWorkflow } from '#/renderer/stores/repos/refresh-workflows.ts'
 import { rpc } from '#/renderer/rpc.ts'
+import { upsertExactWorktreeSource } from '#/renderer/stores/repos/worktree-sources.ts'
 
 const BRANCH_NETWORK_OPERATION_KEY = 'branch-network-action'
 const BRANCH_ACTION_WAIT_TIMEOUT_MS = 30_000
@@ -190,7 +191,12 @@ function runBranchActionRpc(action: RepoBranchAction, repo: RepoState, signal?: 
         )
       case 'deleteBranch':
         return rpc.remote.deleteBranch.mutate(
-          { target: repo.remoteTarget, branch: action.branch, force: action.force },
+          {
+            target: repo.remoteTarget,
+            branch: action.branch,
+            force: action.force,
+            alsoDeleteUpstream: action.alsoDeleteUpstream,
+          },
           { signal },
         )
       case 'removeWorktree':
@@ -201,6 +207,7 @@ function runBranchActionRpc(action: RepoBranchAction, repo: RepoState, signal?: 
             worktreePath: action.worktreePath,
             alsoDeleteBranch: action.alsoDeleteBranch,
             forceDeleteBranch: action.forceDeleteBranch,
+            alsoDeleteUpstream: action.alsoDeleteUpstream,
           },
           { signal },
         )
@@ -297,6 +304,19 @@ export function createBranchActions(set: ReposSet, get: ReposGet) {
         if (result.message === 'cancelled') return
         if (options?.deferResultMessages?.includes(result.message)) return
         get().setLastResult(id, result, token, { action: branchActionEventAction(action) })
+        if (result.ok && action.kind === 'createWorktree') {
+          set((s) => {
+            const repo = s.repos[id]
+            if (!repo || repo.instanceToken !== token) return s
+            return {
+              worktreeSourcesByRepo: upsertExactWorktreeSource(s.worktreeSourcesByRepo, id, {
+                branch: action.newBranch,
+                worktreePath: action.worktreePath,
+                sourceBranch: action.baseBranch,
+              }),
+            }
+          })
+        }
         if (!result.ok && result.message === 'error.network-op-in-progress') return
         if (!result.ok && result.message === BRANCH_ACTION_WAIT_TIMEOUT_MESSAGE) return
         if (result.ok || options?.refreshOnError !== false) {

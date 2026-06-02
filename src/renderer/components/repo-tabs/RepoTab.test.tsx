@@ -89,4 +89,28 @@ describe('RepoTab', () => {
     expect(html).toContain('bg-danger')
     expect(html).toContain('connection refused')
   })
+
+  test('renders unread terminal bell count on the project tab', () => {
+    const html = renderToStaticMarkup(
+      <RepoTab
+        repo={{
+          id: '/tmp/repo',
+          name: 'repo',
+          unreadBellCount: 2,
+        }}
+        isActive
+        showSeparator={false}
+        onHoverChange={() => {}}
+        onActivate={() => {}}
+        onClose={() => {}}
+        onKeyboardNavigate={() => {}}
+        closeLabel="Close"
+        bellUnreadLabel="2 unread bell"
+      />,
+    )
+
+    expect(html).toContain('data-variant="attention"')
+    expect(html).toContain('2 unread bell')
+    expect(html).toContain('>2</span>')
+  })
 })

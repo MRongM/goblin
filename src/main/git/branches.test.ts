@@ -10,11 +10,13 @@ import {
   getBranches,
   getLog,
   getUpstream,
+  getWorktreeSourceInferences,
   isAncestor,
   markDefaultBranch,
   markMergedToDefault,
   prioritizeDefaultBranch,
 } from '#/main/git/branches.ts'
+import { inferWorktreeSourceFromReflogMessages } from '#/shared/worktree-source.ts'
 import type { BranchSnapshotInfo } from '#/shared/git-types.ts'
 
 let templateRepo: string | null = null
@@ -174,6 +176,30 @@ describe('branch write operations', () => {
     const result = await isAncestor(repo, 'main', 'HEAD', abortedSignal())
 
     expect(result).toBe(false)
+  })
+})
+
+describe('worktree source inference', () => {
+  test('parses clear branch creation reflog messages', () => {
+    expect(inferWorktreeSourceFromReflogMessages('feature/x', 'commit: work\nbranch: Created from main')).toEqual({
+      branch: 'feature/x',
+      sourceBranch: 'main',
+    })
+    expect(inferWorktreeSourceFromReflogMessages('feature/x', 'branch: Created from refs/heads/main')).toEqual({
+      branch: 'feature/x',
+      sourceBranch: 'main',
+    })
+    expect(inferWorktreeSourceFromReflogMessages('feature/x', 'branch: Created from feature/x')).toBeNull()
+    expect(inferWorktreeSourceFromReflogMessages('feature/x', 'branch: Created from bad branch')).toBeNull()
+  })
+
+  test('infers local branch source from git reflog', async () => {
+    const repo = createRepo()
+    runGit(repo, ['branch', 'feature/source', 'main'])
+
+    await expect(getWorktreeSourceInferences(repo, ['feature/source'])).resolves.toEqual([
+      { branch: 'feature/source', sourceBranch: 'main' },
+    ])
   })
 })
 

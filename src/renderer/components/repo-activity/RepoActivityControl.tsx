@@ -62,7 +62,7 @@ function RepoActivityControlView({ repo }: { repo: RepoState }) {
     visibleActivity: showingActivity ? visibleActivity : null,
     completion,
     syncBlocked,
-    localOnly: repo.remote.hasRemotes === false,
+    localOnly: repo.kind !== 'remote' && repo.remote.hasRemotes === false,
   })
 
   switch (view.kind) {
@@ -128,6 +128,13 @@ function useRepoCompletion(repoId: string): RepoCompletion | null {
 function RepoRefreshButton({ repo, syncBlocked }: { repo: RepoState; syncBlocked: boolean }) {
   const t = useT()
   const syncAndRefresh = useReposStore((s) => s.syncAndRefresh)
+  const remote = repo.kind === 'remote'
+  const labelKey = remote ? 'action.refresh-remote' : 'action.refresh'
+  const titleKey = remote
+    ? 'action.refresh-remote-title'
+    : repo.remote.hasRemotes === false
+      ? 'action.fetch-local-title'
+      : 'action.fetch-title'
 
   async function handleSync() {
     const token = repo.instanceToken
@@ -136,12 +143,12 @@ function RepoRefreshButton({ repo, syncBlocked }: { repo: RepoState; syncBlocked
   }
 
   return (
-    <Tip label={t(repo.remote.hasRemotes === false ? 'action.fetch-local-title' : 'action.fetch-title')}>
-      <AsyncButton variant="ghost" onClick={handleSync}>
+    <Tip label={t(titleKey)}>
+      <AsyncButton variant="ghost" aria-label={t(titleKey)} onClick={handleSync}>
         {({ busy }) => (
           <>
             <RotateCw className={busy ? 'animate-spin' : ''} />
-            {t('action.refresh')}
+            {t(labelKey)}
           </>
         )}
       </AsyncButton>

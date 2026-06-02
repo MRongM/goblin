@@ -47,6 +47,8 @@ export function resetRefreshTest(): void {
   rpcHandlers['repo.abort'] = async () => false
   rpcHandlers['repo.fetch'] = async () => ({ ok: true, message: 'ok' })
   rpcHandlers['repo.snapshot'] = async () => ({ branches: [], current: '' })
+  rpcHandlers['repo.worktreeSourceInferences'] = async () => []
+  rpcHandlers['remote.worktreeSourceInferences'] = async () => []
   rpcHandlers['repo.pullRequests'] = async () => []
   rpcHandlers['repo.status'] = async () => []
 }

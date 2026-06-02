@@ -7,12 +7,14 @@ import { Badge } from '#/renderer/components/ui/badge.tsx'
 import { BranchActionsMenu } from '#/renderer/components/BranchActionsMenu.tsx'
 import { cn } from '#/renderer/lib/cn.ts'
 import { formatRelativeTime } from '#/renderer/lib/dates.ts'
+import type { WorktreeSourceInfo } from '#/shared/worktree-source.ts'
 
 interface BranchRowProps {
   repo: RepoState
   branch: RepoBranchState
   selected: string | null
   current: string
+  source?: WorktreeSourceInfo
   lang: Lang
   onSelectBranch: (branch: string) => void
   onOpenBranchStatus: (branch: string) => void
@@ -52,6 +54,7 @@ export function BranchRow({
   branch,
   selected,
   current,
+  source,
   lang,
   onSelectBranch,
   onOpenBranchStatus,
@@ -68,6 +71,13 @@ export function BranchRow({
   const isWorktree = hasWorktree && !isCurrent
   const worktreeState = getBranchWorktreeState(repo, branch)
   const worktreeDirty = worktreeState?.dirty ?? false
+  const worktreeSource = source && isWorktree ? source : null
+  const sourceLabel =
+    worktreeSource
+      ? t(worktreeSource.confidence === 'exact' ? 'branches.source-exact' : 'branches.source-inferred', {
+          branch: worktreeSource.sourceBranch,
+        })
+      : null
   const commitTime = formatRelativeTime(branch.lastCommitDate, lang)
   const commitMeta = branch.lastCommitAuthor ? `${branch.lastCommitAuthor} · ${commitTime}` : commitTime
   const ariaParts = [
@@ -75,6 +85,7 @@ export function BranchRow({
     isCurrent ? t('branch-status.current') : null,
     branch.isDefault ? t('branches.default') : null,
     hasWorktree ? t(worktreeDirty ? 'branches.dirty' : 'branches.worktree') : null,
+    sourceLabel,
     branch.trackingGone ? t('branches.gone') : null,
     branch.ahead > 0 ? t('branch-status.sync.ahead', { n: branch.ahead }) : null,
     branch.behind > 0 ? t('branch-status.sync.behind', { n: branch.behind }) : null,
@@ -141,6 +152,18 @@ export function BranchRow({
                 {t('branches.worktree')}
               </Badge>
             ) : null}
+            {worktreeSource && sourceLabel && (
+              <Badge
+                variant={worktreeSource.confidence === 'exact' ? 'secondary' : 'outline'}
+                className={cn(
+                  'max-w-40 truncate',
+                  worktreeSource.confidence === 'inferred' && 'border-warning-border text-warning',
+                )}
+                title={sourceLabel}
+              >
+                {sourceLabel}
+              </Badge>
+            )}
             {branch.trackingGone && <Badge variant="attention">{t('branches.gone')}</Badge>}
             {branch.ahead > 0 && (
               <Delta direction="ahead" count={branch.ahead} label={t('branch-status.sync.ahead', { n: branch.ahead })} />

@@ -19,6 +19,11 @@ import {
 } from '#/shared/git-types.ts'
 import type { RemoteRepoTarget } from '#/shared/remote-repo.ts'
 import { isSafeBranchName } from '#/shared/refnames.ts'
+import type { CommitDetail, CommitFileStat, CommitMeta } from '#/shared/rpc.ts'
+import {
+  inferWorktreeSourceFromReflogMessages,
+  type WorktreeSourceInference,
+} from '#/shared/worktree-source.ts'
 
 type RemoteGitRunner = (
   command: RemoteCommandKind,
@@ -30,6 +35,7 @@ const REMOTE_WORKTREE_STATUS_CONCURRENCY = 8
 const REMOTE_PATCH_UNTRACKED_DIFF_CONCURRENCY = 8
 const REMOTE_BRANCH_OP_TIMEOUT_MS = 180_000
 const REMOTE_PATCH_TIMEOUT_MS = 90_000
+const REMOTE_COMMIT_TIMEOUT_MS = 90_000
 
 export interface RemoteRepoSnapshot {
   branches: BranchSnapshotInfo[]
@@ -96,6 +102,51 @@ export async function getRemoteLog(
   })
   if (!result.ok || options.signal?.aborted) return []
   return parseLog(result.stdout)
+}
+
+export async function getRemoteCommitDetail(
+  target: RemoteRepoTarget,
+  hash: string,
+  options: { signal?: AbortSignal; run?: RemoteGitRunner } = {},
+): Promise<CommitDetail | null> {
+  const run: RemoteGitRunner = options.run ?? ((command, t, runOptions) => runRemoteCommand(t, command, runOptions))
+  const [metaResult, fileResult] = await Promise.all([
+    run({ type: 'gitCommitMeta', path: target.remotePath, hash }, target, {
+      signal: options.signal,
+      timeoutMs: REMOTE_COMMIT_TIMEOUT_MS,
+    }),
+    run({ type: 'gitCommitFileStats', path: target.remotePath, hash }, target, {
+      signal: options.signal,
+      timeoutMs: REMOTE_COMMIT_TIMEOUT_MS,
+    }),
+  ])
+  if (options.signal?.aborted) return null
+  if (!metaResult.ok) return null
+  const meta = parseRemoteCommitMeta(metaResult.stdout)
+  if (!meta) return null
+  return { meta, files: fileResult.ok ? parseRemoteCommitFileStats(fileResult.stdout) : [] }
+}
+
+export async function getRemoteWorktreeSourceInferences(
+  target: RemoteRepoTarget,
+  branches: string[],
+  options: { signal?: AbortSignal; run?: RemoteGitRunner } = {},
+): Promise<WorktreeSourceInference[]> {
+  const run: RemoteGitRunner = options.run ?? ((command, t, runOptions) => runRemoteCommand(t, command, runOptions))
+  const uniqueBranches = [...new Set(branches)].filter(isSafeBranchName)
+  const results = await mapWithConcurrency(
+    uniqueBranches,
+    REMOTE_WORKTREE_STATUS_CONCURRENCY,
+    async (branch): Promise<WorktreeSourceInference | null> => {
+      const result = await run({ type: 'gitBranchReflogMessages', path: target.remotePath, branch }, target, {
+        signal: options.signal,
+      })
+      if (!result.ok || options.signal?.aborted) return null
+      return inferWorktreeSourceFromReflogMessages(branch, result.stdout)
+    },
+    options.signal,
+  )
+  return results.filter((result): result is WorktreeSourceInference => result !== null)
 }
 
 export async function getRemotePatch(
@@ -264,6 +315,7 @@ export async function removeRemoteWorktree(
     worktreePath: string
     alsoDeleteBranch: boolean
     forceDeleteBranch?: boolean
+    alsoDeleteUpstream?: boolean
     signal?: AbortSignal
     run?: RemoteGitRunner
   },
@@ -297,6 +349,14 @@ export async function removeRemoteWorktree(
     if (!safelyDeletable) return { ok: false, message: 'error.cannot-remove-unpushed-worktree' }
   }
 
+  const upstream = await resolveRemoteUpstreamForDelete(target, input.branch, {
+    enabled: input.alsoDeleteBranch && input.alsoDeleteUpstream === true,
+    signal: input.signal,
+    run,
+  })
+  if (input.signal?.aborted) return { ok: false, message: 'cancelled' }
+  if (upstream && typeof upstream === 'object' && 'ok' in upstream) return upstream
+
   const removeResult = await run(
     { type: 'gitWorktreeRemove', path: target.remotePath, worktreePath: resolved.path },
     target,
@@ -311,12 +371,14 @@ export async function removeRemoteWorktree(
     target,
     { signal: input.signal, timeoutMs: REMOTE_BRANCH_OP_TIMEOUT_MS },
   )
-  return remoteExecResult(deleteResult)
+  if (!deleteResult.ok) return remoteExecResult(deleteResult)
+  if (!input.alsoDeleteUpstream) return remoteExecResult(deleteResult)
+  return deleteResolvedRemoteUpstreamBranch(target, upstream, { signal: input.signal, run })
 }
 
 export async function deleteRemoteBranch(
   target: RemoteRepoTarget,
-  input: { branch: string; force?: boolean; signal?: AbortSignal; run?: RemoteGitRunner },
+  input: { branch: string; force?: boolean; alsoDeleteUpstream?: boolean; signal?: AbortSignal; run?: RemoteGitRunner },
 ): Promise<ExecResult> {
   if (PROTECTED_BRANCHES.has(input.branch)) return { ok: false, message: 'error.cannot-delete-protected-branch' }
   const run: RemoteGitRunner = input.run ?? ((command, t, runOptions) => runRemoteCommand(t, command, runOptions))
@@ -332,12 +394,21 @@ export async function deleteRemoteBranch(
     shouldForce || (await isRemoteSafelyDeletableBranch(target, input.branch, { signal: input.signal, run }))
   if (input.signal?.aborted) return { ok: false, message: 'cancelled' }
   if (!safelyDeletable) return { ok: false, message: 'error.branch-not-fully-merged' }
+  const upstream = await resolveRemoteUpstreamForDelete(target, input.branch, {
+    enabled: input.alsoDeleteUpstream === true,
+    signal: input.signal,
+    run,
+  })
+  if (input.signal?.aborted) return { ok: false, message: 'cancelled' }
+  if (upstream && typeof upstream === 'object' && 'ok' in upstream) return upstream
   const result = await run(
     { type: 'gitBranchDelete', path: target.remotePath, branch: input.branch, force: shouldForce },
     target,
     { signal: input.signal, timeoutMs: REMOTE_BRANCH_OP_TIMEOUT_MS },
   )
-  return remoteExecResult(result)
+  if (!result.ok) return remoteExecResult(result)
+  if (!input.alsoDeleteUpstream) return remoteExecResult(result)
+  return deleteResolvedRemoteUpstreamBranch(target, upstream, { signal: input.signal, run })
 }
 
 export async function getRemoteGitHubUrl(
@@ -437,6 +508,42 @@ function firstLine(lines: string[]): string {
   return lines.find((line) => line.trim().length > 0)?.trim() ?? ''
 }
 
+function parseRemoteCommitMeta(output: string): CommitMeta | null {
+  const parts = output.split('\x1f')
+  const hash = parts[0] ?? ''
+  if (!hash) return null
+  return {
+    hash,
+    shortHash: parts[1] ?? '',
+    author: parts[2] ?? '',
+    email: parts[3] ?? '',
+    date: parts[4] ?? '',
+    parents: (parts[5] ?? '').split(' ').filter(Boolean),
+    subject: parts[6] ?? '',
+    body: (parts[7] ?? '').trimEnd(),
+  }
+}
+
+function parseRemoteCommitFileStats(output: string): CommitFileStat[] {
+  if (!output) return []
+  return output
+    .split('\0')
+    .filter((record) => record.length > 0)
+    .map((record) => {
+      const cols = record.split('\t')
+      const added = cols[0] ?? '0'
+      const deleted = cols[1] ?? '0'
+      const filePath = cols.slice(2).join('\t')
+      const binary = added === '-' || deleted === '-'
+      return {
+        added: binary ? 0 : parseInt(added, 10) || 0,
+        deleted: binary ? 0 : parseInt(deleted, 10) || 0,
+        path: filePath,
+        binary,
+      }
+    })
+}
+
 function localNameFromRemoteTrackingBranch(remoteBranch: string): string | null {
   if (!isSafeBranchName(remoteBranch)) return null
   const slash = remoteBranch.indexOf('/')
@@ -485,6 +592,35 @@ async function getRemoteUpstream(
   })
   if (!result.ok || options.signal?.aborted) return null
   return result.stdout.trim() || null
+}
+
+async function resolveRemoteUpstreamForDelete(
+  target: RemoteRepoTarget,
+  branch: string,
+  input: { enabled?: boolean; signal?: AbortSignal; run: RemoteGitRunner },
+): Promise<string | ExecResult | null> {
+  if (!input.enabled) return null
+  const upstream = await getRemoteUpstream(target, branch, input)
+  if (input.signal?.aborted) return { ok: false, message: 'cancelled' }
+  return upstream
+}
+
+async function deleteResolvedRemoteUpstreamBranch(
+  target: RemoteRepoTarget,
+  upstream: string | null,
+  options: { signal?: AbortSignal; run: RemoteGitRunner },
+): Promise<ExecResult> {
+  if (!upstream) return { ok: true, message: 'ok' }
+  const parts = splitUpstream(upstream)
+  if (!parts || parts.remote === '.') return { ok: true, message: 'ok' }
+  const result = await options.run(
+    { type: 'gitPushDelete', path: target.remotePath, remote: parts.remote, branch: parts.branch },
+    target,
+    { signal: options.signal, timeoutMs: REMOTE_BRANCH_OP_TIMEOUT_MS },
+  )
+  if (options.signal?.aborted) return { ok: false, message: 'cancelled' }
+  if (!result.ok) return { ok: false, message: 'error.upstream-delete-failed' }
+  return remoteExecResult(result)
 }
 
 async function isRemoteSafelyDeletableBranch(

@@ -48,6 +48,7 @@ const DEFAULT_TERMINAL_ROWS = 24
 const RESIZE_DEBOUNCE_MS = 80
 const FONT_REMEASURE_DEBOUNCE_MS = 80
 const TERMINAL_FONT_FAMILY = "'Goblin Mono', monospace"
+const TERMINAL_WORD_SEPARATOR = ' ()[]{}\',"`'
 const EMPTY_SEARCH_RESULT: TerminalSearchResult = { resultIndex: -1, resultCount: 0, found: false }
 
 export class ManagedTerminalSession {
@@ -420,6 +421,7 @@ export class ManagedTerminalSession {
 
   private createTerminal(): XTermTerminal {
     const theme = terminalThemeForCurrentDocument()
+    const isMac = isMacNavigatorPlatform(globalThis.navigator?.platform ?? '')
     const term = new Terminal({
       allowProposedApi: true,
       cols: DEFAULT_TERMINAL_COLS,
@@ -431,12 +433,22 @@ export class ManagedTerminalSession {
       minimumContrastRatio: 4.5,
       scrollback: 10_000,
       macOptionIsMeta: true,
+      macOptionClickForcesSelection: true,
       rescaleOverlappingGlyphs: true,
+      rightClickSelectsWord: true,
       scrollOnUserInput: true,
+      wordSeparator: TERMINAL_WORD_SEPARATOR,
+      linkHandler: {
+        allowNonHttpProtocols: false,
+        activate: (event, uri) => {
+          if (!isTerminalLinkActivationEvent(event)) return
+          this.openExternalLink(uri)
+        },
+      },
       theme,
     })
     this.installOptionalAddons(term)
-    this.installKeyboardHandlers(term)
+    this.installKeyboardHandlers(term, isMac)
     this.applyTerminalTheme(term, theme)
     this.disposeThemeObserver = observeTerminalTheme((theme) => {
       this.applyTerminalTheme(term, theme)
@@ -448,12 +460,13 @@ export class ManagedTerminalSession {
     return term
   }
 
-  private installKeyboardHandlers(term: XTermTerminal): void {
+  private installKeyboardHandlers(term: XTermTerminal, isMac: boolean): void {
     // attachCustomKeyEventHandler returns void (no disposable); the handler is
     // implicitly cleaned up when the Terminal instance is disposed in
     // destroyActiveView.
-    const isMac = isMacNavigatorPlatform(globalThis.navigator?.platform ?? '')
     term.attachCustomKeyEventHandler((event) => {
+      if (this.handleClipboardShortcut(term, event, isMac)) return false
+
       const input = terminalInputForMacOptionArrow(event, {
         isMac,
         applicationCursorKeysMode: term.modes.applicationCursorKeysMode,
@@ -464,6 +477,40 @@ export class ManagedTerminalSession {
       this.writeInput(input)
       return false
     })
+  }
+
+  private handleClipboardShortcut(term: XTermTerminal, event: KeyboardEvent, isMac: boolean): boolean {
+    if (isTerminalCopyShortcut(event, isMac)) return this.copyTerminalSelection(term, event)
+    if (isTerminalPasteShortcut(event, isMac)) return this.pasteTerminalClipboard(term, event)
+    return false
+  }
+
+  private copyTerminalSelection(term: XTermTerminal, event: KeyboardEvent): boolean {
+    if (!term.hasSelection()) return false
+    const selection = term.getSelection()
+    if (!selection) return false
+    const clipboard = terminalClipboard()
+    if (!clipboard) return false
+    consumeTerminalShortcut(event)
+    void clipboard.writeText(selection).catch((err) => {
+      console.warn('[terminal] failed to copy selection', err)
+    })
+    return true
+  }
+
+  private pasteTerminalClipboard(term: XTermTerminal, event: KeyboardEvent): boolean {
+    const clipboard = terminalClipboard()
+    if (!clipboard) return false
+    consumeTerminalShortcut(event)
+    void clipboard
+      .readText()
+      .then((text) => {
+        if (text) term.paste(text)
+      })
+      .catch((err) => {
+        console.warn('[terminal] failed to read clipboard', err)
+      })
+    return true
   }
 
   private installOptionalAddons(term: XTermTerminal): void {
@@ -486,7 +533,12 @@ export class ManagedTerminalSession {
 
   private installWebLinksAddon(term: XTermTerminal): void {
     try {
-      term.loadAddon(new WebLinksAddon((_event, uri) => this.openExternalLink(uri)))
+      term.loadAddon(
+        new WebLinksAddon((event, uri) => {
+          if (!isTerminalLinkActivationEvent(event)) return
+          this.openExternalLink(uri)
+        }),
+      )
     } catch (err) {
       console.warn('[terminal] failed to load web links addon', err)
     }
@@ -745,6 +797,37 @@ function remeasureTerminal(term: XTermTerminal): void {
 function cancelScheduledAnimationFrame(frame: number): void {
   if (typeof cancelAnimationFrame === 'function') cancelAnimationFrame(frame)
   else clearTimeout(frame)
+}
+
+function isTerminalLinkActivationEvent(event: MouseEvent): boolean {
+  return event.button === 0 && (event.ctrlKey || event.metaKey)
+}
+
+function isTerminalCopyShortcut(event: KeyboardEvent, isMac: boolean): boolean {
+  if (!isTerminalShortcutKey(event, 'KeyC', 'c')) return false
+  if (isMac && event.metaKey && !event.ctrlKey && !event.altKey) return true
+  return event.ctrlKey && event.shiftKey && !event.metaKey && !event.altKey
+}
+
+function isTerminalPasteShortcut(event: KeyboardEvent, isMac: boolean): boolean {
+  if (!isTerminalShortcutKey(event, 'KeyV', 'v')) return false
+  if (isMac && event.metaKey && !event.ctrlKey && !event.altKey) return true
+  return event.ctrlKey && event.shiftKey && !event.metaKey && !event.altKey
+}
+
+function isTerminalShortcutKey(event: KeyboardEvent, code: string, key: string): boolean {
+  return event.code === code || event.key.toLowerCase() === key
+}
+
+function consumeTerminalShortcut(event: KeyboardEvent): void {
+  event.preventDefault()
+  event.stopPropagation()
+}
+
+function terminalClipboard(): Pick<Clipboard, 'readText' | 'writeText'> | null {
+  const clipboard = globalThis.navigator?.clipboard
+  if (!clipboard?.readText || !clipboard.writeText) return null
+  return clipboard
 }
 
 function isHttpExternalUrl(value: string): boolean {

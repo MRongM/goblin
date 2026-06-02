@@ -195,6 +195,11 @@ export function RepoTabStrip({
                           onKeyboardNavigate={handleKeyboardNavigate}
                           closeLabel={labels.close}
                           unavailableLabel={labels.unavailable}
+                          bellUnreadLabel={
+                            repo.unreadBellCount && repo.unreadBellCount > 0
+                              ? labels.bellUnreadCount(repo.unreadBellCount)
+                              : undefined
+                          }
                         />
                       )
                     })}

@@ -23,6 +23,9 @@ export type RemoteCommandKind =
   | { type: 'gitWorktreeList'; path: string }
   | { type: 'gitStatus'; path: string }
   | { type: 'gitLog'; path: string; branch: string; count?: number; skip?: number }
+  | { type: 'gitCommitMeta'; path: string; hash: string }
+  | { type: 'gitCommitFileStats'; path: string; hash: string }
+  | { type: 'gitBranchReflogMessages'; path: string; branch: string }
   | { type: 'gitFetchAll'; path: string }
   | { type: 'gitStatusAll'; path: string }
   | { type: 'gitDiffNoIndex'; path: string; filePath: string }
@@ -37,6 +40,7 @@ export type RemoteCommandKind =
   | { type: 'gitUpstream'; path: string; branch: string }
   | { type: 'gitIsAncestor'; path: string; ancestor: string; descendant: string }
   | { type: 'gitRemoteGetUrl'; path: string }
+  | { type: 'gitPushDelete'; path: string; remote: string; branch: string }
   | { type: 'rawListeningPorts'; tool: 'ss' | 'lsof' | 'netstat' }
 
 export interface RemoteCommandResult {
@@ -190,6 +194,17 @@ function scriptForCommand(command: RemoteCommandKind): string {
         '--',
       ].join(' ')
     }
+    case 'gitCommitMeta':
+      return [
+        `git -C ${shellQuote(command.path)} show`,
+        '--no-patch',
+        `--format=${shellQuote('%H%x1f%h%x1f%an%x1f%ae%x1f%aI%x1f%P%x1f%s%x1f%b')}`,
+        shellQuote(command.hash),
+      ].join(' ')
+    case 'gitCommitFileStats':
+      return `git -C ${shellQuote(command.path)} show --numstat --no-renames --format= -z ${shellQuote(command.hash)}`
+    case 'gitBranchReflogMessages':
+      return `git -C ${shellQuote(command.path)} reflog show --format=%gs ${shellQuote(command.branch)}`
     case 'gitCheckout':
       return `git -C ${shellQuote(command.path)} switch -- ${shellQuote(command.branch)}`
     case 'gitCheckoutRemoteTracking':
@@ -224,6 +239,10 @@ function scriptForCommand(command: RemoteCommandKind): string {
       )} ${shellQuote(command.descendant)}`
     case 'gitRemoteGetUrl':
       return `git -C ${shellQuote(command.path)} remote get-url origin`
+    case 'gitPushDelete':
+      return `git -C ${shellQuote(command.path)} push --delete -- ${shellQuote(command.remote)} ${shellQuote(
+        command.branch,
+      )}`
     case 'rawListeningPorts':
       return command.tool === 'ss'
         ? 'ss -ltnp'

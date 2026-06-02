@@ -16,6 +16,7 @@ interface RepoTabProps {
   onKeyboardNavigate: (id: string, direction: 'prev' | 'next' | 'first' | 'last') => void
   closeLabel: string
   unavailableLabel?: string
+  bellUnreadLabel?: string
 }
 
 function remoteHealthDotClass(status: RepoTabConnectionStatus | undefined): string {
@@ -41,6 +42,7 @@ export function RepoTab({
   onKeyboardNavigate,
   closeLabel,
   unavailableLabel = 'unavailable',
+  bellUnreadLabel,
 }: RepoTabProps) {
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({
     id: repo.id,
@@ -53,6 +55,8 @@ export function RepoTab({
   }
   const targetLabel = repo.targetLabel ?? undefined
   const title = targetLabel ? `${repo.name} - ${targetLabel}` : repo.unavailable ? `${repo.name} - ${unavailableLabel}` : repo.name
+  const unreadBellCount = repo.unreadBellCount ?? 0
+  const tabLabel = unreadBellCount > 0 && bellUnreadLabel ? `${title} - ${bellUnreadLabel}` : title
   const RepoIcon = repo.kind === 'remote' ? Server : FolderGit2
   const remoteStatus = repo.kind === 'remote' ? (repo.diagnosticStatus ?? 'unknown') : undefined
   const remoteStatusTitle = repo.diagnosticMessage ?? repo.diagnosticCategory
@@ -88,7 +92,7 @@ export function RepoTab({
         role="tab"
         tabIndex={isActive ? 0 : -1}
         aria-selected={isActive}
-        aria-label={title}
+        aria-label={tabLabel}
         onClick={() => onActivate(repo.id)}
         onKeyDown={(e) => {
           if (!isDragging && (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'Home' || e.key === 'End')) {
@@ -112,6 +116,17 @@ export function RepoTab({
           />
         )}
         <span className="truncate font-medium">{repo.name}</span>
+        {unreadBellCount > 0 && (
+          <Badge
+            variant="attention"
+            size="xs"
+            className="min-w-4 shrink-0 font-mono tabular-nums"
+            title={bellUnreadLabel}
+            aria-label={bellUnreadLabel}
+          >
+            {unreadBellCount}
+          </Badge>
+        )}
         {repo.kind === 'remote' && (
           <Badge variant="secondary" size="xs" className="hidden shrink-0 text-[9px] min-[190px]:inline-flex">
             remote

@@ -32,6 +32,7 @@ import type {
   RemotePortForwardSession,
   RemotePortScanResult,
 } from '#/shared/remote-ports.ts'
+import type { WorktreeSourceInference } from '#/shared/worktree-source.ts'
 
 export type { WorkspaceLayout } from '#/shared/workspace-layout.ts'
 export type { SettingsPage } from '#/shared/settings-pages.ts'
@@ -250,6 +251,7 @@ export interface AppRpcHandlers {
       options?: PullRequestFetchOptions
     }) => Promise<PullRequestEntry[] | null>
     log: (input: { cwd: string; branch: string; count?: number; skip?: number }) => Promise<LogEntry[]>
+    worktreeSourceInferences: (input: { cwd: string; branches: string[] }) => Promise<WorktreeSourceInference[]>
     status: (input: { cwd: string }) => Promise<WorktreeStatus[]>
     patch: (input: { cwd: string; worktreePath: string }) => Promise<ExecResult>
     commit: (input: { cwd: string; hash: string }) => Promise<CommitDetail | null>
@@ -296,6 +298,11 @@ export interface AppRpcHandlers {
     snapshot: (input: { target: RemoteRepoTarget }) => Promise<RepoSnapshot | null>
     status: (input: { target: RemoteRepoTarget }) => Promise<WorktreeStatus[]>
     log: (input: { target: RemoteRepoTarget; branch: string; count?: number; skip?: number }) => Promise<LogEntry[]>
+    worktreeSourceInferences: (input: {
+      target: RemoteRepoTarget
+      branches: string[]
+    }) => Promise<WorktreeSourceInference[]>
+    commit: (input: { target: RemoteRepoTarget; hash: string }) => Promise<CommitDetail | null>
     patch: (input: { target: RemoteRepoTarget; worktreePath: string }) => Promise<ExecResult>
     checkout: (input: { target: RemoteRepoTarget; branch: string; worktreePath?: string }) => Promise<ExecResult>
     checkoutRemoteBranch: (input: { target: RemoteRepoTarget; remoteBranch: string }) => Promise<ExecResult>
@@ -313,8 +320,14 @@ export interface AppRpcHandlers {
       worktreePath: string
       alsoDeleteBranch: boolean
       forceDeleteBranch?: boolean
+      alsoDeleteUpstream?: boolean
     }) => Promise<ExecResult>
-    deleteBranch: (input: { target: RemoteRepoTarget; branch: string; force?: boolean }) => Promise<ExecResult>
+    deleteBranch: (input: {
+      target: RemoteRepoTarget
+      branch: string
+      force?: boolean
+      alsoDeleteUpstream?: boolean
+    }) => Promise<ExecResult>
     openTerminal: (input: { target: RemoteRepoTarget; path: string }) => Promise<ExecResult>
     openEditor: (input: { target: RemoteRepoTarget; path: string }) => Promise<ExecResult>
     openGitHub: (input: { target: RemoteRepoTarget; branch?: string }) => Promise<ExecResult>
@@ -506,6 +519,9 @@ export function createAppRouter(handlers: AppRpcHandlers) {
           }),
         )
         .query(({ input }) => handlers.repo.log(input)),
+      worktreeSourceInferences: p
+        .input(v.object({ cwd: v.string(), branches: v.array(v.string()) }))
+        .query(({ input }) => handlers.repo.worktreeSourceInferences(input)),
       status: p.input(CwdInput).query(({ input }) => handlers.repo.status(input)),
       patch: p
         .input(v.object({ cwd: v.string(), worktreePath: v.string() }))
@@ -588,6 +604,12 @@ export function createAppRouter(handlers: AppRpcHandlers) {
           }),
         )
         .query(({ input }) => handlers.remote.log(input)),
+      worktreeSourceInferences: p
+        .input(v.object({ target: RemoteTargetSchema, branches: v.array(v.string()) }))
+        .query(({ input }) => handlers.remote.worktreeSourceInferences(input)),
+      commit: p
+        .input(v.object({ target: RemoteTargetSchema, hash: v.string() }))
+        .query(({ input }) => handlers.remote.commit(input)),
       patch: p
         .input(v.object({ target: RemoteTargetSchema, worktreePath: RemoteAbsolutePath }))
         .mutation(({ input }) => handlers.remote.patch(input)),
@@ -619,11 +641,19 @@ export function createAppRouter(handlers: AppRpcHandlers) {
             worktreePath: RemoteAbsolutePath,
             alsoDeleteBranch: v.boolean(),
             forceDeleteBranch: v.optional(v.boolean()),
+            alsoDeleteUpstream: v.optional(v.boolean()),
           }),
         )
         .mutation(({ input }) => handlers.remote.removeWorktree(input)),
       deleteBranch: p
-        .input(v.object({ target: RemoteTargetSchema, branch: v.string(), force: v.optional(v.boolean()) }))
+        .input(
+          v.object({
+            target: RemoteTargetSchema,
+            branch: v.string(),
+            force: v.optional(v.boolean()),
+            alsoDeleteUpstream: v.optional(v.boolean()),
+          }),
+        )
         .mutation(({ input }) => handlers.remote.deleteBranch(input)),
       openTerminal: p
         .input(v.object({ target: RemoteTargetSchema, path: RemoteAbsolutePath }))

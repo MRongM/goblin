@@ -291,4 +291,53 @@ describe('remote ssh command runner', () => {
       "git -C '/srv/goblin-feature-x' diff --binary --no-index -- /dev/null 'new file'\\''s.txt'",
     )
   })
+
+  test('builds remote commit detail commands with quoted hashes and paths', async () => {
+    const { buildRemoteCommandInvocation } = await import('#/main/ssh/commands.ts')
+
+    const meta = buildRemoteCommandInvocation(MANUAL_TARGET, {
+      type: 'gitCommitMeta',
+      path: "/srv/team's app",
+      hash: 'abc123',
+    })
+    const files = buildRemoteCommandInvocation(MANUAL_TARGET, {
+      type: 'gitCommitFileStats',
+      path: "/srv/team's app",
+      hash: 'abc123',
+    })
+
+    expect(meta.script).toBe(
+      "git -C '/srv/team'\\''s app' show --no-patch --format='%H%x1f%h%x1f%an%x1f%ae%x1f%aI%x1f%P%x1f%s%x1f%b' 'abc123'",
+    )
+    expect(files.script).toBe("git -C '/srv/team'\\''s app' show --numstat --no-renames --format= -z 'abc123'")
+  })
+
+  test('builds remote branch reflog source inference command', async () => {
+    const { buildRemoteCommandInvocation } = await import('#/main/ssh/commands.ts')
+
+    const invocation = buildRemoteCommandInvocation(MANUAL_TARGET, {
+      type: 'gitBranchReflogMessages',
+      path: "/srv/team's app",
+      branch: "feature/quote's",
+    })
+
+    expect(invocation.script).toBe(
+      "git -C '/srv/team'\\''s app' reflog show --format=%gs 'feature/quote'\\''s'",
+    )
+  })
+
+  test('builds remote upstream delete command with quoted remote and branch', async () => {
+    const { buildRemoteCommandInvocation } = await import('#/main/ssh/commands.ts')
+
+    const invocation = buildRemoteCommandInvocation(MANUAL_TARGET, {
+      type: 'gitPushDelete',
+      path: '/srv/goblin',
+      remote: "origin's",
+      branch: "feature/quote's",
+    })
+
+    expect(invocation.script).toBe(
+      "git -C '/srv/goblin' push --delete -- 'origin'\\''s' 'feature/quote'\\''s'",
+    )
+  })
 })

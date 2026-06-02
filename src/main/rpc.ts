@@ -27,6 +27,7 @@ import {
   getLog,
   getRepoName,
   getRepoRoot,
+  getWorktreeSourceInferences,
   getUpstream,
   isAncestor,
   isGitRepo,
@@ -111,11 +112,13 @@ import {
   createRemoteWorktree,
   deleteRemoteBranch,
   fetchRemoteRepository,
+  getRemoteCommitDetail,
   getRemoteGitHubUrl,
   getRemoteLog,
   getRemotePatch,
   getRemoteSnapshot,
   getRemoteStatus,
+  getRemoteWorktreeSourceInferences,
   pullRemoteBranch,
   pushRemoteBranch,
   removeRemoteWorktree,
@@ -401,6 +404,13 @@ function createRpcHandlers(): AppRpcHandlers {
         const log = await getLog(cwd, branch, safeCount, safeSkip, { signal })
         return signal?.aborted ? [] : log
       },
+      worktreeSourceInferences: async ({ cwd, branches }) => {
+        if (!isValidCwd(cwd) || !Array.isArray(branches)) return []
+        const safeBranches = branches.filter((branch): branch is string => isValidBranch(branch))
+        if (safeBranches.length === 0) return []
+        const signal = currentRpcSignal()
+        return getWorktreeSourceInferences(cwd, safeBranches, { signal })
+      },
       status: async ({ cwd }) => {
         if (!isValidCwd(cwd)) return []
         const available = await probeGitRepository(cwd)
@@ -535,6 +545,18 @@ function createRpcHandlers(): AppRpcHandlers {
         if (!isValidBranch(branch)) return []
         return getRemoteLog(normalizedRemoteTargetOrThrow(target), branch, count, skip, { signal: currentRpcSignal() })
       },
+      worktreeSourceInferences: async ({ target, branches }) => {
+        if (!Array.isArray(branches)) return []
+        const safeBranches = branches.filter((branch): branch is string => isValidBranch(branch))
+        if (safeBranches.length === 0) return []
+        return getRemoteWorktreeSourceInferences(normalizedRemoteTargetOrThrow(target), safeBranches, {
+          signal: currentRpcSignal(),
+        })
+      },
+      commit: async ({ target, hash }) => {
+        if (typeof hash !== 'string' || !hash || !GIT_HASH_RE.test(hash)) return null
+        return getRemoteCommitDetail(normalizedRemoteTargetOrThrow(target), hash, { signal: currentRpcSignal() })
+      },
       patch: async ({ target, worktreePath }) => {
         if (!isValidRemoteAbsolutePath(worktreePath)) return { ok: false, message: 'error.invalid-worktree-path' }
         return getRemotePatch(normalizedRemoteTargetOrThrow(target), worktreePath, { signal: currentRpcSignal() })
@@ -588,7 +610,8 @@ function createRpcHandlers(): AppRpcHandlers {
           !isValidBranch(input.branch) ||
           !isValidRemoteAbsolutePath(input.worktreePath) ||
           typeof input.alsoDeleteBranch !== 'boolean' ||
-          (input.forceDeleteBranch !== undefined && typeof input.forceDeleteBranch !== 'boolean')
+          (input.forceDeleteBranch !== undefined && typeof input.forceDeleteBranch !== 'boolean') ||
+          (input.alsoDeleteUpstream !== undefined && typeof input.alsoDeleteUpstream !== 'boolean')
         ) {
           return { ok: false, message: 'error.invalid-arguments' }
         }
@@ -598,11 +621,11 @@ function createRpcHandlers(): AppRpcHandlers {
           removeRemoteWorktree(normalized, { ...remoteInput, signal }),
         )
       },
-      deleteBranch: async ({ target, branch, force }) => {
+      deleteBranch: async ({ target, branch, force, alsoDeleteUpstream }) => {
         if (!isValidBranch(branch)) return { ok: false, message: 'error.invalid-arguments' }
         const normalized = normalizedRemoteTargetOrThrow(target)
         return runCancellable(normalized.id, 'user', (signal) =>
-          deleteRemoteBranch(normalized, { branch, force, signal }),
+          deleteRemoteBranch(normalized, { branch, force, alsoDeleteUpstream, signal }),
         )
       },
       openTerminal: async ({ target, path: remotePath }) => {

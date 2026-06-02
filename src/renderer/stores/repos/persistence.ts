@@ -8,6 +8,7 @@ import {
   stripBranchWorktreeMetadata,
   worktreeStatesFromBranches,
 } from '#/renderer/stores/repos/worktree-state.ts'
+export { normalizeWorktreeSourcesByRepo } from '#/renderer/stores/repos/worktree-sources.ts'
 
 const MAX_CACHE_AGE_MS = 14 * 24 * 60 * 60 * 1000
 const MAX_REPOS = 50

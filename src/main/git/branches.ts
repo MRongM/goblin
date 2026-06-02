@@ -2,6 +2,10 @@ import { git, gitResultWithOptions, NETWORK_TIMEOUT_MS } from '#/main/git/helper
 import { FIELD_SEP, parseBranches, parseLog } from '#/main/git/parsers.ts'
 import { isSafeBranchName } from '#/shared/refnames.ts'
 import type { BranchSnapshotInfo, ExecResult, LogEntry, WorktreeInfo } from '#/shared/git-types.ts'
+import {
+  inferWorktreeSourceFromReflogMessages,
+  type WorktreeSourceInference,
+} from '#/shared/worktree-source.ts'
 
 export async function isGitRepo(cwd: string): Promise<boolean> {
   try {
@@ -162,6 +166,26 @@ export async function getLog(
   } catch {
     return []
   }
+}
+
+export async function getWorktreeSourceInferences(
+  cwd: string,
+  branches: string[],
+  options?: { signal?: AbortSignal },
+): Promise<WorktreeSourceInference[]> {
+  const uniqueBranches = [...new Set(branches)].filter(isSafeBranchName)
+  const results = await Promise.all(
+    uniqueBranches.map(async (branch): Promise<WorktreeSourceInference | null> => {
+      if (options?.signal?.aborted) return null
+      try {
+        const output = await git(cwd, ['reflog', 'show', '--format=%gs', branch], { signal: options?.signal })
+        return inferWorktreeSourceFromReflogMessages(branch, output)
+      } catch {
+        return null
+      }
+    }),
+  )
+  return results.filter((result): result is WorktreeSourceInference => result !== null)
 }
 
 export async function checkoutBranch(cwd: string, name: string, signal?: AbortSignal): Promise<ExecResult> {

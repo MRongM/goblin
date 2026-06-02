@@ -14,6 +14,7 @@ import {
 } from '#/renderer/stores/repos/test-utils.ts'
 import type { RepoBranchAction } from '#/renderer/stores/repos/branch-action-types.ts'
 import type { BranchViewMode } from '#/renderer/stores/repos/types.ts'
+import { getWorktreeSource } from '#/renderer/stores/repos/worktree-sources.ts'
 
 const REPO_ID = '/tmp/gbl-branch-actions-test-repo'
 const REMOTE_TARGET = {
@@ -826,6 +827,18 @@ describe('runBranchAction', () => {
     const repo = useReposStore.getState().repos[REPO_ID]
     expect(repo?.ui.branchViewMode).toBe('all')
     expect(repo?.ui.selectedBranch).toBe('feature/a')
+    expect(
+      getWorktreeSource(
+        useReposStore.getState().worktreeSourcesByRepo[REPO_ID],
+        'feature/new',
+        '/tmp/gbl-branch-actions-test-worktree',
+      ),
+    ).toMatchObject({
+      branch: 'feature/new',
+      worktreePath: '/tmp/gbl-branch-actions-test-worktree',
+      sourceBranch: 'feature/a',
+      confidence: 'exact',
+    })
   })
 
   test('keeps no-worktree filtering after creating a worktree', async () => {
@@ -871,6 +884,7 @@ describe('runBranchAction', () => {
     const repo = useReposStore.getState().repos[REPO_ID]
     expect(repo?.ui.branchViewMode).toBe('no-worktree')
     expect(repo?.ui.selectedBranch).toBe('feature/a')
+    expect(useReposStore.getState().worktreeSourcesByRepo[REPO_ID]).toBeUndefined()
   })
 
   test('does not let stale create worktree refresh results change selection', async () => {
@@ -1021,12 +1035,12 @@ describe('runBranchAction', () => {
     expect(useReposStore.getState().repos[REMOTE_TARGET.id]?.resources.fetch.phase).toBe('idle')
   })
 
-  test('routes remote remove worktree through remote RPC', async () => {
+  test('routes remote remove worktree through remote RPC with upstream deletion option', async () => {
     seedRemoteRepo()
-    const calls: string[] = []
+    const calls: unknown[] = []
     installGoblinTestBridge({
-      'remote.removeWorktree': async ({ worktreePath }: { worktreePath: string }) => {
-        calls.push(worktreePath)
+      'remote.removeWorktree': async (input: unknown) => {
+        calls.push(input)
         return { ok: true, message: 'ok' }
       },
       'remote.snapshot': async () => ({ branches: [], current: '' }),
@@ -1039,9 +1053,49 @@ describe('runBranchAction', () => {
       worktreePath: '/srv/goblin-feature-x',
       alsoDeleteBranch: true,
       forceDeleteBranch: false,
+      alsoDeleteUpstream: true,
     })
 
     expect(result).toEqual({ ok: true, message: 'ok' })
-    expect(calls).toEqual(['/srv/goblin-feature-x'])
+    expect(calls).toEqual([
+      {
+        target: REMOTE_TARGET,
+        branch: 'feature/x',
+        worktreePath: '/srv/goblin-feature-x',
+        alsoDeleteBranch: true,
+        forceDeleteBranch: false,
+        alsoDeleteUpstream: true,
+      },
+    ])
+  })
+
+  test('routes remote delete branch through remote RPC with upstream deletion option', async () => {
+    seedRemoteRepo()
+    const calls: unknown[] = []
+    installGoblinTestBridge({
+      'remote.deleteBranch': async (input: unknown) => {
+        calls.push(input)
+        return { ok: true, message: 'ok' }
+      },
+      'remote.snapshot': async () => ({ branches: [], current: '' }),
+      'remote.status': async () => [],
+    })
+
+    const result = await useReposStore.getState().runBranchAction(REMOTE_TARGET.id, {
+      kind: 'deleteBranch',
+      branch: 'feature/x',
+      force: false,
+      alsoDeleteUpstream: true,
+    })
+
+    expect(result).toEqual({ ok: true, message: 'ok' })
+    expect(calls).toEqual([
+      {
+        target: REMOTE_TARGET,
+        branch: 'feature/x',
+        force: false,
+        alsoDeleteUpstream: true,
+      },
+    ])
   })
 })

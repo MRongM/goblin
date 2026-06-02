@@ -13,6 +13,7 @@ import { useT } from '#/renderer/stores/i18n.ts'
 import { useSettingsStore } from '#/renderer/stores/settings.ts'
 import { RepoTabStrip } from '#/renderer/components/repo-tabs/RepoTabStrip.tsx'
 import type { RepoTabConnectionStatus, RepoTabSummary } from '#/renderer/components/repo-tabs/types.ts'
+import { useTerminalSessionContext } from '#/renderer/components/terminal/terminal-session-context.ts'
 import { openRepoFromDialog } from '#/renderer/lib/open-repo-dialog.ts'
 import { resourceBusy } from '#/renderer/stores/repos/resources.ts'
 import type { RepoState } from '#/renderer/stores/repos/types.ts'
@@ -38,6 +39,7 @@ function summariesEqual(a: RepoTabSummary[], b: RepoTabSummary[]): boolean {
       x.diagnosticCategory !== y.diagnosticCategory ||
       x.diagnosticMessage !== y.diagnosticMessage ||
       x.unavailable !== y.unavailable ||
+      x.unreadBellCount !== y.unreadBellCount ||
       (x.remoteDetails?.length ?? 0) !== (y.remoteDetails?.length ?? 0)
     ) {
       return false
@@ -68,6 +70,7 @@ interface RepoTabsProps {
 
 export function RepoTabs({ onClone, onAddRemote }: RepoTabsProps) {
   const t = useT()
+  const terminalContext = useTerminalSessionContext()
   const shortcutsDisabled = useSettingsStore((s) => s.shortcutsDisabled)
   // Build the summary array inside the selector but compare with our
   // explicit equality fn so re-derivations with identical contents
@@ -94,6 +97,7 @@ export function RepoTabs({ onClone, onAddRemote }: RepoTabsProps) {
               r.kind === 'remote' && r.diagnostics?.ok === false ? (r.diagnostics.message ?? null) : null,
             remoteDetails: r.remote.remoteDetails ?? [],
             unavailable: r.availability.phase === 'unavailable',
+            unreadBellCount: terminalContext.unreadBellCountByRepo(r.id),
           }
         })
         .filter((x): x is RepoTabSummary => x !== null),
@@ -124,6 +128,7 @@ export function RepoTabs({ onClone, onAddRemote }: RepoTabsProps) {
         cloneShortcut: shortcutsDisabled ? null : '⌘⇧O',
         addRemote: t('repo-tabs.add-remote'),
         unavailable: t('repo-unavailable.title'),
+        bellUnreadCount: (count) => t('terminal.bell-unread-count', { count }),
       }}
       onActivate={setActive}
       onClose={closeRepo}

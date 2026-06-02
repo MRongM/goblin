@@ -5,6 +5,7 @@ import { markRepoOperationTargets, repoOperation } from '#/renderer/stores/repos
 import { INITIAL_LOG_COUNT, LOG_PAGE_SIZE } from '#/renderer/stores/repos/refresh.ts'
 import { branch, REPO_ID, resetRefreshTest, rpcHandlers, seedRepo } from '#/renderer/stores/repos/refresh-test-utils.ts'
 import { canStartRemoteFetch } from '#/renderer/stores/repos/sync-state.ts'
+import { getWorktreeSource, worktreeSourceKey } from '#/renderer/stores/repos/worktree-sources.ts'
 import type { LogEntry, WorktreeStatus } from '#/renderer/types.ts'
 import type { TerminalPruneRepoInput } from '#/shared/terminal.ts'
 import type { RemoteRepoTarget } from '#/shared/remote-repo.ts'
@@ -209,6 +210,58 @@ describe('remote fetch timestamps', () => {
         worktreePaths: ['/srv/goblin', '/srv/goblin-feature-x'],
       },
     ])
+  })
+
+  test('snapshot refresh prunes stale source metadata and merges inferred worktree sources', async () => {
+    const token = seedRepo([branch('main')])
+    const exactKey = worktreeSourceKey('feature/exact', '/tmp/worktrees/exact')
+    const staleKey = worktreeSourceKey('feature/stale', '/tmp/worktrees/stale')
+    useReposStore.setState((s) => ({
+      worktreeSourcesByRepo: {
+        ...s.worktreeSourcesByRepo,
+        [REPO_ID]: {
+          [exactKey]: {
+            branch: 'feature/exact',
+            worktreePath: '/tmp/worktrees/exact',
+            sourceBranch: 'main',
+            confidence: 'exact',
+            updatedAt: 1,
+          },
+          [staleKey]: {
+            branch: 'feature/stale',
+            worktreePath: '/tmp/worktrees/stale',
+            sourceBranch: 'main',
+            confidence: 'exact',
+            updatedAt: 1,
+          },
+        },
+      },
+    }))
+    rpcHandlers['repo.snapshot'] = async () => ({
+      branches: [
+        branch('main', undefined, { worktreePath: REPO_ID }),
+        branch('feature/exact', undefined, { worktreePath: '/tmp/worktrees/exact' }),
+        branch('feature/inferred', undefined, { worktreePath: '/tmp/worktrees/inferred' }),
+      ],
+      current: 'main',
+    })
+    rpcHandlers['repo.worktreeSourceInferences'] = async ({ branches }: { branches: string[] }) => {
+      expect(branches).toEqual(['feature/inferred'])
+      return [{ branch: 'feature/inferred', sourceBranch: 'develop' }]
+    }
+
+    await useReposStore.getState().refreshSnapshot(REPO_ID, { token })
+
+    const sourceMap = useReposStore.getState().worktreeSourcesByRepo[REPO_ID]
+    expect(getWorktreeSource(sourceMap, 'feature/exact', '/tmp/worktrees/exact')).toMatchObject({
+      sourceBranch: 'main',
+      confidence: 'exact',
+    })
+    expect(getWorktreeSource(sourceMap, 'feature/inferred', '/tmp/worktrees/inferred')).toMatchObject({
+      sourceBranch: 'develop',
+      confidence: 'inferred',
+    })
+    expect(sourceMap?.[staleKey]).toBeUndefined()
   })
 
   test('manual sync records the remote fetch settled time', async () => {

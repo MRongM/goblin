@@ -214,6 +214,8 @@ export const en = {
   'branches.gone': 'gone',
   'branches.dirty': 'dirty',
   'branches.worktree': 'worktree',
+  'branches.source-exact': 'from {branch}',
+  'branches.source-inferred': 'inferred from {branch}',
   'branches.default': 'default',
   'branches.no-upstream': 'no upstream',
 
@@ -384,7 +386,7 @@ export const en = {
   'action.refresh': 'Refresh',
   'action.refresh-title': 'git branch · git status · git log',
   'action.refresh-remote': 'Refresh remote data',
-  'action.refresh-remote-title': 'Refresh branches, status, and visible log over SSH',
+  'action.refresh-remote-title': 'Sync and refresh branches, status, and visible log over SSH',
 
   // ---- Remote ports ------------------------------------------------------
   'remote-ports.button': 'Ports',

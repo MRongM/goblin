@@ -76,6 +76,19 @@ export function TerminalSessionProvider({ children }: TerminalSessionProviderPro
       })
   }, [])
 
+  const unreadBellCountByRepo = useCallback(
+    (repoId: string): number => {
+      let count = 0
+      for (const session of sessionsRef.current.values()) {
+        if (terminalDescriptorRepoId(session.descriptor) === repoId && bellController.hasBell(session.descriptor.key)) {
+          count++
+        }
+      }
+      return count
+    },
+    [bellController],
+  )
+
   const closeTerminal = useCallback(
     (key: string): TerminalSessionSummary[] => {
       const groupKey = sessionsRef.current.get(key)?.descriptor.groupKey
@@ -275,6 +288,7 @@ export function TerminalSessionProvider({ children }: TerminalSessionProviderPro
       createTerminal,
       activeDescriptor,
       sessionSummaries,
+      unreadBellCountByRepo,
       setActive,
       clearBell,
       closeTerminalAndDismissDetailIfLast,
@@ -306,6 +320,7 @@ export function TerminalSessionProvider({ children }: TerminalSessionProviderPro
       setActive,
       clearBell,
       snapshot,
+      unreadBellCountByRepo,
       version,
       writeInput,
     ],

@@ -6,6 +6,7 @@ import { BranchList } from '#/renderer/components/BranchList.tsx'
 import { emptyRepo } from '#/renderer/stores/repos/helpers.ts'
 import { useReposStore } from '#/renderer/stores/repos/store.ts'
 import { createBranch, resetReposStore } from '#/renderer/stores/repos/test-utils.ts'
+import { worktreeSourceKey } from '#/renderer/stores/repos/worktree-sources.ts'
 
 const dndState = vi.hoisted(() => ({
   latestDragEnd: null as null | ((event: { active: { id: string }; over: { id: string } | null }) => void),
@@ -165,5 +166,43 @@ describe('BranchList remote snapshot failure', () => {
         row.getAttribute('data-sortable-id'),
       ),
     ).toEqual(['feature/b', 'main', 'feature/a'])
+  })
+
+  test('updates worktree source labels when source metadata changes', async () => {
+    const repo = emptyRepo('/repo', 'repo')
+    repo.data.branches = [createBranch('main'), createBranch('feature/x', { worktreePath: '/repo-feature-x' })]
+    repo.data.currentBranch = 'main'
+    repo.ui.selectedBranch = 'main'
+    useReposStore.setState({
+      repos: { [repo.id]: repo },
+      order: [repo.id],
+      activeId: repo.id,
+      sessionReady: true,
+    })
+
+    await act(async () => {
+      root.render(<BranchList repoId={repo.id} />)
+    })
+
+    expect(host.textContent).not.toContain('branches.source-exact')
+
+    await act(async () => {
+      useReposStore.setState((s) => ({
+        worktreeSourcesByRepo: {
+          ...s.worktreeSourcesByRepo,
+          [repo.id]: {
+            [worktreeSourceKey('feature/x', '/repo-feature-x')]: {
+              branch: 'feature/x',
+              worktreePath: '/repo-feature-x',
+              sourceBranch: 'main',
+              confidence: 'exact',
+              updatedAt: 100,
+            },
+          },
+        },
+      }))
+    })
+
+    expect(host.textContent).toContain('branches.source-exact')
   })
 })

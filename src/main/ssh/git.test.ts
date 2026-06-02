@@ -236,6 +236,90 @@ describe('remote git snapshot', () => {
   })
 })
 
+describe('remote git commit detail', () => {
+  test('reads remote commit metadata and file stats', async () => {
+    const { getRemoteCommitDetail } = await import('#/main/ssh/git.ts')
+    const run = vi.fn(async (command) => {
+      if (command.type === 'gitCommitMeta') {
+        return {
+          ok: true,
+          stderr: '',
+          stdout: [
+            'abc123',
+            'abc123',
+            'Ada',
+            'ada@example.com',
+            '2026-05-28T10:00:00Z',
+            'parent1 parent2',
+            'Subject',
+            'Body',
+          ].join('\x1f'),
+        }
+      }
+      if (command.type === 'gitCommitFileStats') {
+        return { ok: true, stderr: '', stdout: '1\t2\tsrc/app.ts\0-\t-\tassets/logo.png\0' }
+      }
+      return { ok: true, stderr: '', stdout: '' }
+    })
+
+    await expect(getRemoteCommitDetail(TARGET, 'abc123', { run })).resolves.toEqual({
+      meta: {
+        hash: 'abc123',
+        shortHash: 'abc123',
+        subject: 'Subject',
+        body: 'Body',
+        author: 'Ada',
+        email: 'ada@example.com',
+        date: '2026-05-28T10:00:00Z',
+        parents: ['parent1', 'parent2'],
+      },
+      files: [
+        { added: 1, deleted: 2, path: 'src/app.ts', binary: false },
+        { added: 0, deleted: 0, path: 'assets/logo.png', binary: true },
+      ],
+    })
+    expect(run).toHaveBeenCalledWith({ type: 'gitCommitMeta', path: '/srv/goblin', hash: 'abc123' }, TARGET, {
+      signal: undefined,
+      timeoutMs: 90_000,
+    })
+    expect(run).toHaveBeenCalledWith({ type: 'gitCommitFileStats', path: '/srv/goblin', hash: 'abc123' }, TARGET, {
+      signal: undefined,
+      timeoutMs: 90_000,
+    })
+  })
+
+  test('returns null when remote commit metadata cannot be read', async () => {
+    const { getRemoteCommitDetail } = await import('#/main/ssh/git.ts')
+    const run = vi.fn(async () => ({ ok: false, stderr: 'bad revision', stdout: '', message: 'bad revision' }))
+
+    await expect(getRemoteCommitDetail(TARGET, 'missing', { run })).resolves.toBeNull()
+  })
+})
+
+describe('remote worktree source inference', () => {
+  test('infers source branches from remote reflog messages', async () => {
+    const { getRemoteWorktreeSourceInferences } = await import('#/main/ssh/git.ts')
+    const run = vi.fn(async (command) => {
+      if (command.type === 'gitBranchReflogMessages' && command.branch === 'feature/x') {
+        return { ok: true, stderr: '', stdout: 'commit: work\nbranch: Created from main' }
+      }
+      if (command.type === 'gitBranchReflogMessages' && command.branch === 'feature/self') {
+        return { ok: true, stderr: '', stdout: 'branch: Created from feature/self' }
+      }
+      return { ok: false, stderr: 'missing', stdout: '' }
+    })
+
+    await expect(
+      getRemoteWorktreeSourceInferences(TARGET, ['feature/x', 'feature/self', 'bad branch'], { run }),
+    ).resolves.toEqual([{ branch: 'feature/x', sourceBranch: 'main' }])
+    expect(run).toHaveBeenCalledWith(
+      { type: 'gitBranchReflogMessages', path: '/srv/goblin', branch: 'feature/x' },
+      TARGET,
+      { signal: undefined },
+    )
+  })
+})
+
 describe('remote git branch actions', () => {
   test('fetches all remotes from the remote repository path', async () => {
     const { fetchRemoteRepository } = await import('#/main/ssh/git.ts')
@@ -494,5 +578,64 @@ describe('remote git branch actions', () => {
       ok: false,
       message: 'error.cannot-delete-protected-branch',
     })
+  })
+
+  test('deletes remote upstream after deleting a remote branch when requested', async () => {
+    const { deleteRemoteBranch } = await import('#/main/ssh/git.ts')
+    const calls: string[] = []
+    const run = vi.fn(async (command) => {
+      calls.push(command.type)
+      if (command.type === 'gitSnapshot') {
+        return {
+          ok: true,
+          stderr: '',
+          stdout: [
+            '__GOBLIN_REMOTE_CURRENT__',
+            'main',
+            '__GOBLIN_REMOTE_DEFAULT__',
+            'main',
+            '__GOBLIN_REMOTE_BRANCHES__',
+            ['feature/x', 'def5678', 'feature work', '2026-05-28T11:00:00Z', 'Lin', 'origin/feature/x', ''].join(
+              FIELD_SEP,
+            ),
+          ].join('\n'),
+        }
+      }
+      if (command.type === 'gitUpstream') return { ok: true, stderr: '', stdout: 'origin/feature/x' }
+      return { ok: true, stderr: '', stdout: '' }
+    })
+
+    await expect(deleteRemoteBranch(TARGET, { branch: 'feature/x', alsoDeleteUpstream: true, run })).resolves.toEqual({
+      ok: true,
+      message: 'ok',
+    })
+    expect(calls).toEqual([
+      'gitSnapshot',
+      'gitWorktreeList',
+      'gitUpstream',
+      'gitIsAncestor',
+      'gitUpstream',
+      'gitBranchDelete',
+      'gitPushDelete',
+    ])
+  })
+
+  test('skips remote upstream delete for dot upstreams and missing upstreams', async () => {
+    const { deleteRemoteBranch } = await import('#/main/ssh/git.ts')
+    const run = vi.fn(async (command) => {
+      if (command.type === 'gitSnapshot') {
+        return { ok: true, stderr: '', stdout: ['__GOBLIN_REMOTE_BRANCHES__'].join('\n') }
+      }
+      if (command.type === 'gitUpstream') return { ok: true, stderr: '', stdout: './feature/x' }
+      return { ok: true, stderr: '', stdout: '' }
+    })
+
+    await expect(
+      deleteRemoteBranch(TARGET, { branch: 'feature/x', force: true, alsoDeleteUpstream: true, run }),
+    ).resolves.toEqual({
+      ok: true,
+      message: 'ok',
+    })
+    expect(run).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'gitPushDelete' }), TARGET, expect.anything())
   })
 })

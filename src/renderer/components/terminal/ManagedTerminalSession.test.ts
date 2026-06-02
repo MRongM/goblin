@@ -35,10 +35,16 @@ const xtermMocks = vi.hoisted(() => {
       fontSize?: number
       lineHeight?: number
       macOptionIsMeta?: boolean
+      macOptionClickForcesSelection?: boolean
       minimumContrastRatio?: number
+      rightClickSelectsWord?: boolean
       rescaleOverlappingGlyphs?: boolean
       theme?: { background?: string; foreground?: string }
       scrollOnUserInput?: boolean
+      wordSeparator?: string
+      linkHandler?: {
+        activate: (event: MouseEvent, text: string) => void
+      } | null
     }
     element: HTMLDivElement | null = null
     modes = { applicationCursorKeysMode: false }
@@ -47,7 +53,14 @@ const xtermMocks = vi.hoisted(() => {
     reset = vi.fn()
     dispose = vi.fn()
     focus = vi.fn(() => this.textarea?.focus())
+    paste = vi.fn()
+    hasSelection = vi.fn(() => this.selectionText.length > 0)
+    getSelection = vi.fn(() => this.selectionText)
+    clearSelection = vi.fn(() => {
+      this.selectionText = ''
+    })
     customKeyEventHandler: ((event: KeyboardEvent) => boolean) | null = null
+    selectionText = ''
     _core = {
       _charSizeService: { measure: vi.fn() },
       _renderService: { clear: vi.fn() },
@@ -67,10 +80,16 @@ const xtermMocks = vi.hoisted(() => {
       fontSize?: number
       lineHeight?: number
       macOptionIsMeta?: boolean
+      macOptionClickForcesSelection?: boolean
       minimumContrastRatio?: number
+      rightClickSelectsWord?: boolean
       rescaleOverlappingGlyphs?: boolean
       theme?: { background?: string; foreground?: string }
       scrollOnUserInput?: boolean
+      wordSeparator?: string
+      linkHandler?: {
+        activate: (event: MouseEvent, text: string) => void
+      } | null
     }) {
       this.cols = options.cols
       this.rows = options.rows
@@ -81,10 +100,14 @@ const xtermMocks = vi.hoisted(() => {
         fontSize: options.fontSize,
         lineHeight: options.lineHeight,
         macOptionIsMeta: options.macOptionIsMeta,
+        macOptionClickForcesSelection: options.macOptionClickForcesSelection,
         minimumContrastRatio: options.minimumContrastRatio,
+        rightClickSelectsWord: options.rightClickSelectsWord,
         rescaleOverlappingGlyphs: options.rescaleOverlappingGlyphs,
         theme: options.theme,
         scrollOnUserInput: options.scrollOnUserInput,
+        wordSeparator: options.wordSeparator,
+        linkHandler: options.linkHandler,
       }
       terminals.push(this)
     }
@@ -229,8 +252,8 @@ const xtermMocks = vi.hoisted(() => {
       this.term = term
     }
 
-    open(uri: string) {
-      this.handler?.(new MouseEvent('click'), uri)
+    open(uri: string, event: MouseEvent = new MouseEvent('click')) {
+      this.handler?.(event, uri)
     }
   }
 
@@ -359,6 +382,10 @@ const terminalCalls = {
 }
 const invokeRpc = vi.fn<Window['goblin']['invokeRpc']>()
 const mockFonts = new MockFontFaceSet()
+const clipboardCalls = {
+  writeText: vi.fn<(value: string) => Promise<void>>(),
+  readText: vi.fn<() => Promise<string>>(),
+}
 
 const descriptor = {
   key: 'local\0/repo\0/worktree\0terminal-1',
@@ -400,6 +427,13 @@ beforeEach(() => {
   mockFonts.reset()
   Object.defineProperty(globalThis, 'ResizeObserver', { configurable: true, value: MockResizeObserver })
   Object.defineProperty(document, 'fonts', { configurable: true, value: mockFonts })
+  Object.defineProperty(globalThis.navigator, 'clipboard', {
+    configurable: true,
+    value: {
+      writeText: clipboardCalls.writeText.mockResolvedValue(undefined),
+      readText: clipboardCalls.readText.mockResolvedValue('clipboard text'),
+    },
+  })
   Object.defineProperty(globalThis, 'requestAnimationFrame', {
     configurable: true,
     value: (cb: FrameRequestCallback) => window.setTimeout(() => cb(performance.now()), 0),
@@ -464,6 +498,9 @@ describe('ManagedTerminalSession', () => {
     expect(xtermMocks.terminals[0]!.options.minimumContrastRatio).toBe(4.5)
     expect(xtermMocks.terminals[0]!.options.allowProposedApi).toBe(true)
     expect(xtermMocks.terminals[0]!.options.fontFamily).toContain('Goblin Mono')
+    expect(xtermMocks.terminals[0]!.options.macOptionClickForcesSelection).toBe(true)
+    expect(xtermMocks.terminals[0]!.options.rightClickSelectsWord).toBe(true)
+    expect(xtermMocks.terminals[0]!.options.wordSeparator).toBe(' ()[]{}\',"`')
     expect(xtermMocks.terminals[0]!.options.rescaleOverlappingGlyphs).toBe(true)
     expect(terminalCalls.restart).not.toHaveBeenCalled()
     expect(session.snapshot().phase).toBe('open')
@@ -607,7 +644,7 @@ describe('ManagedTerminalSession', () => {
     session.attach(host)
     await flushTerminalStart()
     await flushUntil(() => session.snapshot().phase === 'open')
-    xtermMocks.webLinkAddons[0]!.open('https://example.com/path')
+    xtermMocks.webLinkAddons[0]!.open('https://example.com/path', ctrlClick())
     await Promise.resolve()
 
     expect(invokeRpc).toHaveBeenCalledWith({
@@ -615,6 +652,94 @@ describe('ManagedTerminalSession', () => {
       input: { url: 'https://example.com/path' },
       requestId: expect.any(String),
     })
+  })
+
+  test('requires a modified click before opening terminal web links', async () => {
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const session = new ManagedTerminalSession(descriptor, vi.fn())
+
+    session.attach(host)
+    await flushTerminalStart()
+    await flushUntil(() => session.snapshot().phase === 'open')
+    xtermMocks.webLinkAddons[0]!.open('https://example.com/plain')
+    await Promise.resolve()
+
+    expect(invokeRpc).not.toHaveBeenCalled()
+
+    xtermMocks.webLinkAddons[0]!.open('https://example.com/ctrl', ctrlClick())
+    xtermMocks.terminals[0]!.options.linkHandler?.activate(ctrlClick(), 'https://example.com/osc8')
+    await Promise.resolve()
+
+    expect(invokeRpc).toHaveBeenCalledTimes(2)
+    expect(invokeRpc).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        path: 'app.openExternalUrl',
+        input: { url: 'https://example.com/ctrl' },
+      }),
+    )
+    expect(invokeRpc).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        path: 'app.openExternalUrl',
+        input: { url: 'https://example.com/osc8' },
+      }),
+    )
+  })
+
+  test('copies selected terminal text and pastes clipboard text with terminal shortcuts', async () => {
+    const savedPlatform = navigator.platform
+    Object.defineProperty(window.navigator, 'platform', { configurable: true, value: 'Linux x86_64' })
+    try {
+      const host = document.createElement('div')
+      document.body.appendChild(host)
+      const session = new ManagedTerminalSession(descriptor, vi.fn())
+
+      session.attach(host)
+      await flushTerminalStart()
+      await flushUntil(() => session.snapshot().phase === 'open')
+
+      const term = xtermMocks.terminals[0]!
+      term.selectionText = 'selected text'
+      expect(term.customKeyEventHandler?.(terminalShortcut('KeyC', { ctrlKey: true, shiftKey: true }))).toBe(false)
+      await Promise.resolve()
+      expect(clipboardCalls.writeText).toHaveBeenCalledWith('selected text')
+
+      clipboardCalls.readText.mockResolvedValueOnce('pasted text')
+      expect(term.customKeyEventHandler?.(terminalShortcut('KeyV', { ctrlKey: true, shiftKey: true }))).toBe(false)
+      await Promise.resolve()
+      expect(term.paste).toHaveBeenCalledWith('pasted text')
+    } finally {
+      Object.defineProperty(window.navigator, 'platform', { configurable: true, value: savedPlatform })
+    }
+  })
+
+  test('copies and pastes with macOS command shortcuts', async () => {
+    const savedPlatform = navigator.platform
+    Object.defineProperty(window.navigator, 'platform', { configurable: true, value: 'MacIntel' })
+    try {
+      const host = document.createElement('div')
+      document.body.appendChild(host)
+      const session = new ManagedTerminalSession(descriptor, vi.fn())
+
+      session.attach(host)
+      await flushTerminalStart()
+      await flushUntil(() => session.snapshot().phase === 'open')
+
+      const term = xtermMocks.terminals[0]!
+      term.selectionText = 'mac selected text'
+      expect(term.customKeyEventHandler?.(terminalShortcut('KeyC', { metaKey: true }))).toBe(false)
+      await Promise.resolve()
+      expect(clipboardCalls.writeText).toHaveBeenCalledWith('mac selected text')
+
+      clipboardCalls.readText.mockResolvedValueOnce('mac pasted text')
+      expect(term.customKeyEventHandler?.(terminalShortcut('KeyV', { metaKey: true }))).toBe(false)
+      await Promise.resolve()
+      expect(term.paste).toHaveBeenCalledWith('mac pasted text')
+    } finally {
+      Object.defineProperty(window.navigator, 'platform', { configurable: true, value: savedPlatform })
+    }
   })
 
   test('does not send unsafe web links to the app rpc', async () => {
@@ -625,9 +750,9 @@ describe('ManagedTerminalSession', () => {
     session.attach(host)
     await flushTerminalStart()
     await flushUntil(() => session.snapshot().phase === 'open')
-    xtermMocks.webLinkAddons[0]!.open('javascript:alert(1)')
-    xtermMocks.webLinkAddons[0]!.open('file:///tmp/secret')
-    xtermMocks.webLinkAddons[0]!.open('https://example.com/\u0000bad')
+    xtermMocks.webLinkAddons[0]!.open('javascript:alert(1)', ctrlClick())
+    xtermMocks.webLinkAddons[0]!.open('file:///tmp/secret', ctrlClick())
+    xtermMocks.webLinkAddons[0]!.open('https://example.com/\u0000bad', ctrlClick())
     await Promise.resolve()
 
     expect(invokeRpc).not.toHaveBeenCalled()
@@ -1014,6 +1139,24 @@ function deferred<T>() {
 
 function optionArrow(key: string): KeyboardEvent {
   return new KeyboardEvent('keydown', { key, altKey: true, cancelable: true })
+}
+
+function ctrlClick(): MouseEvent {
+  return new MouseEvent('click', { button: 0, ctrlKey: true })
+}
+
+function terminalShortcut(
+  code: 'KeyC' | 'KeyV',
+  options: { ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean },
+): KeyboardEvent {
+  return new KeyboardEvent('keydown', {
+    key: code === 'KeyC' ? 'c' : 'v',
+    code,
+    ctrlKey: !!options.ctrlKey,
+    metaKey: !!options.metaKey,
+    shiftKey: !!options.shiftKey,
+    cancelable: true,
+  })
 }
 
 async function flushTerminalStart(): Promise<void> {

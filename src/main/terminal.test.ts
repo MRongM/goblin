@@ -1,5 +1,5 @@
 import { beforeAll, beforeEach, describe, expect, test, vi } from 'vitest'
-import { ipcMain } from 'electron'
+import { app, ipcMain } from 'electron'
 import { closeWorktreeSession, pruneRepoSessions, wireTerminalIpc } from '#/main/terminal.ts'
 import { openTerminalSession } from '#/main/terminal-core.ts'
 import { getWorktrees } from '#/main/git/worktrees.ts'
@@ -50,7 +50,7 @@ vi.mock('electron', () => ({
     vi.fn(mockNotificationEmitting('show')),
     { isSupported: vi.fn(() => true) },
   ),
-  app: { on: vi.fn(), getAppPath: vi.fn(() => '/app'), dock: { bounce: vi.fn() } },
+  app: { on: vi.fn(), getAppPath: vi.fn(() => '/app'), dock: { bounce: vi.fn(), setBadge: vi.fn() } },
 }))
 
 vi.mock('#/main/git/worktrees.ts', () => ({
@@ -308,6 +308,18 @@ describe('terminal IPC', () => {
         worktreePaths: ['/srv/goblin-feature'],
       }),
     ).toBe(true)
+  })
+
+  test('sets the macOS Dock badge for trusted badge updates', () => {
+    invoke('goblin:terminal-set-badge', 2)
+
+    expect(app.dock?.setBadge).toHaveBeenCalledWith('2')
+  })
+
+  test('clears the macOS Dock badge when the unread count reaches zero', () => {
+    invoke('goblin:terminal-set-badge', 0)
+
+    expect(app.dock?.setBadge).toHaveBeenCalledWith('')
   })
 
   test('shows a system notification for trusted bell requests', async () => {

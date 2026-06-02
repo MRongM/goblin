@@ -10,6 +10,7 @@ import type {
 } from '#/renderer/types.ts'
 import type { CommitDetail } from '#/shared/rpc.ts'
 import type { RemoteDiagnosticsResult, RemoteRepoTarget, RepoKind, RepoSessionEntry } from '#/shared/remote-repo.ts'
+import type { WorktreeSourcesByRepo } from '#/renderer/stores/repos/worktree-sources.ts'
 import type {
   RemoteListeningPort,
   RemotePortForwardConfig,
@@ -156,6 +157,7 @@ export interface ReposStore {
   repos: Record<string, RepoState>
   repoCache: Record<string, CachedRepoState>
   branchOrdersByRepo: Record<string, string[]>
+  worktreeSourcesByRepo: WorktreeSourcesByRepo
   remotePortConfigsByRepo: Record<string, RemotePortForwardConfig[]>
   order: string[]
   activeId: string | null

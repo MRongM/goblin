@@ -202,6 +202,8 @@ export const zh: Record<DictKey, string> = {
   'branches.gone': '已失联',
   'branches.dirty': '有改动',
   'branches.worktree': '工作树',
+  'branches.source-exact': '来自 {branch}',
+  'branches.source-inferred': '推断来自 {branch}',
   'branches.default': '默认',
   'branches.no-upstream': '未设置上游',
 
@@ -368,8 +370,8 @@ export const zh: Record<DictKey, string> = {
   'action.menu': '操作',
   'action.refresh': '刷新',
   'action.refresh-title': 'git branch · git status · git log',
-  'action.refresh-remote': '刷新',
-  'action.refresh-remote-title': '通过 SSH 刷新分支、状态和当前提交记录',
+  'action.refresh-remote': '刷新远端',
+  'action.refresh-remote-title': '通过 SSH 同步并刷新分支、状态和当前提交记录',
 
   // ---- Remote ports -----------------------------------------------------
   'remote-ports.button': '端口转发',

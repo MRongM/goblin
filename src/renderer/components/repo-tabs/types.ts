@@ -13,6 +13,7 @@ export interface RepoTabSummary {
   diagnosticMessage?: string | null
   remoteDetails?: GitRemoteInfo[]
   unavailable?: boolean
+  unreadBellCount?: number
 }
 
 export interface RepoTabStripLabels {
@@ -26,4 +27,5 @@ export interface RepoTabStripLabels {
   cloneShortcut: string | null
   addRemote: string
   unavailable: string
+  bellUnreadCount: (count: number) => string
 }

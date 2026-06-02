@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from 'vitest'
-import { replaceRepo } from '#/renderer/stores/repos/helpers.ts'
+import { emptyRepo, replaceRepo } from '#/renderer/stores/repos/helpers.ts'
 import { useReposStore } from '#/renderer/stores/repos/store.ts'
 import type { BranchLogState, DetailTab, RepoState } from '#/renderer/stores/repos/types.ts'
 import {
@@ -670,6 +670,33 @@ describe('commit detail collapse behavior', () => {
 
     expect(useReposStore.getState().detailCollapsed).toBe(false)
     const commitDetail = useReposStore.getState().repos[REPO_ID]?.ui.commitDetail
+    expect(commitDetail?.phase).toBe('open')
+    expect(commitDetail?.phase === 'open' ? commitDetail.detail.meta.hash : null).toBe('abc123')
+  })
+
+  test('opening a remote commit uses the remote commit RPC', async () => {
+    const remoteId = 'ssh://deploy@prod:22/srv/goblin'
+    const target = {
+      id: remoteId,
+      alias: null,
+      host: 'prod',
+      user: 'deploy',
+      port: 22,
+      remotePath: '/srv/goblin',
+      displayName: 'prod:goblin',
+    }
+    const remoteRepo = emptyRepo(remoteId, 'prod:goblin', { kind: 'remote', remoteTarget: target })
+    useReposStore.setState({
+      repos: { [remoteId]: remoteRepo },
+      order: [remoteId],
+      activeId: remoteId,
+      sessionReady: true,
+    })
+    rpcHandlers['remote.commit'] = async ({ hash }: { hash: string }) => createCommitDetail(hash)
+
+    await useReposStore.getState().openCommit(remoteId, 'abc123')
+
+    const commitDetail = useReposStore.getState().repos[remoteId]?.ui.commitDetail
     expect(commitDetail?.phase).toBe('open')
     expect(commitDetail?.phase === 'open' ? commitDetail.detail.meta.hash : null).toBe('abc123')
   })

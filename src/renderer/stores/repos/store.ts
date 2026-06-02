@@ -27,7 +27,11 @@ import { createLifecycleActions } from '#/renderer/stores/repos/lifecycle.ts'
 import { createRefreshActions } from '#/renderer/stores/repos/refresh.ts'
 import { createRemotePortActions } from '#/renderer/stores/repos/remote-ports.ts'
 import { createSelectionActions } from '#/renderer/stores/repos/selection.ts'
-import { normalizeBranchOrdersByRepo, normalizeRepoCache } from '#/renderer/stores/repos/persistence.ts'
+import {
+  normalizeBranchOrdersByRepo,
+  normalizeRepoCache,
+  normalizeWorktreeSourcesByRepo,
+} from '#/renderer/stores/repos/persistence.ts'
 import {
   DEFAULT_DETAIL_COLLAPSED,
   DEFAULT_DETAIL_PANE_SIZES,
@@ -35,16 +39,19 @@ import {
 } from '#/shared/workspace-layout.ts'
 import type { CachedRepoState, ReposStore } from '#/renderer/stores/repos/types.ts'
 import { normalizeRemotePortConfigMap, type RemotePortForwardConfig } from '#/shared/remote-ports.ts'
+import type { WorktreeSourcesByRepo } from '#/renderer/stores/repos/worktree-sources.ts'
 
 interface PersistedReposStore {
   repoCache: Record<string, CachedRepoState>
   branchOrdersByRepo: Record<string, string[]>
+  worktreeSourcesByRepo: WorktreeSourcesByRepo
   remotePortConfigsByRepo: Record<string, RemotePortForwardConfig[]>
 }
 
 interface RawPersistedReposStore {
   repoCache?: unknown
   branchOrdersByRepo?: unknown
+  worktreeSourcesByRepo?: unknown
   remotePortConfigsByRepo?: unknown
 }
 
@@ -61,8 +68,12 @@ const repoStorage: PersistStorage<PersistedReposStore, void> = {
       const parsed = JSON.parse(raw) as StorageValue<RawPersistedReposStore>
       const repoCache = normalizeRepoCache(parsed.state?.repoCache)
       const branchOrdersByRepo = normalizeBranchOrdersByRepo(parsed.state?.branchOrdersByRepo)
+      const worktreeSourcesByRepo = normalizeWorktreeSourcesByRepo(parsed.state?.worktreeSourcesByRepo)
       const remotePortConfigsByRepo = normalizeRemotePortConfigMap(parsed.state?.remotePortConfigsByRepo)
-      const value = { state: { repoCache, branchOrdersByRepo, remotePortConfigsByRepo }, version: parsed.version }
+      const value = {
+        state: { repoCache, branchOrdersByRepo, worktreeSourcesByRepo, remotePortConfigsByRepo },
+        version: parsed.version,
+      }
       lastStoredReposJson = JSON.stringify(value)
       return value
     } catch (err) {
@@ -103,6 +114,7 @@ export const useReposStore = create<ReposStore>()(
       repos: {},
       repoCache: {},
       branchOrdersByRepo: {},
+      worktreeSourcesByRepo: {},
       remotePortConfigsByRepo: {},
       order: [],
       activeId: null,
@@ -126,6 +138,7 @@ export const useReposStore = create<ReposStore>()(
       partialize: (state): PersistedReposStore => ({
         repoCache: state.repoCache,
         branchOrdersByRepo: state.branchOrdersByRepo,
+        worktreeSourcesByRepo: state.worktreeSourcesByRepo,
         remotePortConfigsByRepo: state.remotePortConfigsByRepo,
       }),
       merge: (persisted, current) => ({
@@ -133,6 +146,9 @@ export const useReposStore = create<ReposStore>()(
         repoCache: normalizeRepoCache((persisted as RawPersistedReposStore | null)?.repoCache),
         branchOrdersByRepo: normalizeBranchOrdersByRepo(
           (persisted as RawPersistedReposStore | null)?.branchOrdersByRepo,
+        ),
+        worktreeSourcesByRepo: normalizeWorktreeSourcesByRepo(
+          (persisted as RawPersistedReposStore | null)?.worktreeSourcesByRepo,
         ),
         remotePortConfigsByRepo: normalizeRemotePortConfigMap(
           (persisted as RawPersistedReposStore | null)?.remotePortConfigsByRepo,

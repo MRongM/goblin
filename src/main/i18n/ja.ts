@@ -212,6 +212,8 @@ export const ja: Record<DictKey, string> = {
   'branches.gone': '消失',
   'branches.dirty': '変更あり',
   'branches.worktree': 'ワークツリー',
+  'branches.source-exact': '{branch} から',
+  'branches.source-inferred': '{branch} からと推定',
   'branches.default': 'デフォルト',
   'branches.no-upstream': '上流なし',
 
@@ -382,7 +384,7 @@ export const ja: Record<DictKey, string> = {
   'action.refresh': '更新',
   'action.refresh-title': 'git branch · git status · git log',
   'action.refresh-remote': 'リモートデータを更新',
-  'action.refresh-remote-title': 'SSH 経由でブランチ、ステータス、表示中のログを更新',
+  'action.refresh-remote-title': 'SSH 経由でブランチ、ステータス、表示中のログを同期して更新',
 
   // ---- Remote ports ------------------------------------------------------
   'remote-ports.button': 'ポート',

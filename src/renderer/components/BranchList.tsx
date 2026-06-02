@@ -25,6 +25,7 @@ import { ScrollArea } from '#/renderer/components/ui/scroll-area.tsx'
 import { branchActionsAvailable } from '#/renderer/hooks/branch-action-state.ts'
 import { resourceBusy } from '#/renderer/stores/repos/resources.ts'
 import type { RepoBranchState, RepoState } from '#/renderer/stores/repos/types.ts'
+import { getWorktreeSource, type WorktreeSourceMap } from '#/renderer/stores/repos/worktree-sources.ts'
 
 interface Props {
   repoId: string
@@ -67,7 +68,7 @@ export function BranchList({ repoId, showActions = true, variant = 'list' }: Pro
     },
     [repoId, reorderBranches],
   )
-  const { repo, branches, selected, current } = useStoreWithEqualityFn(
+  const { repo, branches, selected, current, sourceMap } = useStoreWithEqualityFn(
     useReposStore,
     (s) => {
       const repo = s.repos[repoId]
@@ -86,11 +87,12 @@ export function BranchList({ repoId, showActions = true, variant = 'list' }: Pro
         branchSearchQuery,
         selected: repo?.ui.selectedBranch ?? null,
         current: repo?.data.currentBranch ?? '',
+        sourceMap: s.worktreeSourcesByRepo[repoId],
       }
     },
     (a, b) =>
       a.repo === b.repo
-        ? a.branchSearchQuery === b.branchSearchQuery
+        ? a.branchSearchQuery === b.branchSearchQuery && a.sourceMap === b.sourceMap
         : !!a.repo &&
           !!b.repo &&
           a.repo.id === b.repo.id &&
@@ -102,6 +104,7 @@ export function BranchList({ repoId, showActions = true, variant = 'list' }: Pro
           a.repo.data.worktreesByPath === b.repo.data.worktreesByPath &&
           a.repo.operations.branchAction === b.repo.operations.branchAction &&
           a.repo.resources.snapshot === b.repo.resources.snapshot &&
+          a.sourceMap === b.sourceMap &&
           a.branchCount === b.branchCount &&
           a.selected === b.selected &&
           a.current === b.current,
@@ -170,6 +173,7 @@ export function BranchList({ repoId, showActions = true, variant = 'list' }: Pro
               branches={renderedBranches}
               selected={selected}
               current={current}
+              sourceMap={sourceMap}
               lang={lang}
               selectedRef={selectedRef}
               showActions={showActions}
@@ -187,6 +191,7 @@ export function BranchList({ repoId, showActions = true, variant = 'list' }: Pro
           branches={renderedBranches}
           selected={selected}
           current={current}
+          sourceMap={sourceMap}
           lang={lang}
           selectedRef={selectedRef}
           showActions={showActions}
@@ -214,6 +219,7 @@ function BranchRows({
   branches,
   selected,
   current,
+  sourceMap,
   lang,
   selectedRef,
   showActions,
@@ -227,6 +233,7 @@ function BranchRows({
   branches: RepoBranchState[]
   selected: string | null
   current: string
+  sourceMap?: WorktreeSourceMap
   lang: Lang
   selectedRef: RefObject<HTMLLIElement | null>
   showActions: boolean
@@ -246,6 +253,7 @@ function BranchRows({
             branch={branch}
             selected={selected}
             current={current}
+            source={getWorktreeSource(sourceMap, branch.name, branch.worktree?.path)}
             lang={lang}
             selectedRef={selectedRef}
             showActions={showActions && branchActionsAvailable(repo, branch)}

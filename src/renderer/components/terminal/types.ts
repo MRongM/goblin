@@ -75,6 +75,7 @@ export interface TerminalSessionContextValue {
   createTerminal: (base: TerminalSessionBase) => string
   activeDescriptor: (groupKey: string) => TerminalDescriptor | null
   sessionSummaries: (groupKey: string) => TerminalSessionSummary[]
+  unreadBellCountByRepo: (repoId: string) => number
   setActive: (groupKey: string, key: string) => void
   clearBell: (key: string) => boolean
   closeTerminalAndDismissDetailIfLast: (key: string, base: TerminalSessionBase) => TerminalSessionSummary[]

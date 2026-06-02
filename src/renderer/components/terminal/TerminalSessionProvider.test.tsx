@@ -198,7 +198,8 @@ describe('TerminalSessionProvider', () => {
     useSettingsStore.setState({ terminalNotificationsEnabled: true })
     const hasFocus = vi.spyOn(document, 'hasFocus').mockReturnValue(false)
     const notifyBell = vi.fn(async () => true)
-    Object.assign(window.goblin.terminal, { notifyBell })
+    const setBadge = vi.fn()
+    Object.assign(window.goblin.terminal, { notifyBell, setBadge })
     const { getContext, unmount } = await renderProvider()
 
     try {
@@ -224,6 +225,8 @@ describe('TerminalSessionProvider', () => {
         ['terminal-1', false, true],
         ['terminal-2', true, false],
       ])
+      expect(getContext().unreadBellCountByRepo(REPO_ID)).toBe(1)
+      expect(setBadge).toHaveBeenCalledWith(1)
       expect(notifyBell).toHaveBeenCalledWith({
         title: 'gbl-terminal-provider-repo',
         body: 'feature/worktree\nzsh',
@@ -244,6 +247,8 @@ describe('TerminalSessionProvider', () => {
         ['terminal-1', true, false],
         ['terminal-2', false, false],
       ])
+      expect(getContext().unreadBellCountByRepo(REPO_ID)).toBe(0)
+      expect(setBadge).toHaveBeenLastCalledWith(0)
     } finally {
       hasFocus.mockRestore()
       await unmount()

@@ -44,6 +44,12 @@ import { branchPullRequestBelongsToBranch } from '#/shared/git-types.ts'
 import type { RepoOperationReason, RepoPullRequestReason } from '#/renderer/stores/repos/operations.ts'
 import type { BranchLogState, RepoState, ReposGet, ReposSet } from '#/renderer/stores/repos/types.ts'
 import type { ExecResult, LogEntry, PullRequestFetchMode, PullRequestInfo } from '#/renderer/types.ts'
+import {
+  getWorktreeSource,
+  mergeInferredWorktreeSources,
+  pruneWorktreeSources,
+  type LiveWorktreeSourceTarget,
+} from '#/renderer/stores/repos/worktree-sources.ts'
 import { rpc } from '#/renderer/rpc.ts'
 
 export const INITIAL_LOG_COUNT = 30
@@ -83,6 +89,15 @@ function existingBranchNames(r: { data: { branches: Array<{ name: string }> } })
   return new Set(r.data.branches.map((branch) => branch.name))
 }
 
+function worktreeSourceTargetsFromBranches(
+  branches: Array<{ name: string; worktree?: { path?: string } }>,
+  currentBranch: string,
+): LiveWorktreeSourceTarget[] {
+  return branches
+    .filter((branch) => branch.name !== currentBranch && typeof branch.worktree?.path === 'string')
+    .map((branch) => ({ branch: branch.name, worktreePath: branch.worktree!.path! }))
+}
+
 function finishPullRequestBranchResources(
   r: {
     resources: {
@@ -107,6 +122,55 @@ function finishPullRequestBranchResources(
 }
 
 export function createRefreshActions(set: ReposSet, get: ReposGet) {
+  function pruneSourcesForSnapshot(id: string, token: number, liveTargets: LiveWorktreeSourceTarget[]): void {
+    set((s) => {
+      const repo = s.repos[id]
+      if (!repo || repo.instanceToken !== token) return s
+      return { worktreeSourcesByRepo: pruneWorktreeSources(s.worktreeSourcesByRepo, id, liveTargets) }
+    })
+  }
+
+  async function refreshWorktreeSourceInferences(
+    id: string,
+    token: number,
+    liveTargets: LiveWorktreeSourceTarget[],
+  ): Promise<void> {
+    if (liveTargets.length === 0) return
+    const repo = get().repos[id]
+    if (!repo || repo.instanceToken !== token) return
+    const existingSources = get().worktreeSourcesByRepo[id]
+    const branches = [
+      ...new Set(
+        liveTargets
+          .filter((target) => getWorktreeSource(existingSources, target.branch, target.worktreePath)?.confidence !== 'exact')
+          .map((target) => target.branch),
+      ),
+    ]
+    if (branches.length === 0) return
+    try {
+      const inferences =
+        repo.kind === 'remote'
+          ? repo.remoteTarget
+            ? await rpc.remote.worktreeSourceInferences.query({ target: repo.remoteTarget, branches })
+            : []
+          : await rpc.repo.worktreeSourceInferences.query({ cwd: id, branches })
+      set((s) => {
+        const repo = s.repos[id]
+        if (!repo || repo.instanceToken !== token) return s
+        return {
+          worktreeSourcesByRepo: mergeInferredWorktreeSources(
+            s.worktreeSourcesByRepo,
+            id,
+            liveTargets,
+            inferences,
+          ),
+        }
+      })
+    } catch (err) {
+      console.warn('[refreshSnapshot] failed to infer worktree source branches', err)
+    }
+  }
+
   function fetchTaskForRepo(
     repo: RepoState,
     kind?: 'user' | 'background',
@@ -268,7 +332,7 @@ export function createRefreshActions(set: ReposSet, get: ReposGet) {
         targets: [{ key: 'snapshot', reason: 'snapshot' }],
         task: snapshotTask,
         errorFromResult: (snap) => (snap ? null : 'error.failed-read-repo'),
-        onResult: (snap, ctx) => {
+        onResult: async (snap, ctx) => {
           if (!snap) {
             updateIfFresh(set, id, token, (r) => {
               finishResourceError(r.resources.snapshot, 'error.failed-read-repo')
@@ -277,6 +341,7 @@ export function createRefreshActions(set: ReposSet, get: ReposGet) {
             return
           }
           const validBranches = new Set(snap.branches.map((b) => b.name))
+          const liveSourceTargets = worktreeSourceTargetsFromBranches(snap.branches, snap.current)
           updateIfFresh(set, id, token, (r) => {
             const logsByBranch = Object.fromEntries(
               Object.entries(r.data.logsByBranch).filter(([branch]) => validBranches.has(branch)),
@@ -354,6 +419,8 @@ export function createRefreshActions(set: ReposSet, get: ReposGet) {
             r.cache.savedAt = null
             finishResourceSuccess(r.resources.snapshot)
           })
+          pruneSourcesForSnapshot(id, token, liveSourceTargets)
+          await refreshWorktreeSourceInferences(id, token, liveSourceTargets)
           pruneRepoBranchLogOperations(id, validBranches)
           pruneRepoBranchPullRequestOperations(id, validBranches)
           const branchNames = snap.branches.map((branch) => branch.name)
