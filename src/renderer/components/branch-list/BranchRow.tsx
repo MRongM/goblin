@@ -67,7 +67,8 @@ export function BranchRow({
   const t = useT()
   const isSelected = branch.name === selected
   const isCurrent = branch.name === current
-  const hasWorktree = !!branch.worktree?.path
+  const worktreePath = branch.worktree?.path ?? ''
+  const hasWorktree = !!worktreePath
   const isWorktree = hasWorktree && !isCurrent
   const worktreeState = getBranchWorktreeState(repo, branch)
   const worktreeDirty = worktreeState?.dirty ?? false
@@ -85,6 +86,7 @@ export function BranchRow({
     isCurrent ? t('branch-status.current') : null,
     branch.isDefault ? t('branches.default') : null,
     hasWorktree ? t(worktreeDirty ? 'branches.dirty' : 'branches.worktree') : null,
+    worktreePath || null,
     sourceLabel,
     branch.trackingGone ? t('branches.gone') : null,
     branch.ahead > 0 ? t('branch-status.sync.ahead', { n: branch.ahead }) : null,
@@ -177,6 +179,17 @@ export function BranchRow({
             )}
           </span>
         </span>
+        {worktreePath && (
+          <span
+            className={cn(
+              'col-start-2 min-w-0 truncate font-mono text-xs',
+              isSelected ? 'text-selected-muted-foreground' : 'text-muted-foreground',
+            )}
+            title={worktreePath}
+          >
+            {worktreePath}
+          </span>
+        )}
         <span
           className={cn(
             'col-start-2 flex min-w-0 items-center gap-2 text-xs',
