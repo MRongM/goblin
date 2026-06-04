@@ -1,12 +1,13 @@
-// Single source of truth for the user's theme. Mirrors deck-app's design:
-// pref ('auto' | 'light' | 'dark') persists; resolved ('light' | 'dark')
-// is computed against `nativeTheme.shouldUseDarkColors` when pref === 'auto'.
-// Renderers pull `{ pref, resolved, colorTheme }` at boot and subscribe to changes —
-// they never read prefers-color-scheme themselves.
+// Native projection for the user's server-backed theme preference:
+// pref ('auto' | 'light' | 'dark') persists in settings; resolved
+// ('light' | 'dark') is computed against `nativeTheme.shouldUseDarkColors`
+// when pref === 'auto'. Main owns the Electron-native projection and
+// emits updates, but it is not the persistence source of truth.
 
 import { nativeTheme } from 'electron'
-import { loadSettings, setColorTheme as persistColorTheme, setThemePref as persistThemePref } from '#/main/settings.ts'
-import { DEFAULT_COLOR_THEME, isColorTheme } from '#/shared/color-theme.ts'
+import { getSettingsPrefs, updateSettingsPrefs } from '#/main/settings-server-client.ts'
+import { isColorTheme } from '#/shared/color-theme.ts'
+import { DEFAULT_COLOR_THEME } from '#/shared/settings-defaults.ts'
 import type { ResolvedTheme, ThemePref, ThemeState } from '#/shared/rpc.ts'
 import type { ColorTheme } from '#/shared/color-theme.ts'
 
@@ -43,9 +44,9 @@ function emit(): void {
 export async function initTheme(): Promise<void> {
   if (inited) return
   inited = true
-  const settings = await loadSettings()
-  currentPref = settings.theme
-  currentColorTheme = settings.colorTheme
+  const serverSettings = await getSettingsPrefs()
+  currentPref = serverSettings.theme
+  currentColorTheme = serverSettings.colorTheme
   applyToNativeTheme(currentPref)
   currentResolved = resolveTheme(currentPref)
 
@@ -69,10 +70,11 @@ export async function setThemePref(pref: ThemePref): Promise<ThemeState> {
   if (pref === currentPref) return getTheme()
   transitionDepth++
   try {
-    await persistThemePref(pref)
-    currentPref = pref
-    applyToNativeTheme(pref)
-    currentResolved = resolveTheme(pref)
+    const serverSettings = await updateSettingsPrefs({ theme: pref })
+    const nextPref = serverSettings.theme
+    currentPref = nextPref
+    applyToNativeTheme(nextPref)
+    currentResolved = resolveTheme(nextPref)
     emit()
     return getTheme()
   } finally {
@@ -83,7 +85,8 @@ export async function setThemePref(pref: ThemePref): Promise<ThemeState> {
 export async function setColorTheme(colorTheme: ColorTheme): Promise<ThemeState> {
   if (!isColorTheme(colorTheme)) return getTheme()
   if (colorTheme === currentColorTheme) return getTheme()
-  currentColorTheme = await persistColorTheme(colorTheme)
+  const serverSettings = await updateSettingsPrefs({ colorTheme })
+  currentColorTheme = serverSettings.colorTheme
   emit()
   return getTheme()
 }

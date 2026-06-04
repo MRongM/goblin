@@ -1,5 +1,5 @@
-import { broadcastRpcEvent } from '#/main/events.ts'
-import { toSafeSessionPath } from '#/main/ipc/validation.ts'
+import { broadcastRendererEffectIntent } from '#/main/renderer-surface-events.ts'
+import { toSafeSessionPath } from '#/shared/input-validation.ts'
 
 const queuedPaths = new Set<string>()
 
@@ -7,7 +7,7 @@ export function enqueueExternalOpenPath(path: unknown): boolean {
   const safePath = toSafeSessionPath(path)
   if (!safePath || queuedPaths.has(safePath)) return false
   queuedPaths.add(safePath)
-  broadcastRpcEvent({ type: 'external-open-enqueued' })
+  broadcastRendererEffectIntent({ type: 'external-open-enqueued' })
   return true
 }
 
