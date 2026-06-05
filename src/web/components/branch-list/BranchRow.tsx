@@ -1,13 +1,15 @@
 import { type RefObject } from 'react'
 import { ArrowDown, ArrowUp, Check, FolderTree, GitBranch } from 'lucide-react'
-import { useT } from '#/web/stores/i18n.ts'
-import type { RepoBranchState, RepoState } from '#/web/stores/repos/types.ts'
+import { useI18nStore, useT } from '#/web/stores/i18n.ts'
+import type { RepoBranchState } from '#/web/stores/repos/types.ts'
 import { Badge } from '#/web/components/ui/badge.tsx'
 import { BranchActionsMenu } from '#/web/components/BranchActionsMenu.tsx'
 import { cn } from '#/web/lib/cn.ts'
+import { formatRelativeTimeOrNull } from '#/web/lib/dates.ts'
 import { getBranchWorktreeState } from '#/web/stores/repos/worktree-state.ts'
+import type { BranchActionRepo } from '#/web/hooks/branch-action-state.ts'
 interface BranchRowProps {
-  repo: RepoState
+  repo: BranchActionRepo
   branch: RepoBranchState
   selected: string | null
   current: string
@@ -50,12 +52,15 @@ export function BranchRow({
   onActionMenuOpenChange,
 }: BranchRowProps) {
   const t = useT()
+  const lang = useI18nStore((s) => s.lang)
   const isSelected = branch.name === selected
   const isCurrent = branch.name === current
   const hasWorktree = !!branch.worktree?.path
   const isWorktree = hasWorktree && !isCurrent
   const worktreeState = getBranchWorktreeState(repo, branch)
   const worktreeDirty = worktreeState?.dirty ?? false
+  const commitTime = formatRelativeTimeOrNull(branch.lastCommitDate, lang)
+  const commitMeta = commitTime ? (branch.lastCommitAuthor ? `${branch.lastCommitAuthor} · ${commitTime}` : commitTime) : null
   const ariaParts = [
     branch.name,
     isCurrent ? t('branch-status.current') : null,
@@ -64,6 +69,7 @@ export function BranchRow({
     branch.trackingGone ? t('branches.gone') : null,
     branch.ahead > 0 ? t('branch-status.sync.ahead', { n: branch.ahead }) : null,
     branch.behind > 0 ? t('branch-status.sync.behind', { n: branch.behind }) : null,
+    commitMeta,
   ].filter(Boolean)
 
   return (
@@ -134,6 +140,17 @@ export function BranchRow({
                 count={branch.behind}
                 label={t('branch-status.sync.behind', { n: branch.behind })}
               />
+            )}
+            {commitMeta && (
+              <span
+                className={cn(
+                  'min-w-0 truncate whitespace-nowrap text-[11px] leading-none',
+                  isSelected ? 'text-selected-muted-foreground/90' : 'text-muted-foreground/85',
+                )}
+                title={commitMeta}
+              >
+                {commitMeta}
+              </span>
             )}
           </span>
         </span>

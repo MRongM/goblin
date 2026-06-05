@@ -10,7 +10,8 @@ import {
   StatusRows,
   type Tone,
 } from '#/web/components/branch-detail/status-ui.tsx'
-import { formatRelativeTime } from '#/web/lib/dates.ts'
+import { formatRelativeTimeOrNull } from '#/web/lib/dates.ts'
+import { useIsCompactUi } from '#/web/hooks/useResponsiveUiMode.tsx'
 import { formatWorktreePath } from '#/web/lib/paths.ts'
 import { PROTECTED_BRANCHES, branchPullRequestBelongsToBranch } from '#/shared/git-types.ts'
 import type { SelectedBranchDetail } from '#/web/components/branch-detail/model.ts'
@@ -67,6 +68,7 @@ function SyncValue({
 export function BranchStatus({ detail, layout }: Props) {
   const t = useT()
   const lang = useI18nStore((s) => s.lang)
+  const compact = useIsCompactUi()
   const { branch, statusCount } = detail
   const behavior = repoWorkspaceBehavior(layout, false)
   if (!branch) return <EmptyState title={t('branches.empty')} />
@@ -80,8 +82,8 @@ export function BranchStatus({ detail, layout }: Props) {
   const hasWorktreeChanges = !!branch.worktree?.path && (detail.worktreeState?.dirty || worktreeChangeCount > 0)
   const mergeKnown = branch.isDefault || branch.mergedToDefault !== undefined
   const showMerged = !branch.isDefault
-  const commitTime = formatRelativeTime(branch.lastCommitDate, lang)
-  const commitMeta = branch.lastCommitAuthor ? `${branch.lastCommitAuthor} · ${commitTime}` : commitTime
+  const commitTime = formatRelativeTimeOrNull(branch.lastCommitDate, lang)
+  const commitMeta = commitTime ? (branch.lastCommitAuthor ? `${branch.lastCommitAuthor} · ${commitTime}` : commitTime) : null
   const mergeLabel = !mergeKnown
     ? t('branch-status.merge-unknown')
     : branch.mergedToDefault || branch.isDefault
@@ -196,9 +198,11 @@ export function BranchStatus({ detail, layout }: Props) {
             <span className="min-w-0 truncate leading-tight text-foreground/95" title={branch.lastCommitMessage || undefined}>
               {branch.lastCommitMessage || '—'}
             </span>
-            <span className="shrink-0 whitespace-nowrap text-[11px] leading-none text-muted-foreground/85" title={commitMeta}>
-              {commitMeta}
-            </span>
+            {commitMeta && (
+              <span className="shrink-0 whitespace-nowrap text-xs leading-tight text-muted-foreground/85" title={commitMeta}>
+                {commitMeta}
+              </span>
+            )}
           </div>
         }
         valueLayout="fill"
@@ -217,7 +221,7 @@ export function BranchStatus({ detail, layout }: Props) {
           tone={mergeTone}
         />
       )}
-      <PullRequestStatusRow pullRequest={pullRequest} tooltipSide={behavior.prTooltipSide} />
+      <PullRequestStatusRow pullRequest={pullRequest} tooltipSide={compact ? 'top' : behavior.prTooltipSide} />
     </StatusRows>
   )
 }

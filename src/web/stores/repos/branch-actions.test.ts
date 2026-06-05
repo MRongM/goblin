@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, test } from 'vitest'
 import { useReposStore } from '#/web/stores/repos/store.ts'
-import { repoOperation } from '#/web/stores/repos/runtime.ts'
-import { startResource } from '#/web/stores/repos/resources.ts'
+import { markRepoOperationTargets, nextRepoOperationId, repoOperation } from '#/web/stores/repos/runtime.ts'
 import { replaceRepo } from '#/web/stores/repos/helpers.ts'
 import { getBranchActionCapabilities } from '#/web/hooks/useBranchActions.tsx'
 import { branchBrowserRemoteProvider } from '#/web/hooks/useBranchActionItems.ts'
@@ -151,7 +150,7 @@ describe('branch action capabilities', () => {
     })
   })
 
-  test('disables external editor actions for remote worktrees while keeping terminal access', () => {
+  test('disables external editor and terminal actions for remote worktrees', () => {
     const branch = createRepoBranch('feature/remote', { worktree: { path: '/srv/repo-feature' } })
     const target = normalizeRemoteTarget({
       alias: 'example',
@@ -176,7 +175,7 @@ describe('branch action capabilities', () => {
     })
 
     expect(getBranchActionCapabilities(useReposStore.getState().repos[target!.id]!, branch)).toMatchObject({
-      canOpenTerminal: true,
+      canOpenTerminal: false,
       canOpenEditor: false,
     })
   })
@@ -245,14 +244,7 @@ describe('runBranchAction', () => {
         return { ok: true, message: 'ok' }
       },
     })
-    useReposStore.setState((s) => ({
-      repos: {
-        ...s.repos,
-        [REPO_ID]: replaceRepo(s.repos[REPO_ID]!, (repo) => {
-          startResource(repo.resources.fetch)
-        }),
-      },
-    }))
+    markRepoOperationTargets(REPO_ID, nextRepoOperationId(REPO_ID), [{ key: 'fetch', reason: 'fetch' }], 'running')
 
     const result = await useReposStore.getState().runBranchAction(REPO_ID, { kind: 'checkout', branch: 'feature/a' })
 
@@ -565,6 +557,35 @@ describe('runBranchAction', () => {
     })
     expect(repoOperation(REPO_ID, 'branchAction').phase).toBe('idle')
     expect(repoOperation(REPO_ID, 'branchAction').target).toBeNull()
+  })
+
+  test('submitBranchAction starts create worktree without waiting for completion', async () => {
+    let release!: () => void
+    installGoblinTestBridge({
+      'repo.createWorktree': () =>
+        new Promise((resolve) => {
+          release = () => resolve({ ok: true, message: 'ok' })
+        }),
+      'repo.snapshot': async () => ({ branches: [createBranchSnapshot('feature/a')], current: 'feature/a' }),
+      'repo.status': async () => [],
+      'repo.pullRequests': async () => [],
+    })
+
+    useReposStore.getState().submitBranchAction(REPO_ID, {
+      kind: 'createWorktree',
+      worktreePath: '/tmp/gbl-branch-actions-test-worktree',
+      newBranch: 'feature/new',
+      baseBranch: 'feature/a',
+    })
+
+    expect(useReposStore.getState().repos[REPO_ID]?.operations.branchAction).toMatchObject({
+      phase: 'running',
+      reason: 'branch:createWorktree',
+      target: 'feature/new',
+    })
+
+    release()
+    await flushAsyncWork()
   })
 
   test('records branch action metadata on result events', async () => {

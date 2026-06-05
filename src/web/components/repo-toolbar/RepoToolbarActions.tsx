@@ -18,24 +18,25 @@ import { Tip } from '#/web/components/Tip.tsx'
 import { Button } from '#/web/components/ui/button.tsx'
 import { CreateWorktreeDialog, type CreateWorktreeRequest } from '#/web/components/CreateWorktreeDialog.tsx'
 import { RepoActivityControl } from '#/web/components/repo-activity/RepoActivityControl.tsx'
-import type { ExecResult } from '#/shared/git-types.ts'
+import { useIsCompactUi } from '#/web/hooks/useResponsiveUiMode.tsx'
 
 interface Props {
   repoId: string
 }
 
 export function RepoToolbarActions({ repoId }: Props) {
+  const compact = useIsCompactUi()
   return (
     <div className="flex items-center gap-1">
       <RepoActivityControl repoId={repoId} />
-      <CreateWorktreeAction repoId={repoId} />
+      <CreateWorktreeAction repoId={repoId} compact={compact} />
     </div>
   )
 }
 
-function CreateWorktreeAction({ repoId }: Props) {
+function CreateWorktreeAction({ repoId, compact }: Props & { compact: boolean }) {
   const t = useT()
-  const runBranchAction = useReposStore((s) => s.runBranchAction)
+  const submitBranchAction = useReposStore((s) => s.submitBranchAction)
   const repo = useStoreWithEqualityFn(
     useReposStore,
     (s) => {
@@ -64,12 +65,12 @@ function CreateWorktreeAction({ repoId }: Props) {
     setCreateOpen(false)
   }, [repoId])
 
-  async function handleCreateWorktree(request: CreateWorktreeRequest): Promise<ExecResult | null> {
-    if (!repo) return null
+  function handleCreateWorktree(request: CreateWorktreeRequest): void {
+    if (!repo) return
     const targetRepoId = repo.id
     const token = repo.instanceToken
-    if (branchActionBusy) return null
-    return runBranchAction(
+    if (branchActionBusy) return
+    submitBranchAction(
       targetRepoId,
       {
         kind: 'createWorktree',
@@ -99,7 +100,7 @@ function CreateWorktreeAction({ repoId }: Props) {
             aria-label={createTip}
           >
             <FolderPlus />
-            {t('action.create-worktree')}
+            {!compact && t('action.create-worktree')}
           </Button>
         </span>
       </Tip>
@@ -121,7 +122,7 @@ function CreateWorktreeDialogConnected({
 }: Props & {
   open: boolean
   onClose: () => void
-  onCreate: (request: CreateWorktreeRequest) => ExecResult | null | Promise<ExecResult | null>
+  onCreate: (request: CreateWorktreeRequest) => void | Promise<void>
 }) {
   const repo = useReposStore((s) => s.repos[repoId])
   if (!repo) return null

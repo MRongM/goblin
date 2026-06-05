@@ -2,6 +2,7 @@
 
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { BranchDetailToolbar } from '#/web/components/branch-detail/BranchDetailToolbar.tsx'
 import { getSelectedBranchDetailPresentation } from '#/web/components/branch-detail/model.ts'
@@ -12,12 +13,15 @@ import { emptyRendererBridgeBootstrap, setRendererBridgeForTests } from '#/web/r
 import { createRepoBranch, resetReposStore, seedRepoState } from '#/web/stores/repos/test-utils.ts'
 import { DEFAULT_WORKSPACE_LAYOUT } from '#/shared/workspace-layout.ts'
 import type { RendererBridge } from '#/web/renderer-bridge-types.ts'
+import type { BranchActionItemGroups } from '#/web/hooks/useBranchActionItems.ts'
+import type { RepoWorkspaceLayout } from '#/web/stores/repos/types.ts'
 
 const REPO_ID = '/tmp/gbl-branch-detail-toolbar-repo'
 const WORKTREE_PATH = '/tmp/gbl-branch-detail-toolbar-worktree'
 
 let container: HTMLDivElement | null = null
 let root: Root | null = null
+let queryClient: QueryClient | null = null
 const reactActEnvironment = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
 
 beforeEach(() => {
@@ -33,6 +37,7 @@ afterEach(() => {
   container?.remove()
   root = null
   container = null
+  queryClient = null
   setRendererBridgeForTests(null)
   reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = false
 })
@@ -68,9 +73,95 @@ describe('BranchDetailToolbar', () => {
     expect(create).not.toHaveBeenCalled()
     expect(tab.textContent).toContain('2')
   })
+
+  test('shows branch actions in the detail bar in top-bottom focus mode', () => {
+    renderToolbar({
+      terminalCount: 0,
+      navigation: navigationWith({}),
+      detailFocusMode: true,
+      branchActions: {
+        patchItems: [],
+        mainItems: [
+          {
+            id: 'checkout',
+            label: 'Checkout',
+            disabled: false,
+            visible: true,
+            icon: null,
+            onSelect: vi.fn(),
+          },
+        ],
+        destructiveItems: [],
+        dialogs: null,
+      },
+    })
+
+    expect(container?.querySelector('button[aria-label="action.menu"]')).not.toBeNull()
+    expect(container?.querySelector('[data-testid="branch-detail-toolbar-divider"]')).not.toBeNull()
+  })
+
+  test('does not show branch actions in the detail bar when focus preference is on but detail is collapsed', () => {
+    renderToolbar({
+      terminalCount: 0,
+      navigation: navigationWith({}),
+      detailFocusMode: true,
+      collapsed: true,
+      branchActions: {
+        patchItems: [],
+        mainItems: [
+          {
+            id: 'checkout',
+            label: 'Checkout',
+            disabled: false,
+            visible: true,
+            icon: null,
+            onSelect: vi.fn(),
+          },
+        ],
+        destructiveItems: [],
+        dialogs: null,
+      },
+    })
+
+    expect(container?.querySelector('button[aria-label="action.menu"]')).toBeNull()
+    expect(container?.querySelector('[data-testid="branch-detail-toolbar-divider"]')).toBeNull()
+  })
+
+  test('does not show the divider when there are no panel controls beside branch actions', () => {
+    renderToolbar({
+      terminalCount: 0,
+      navigation: navigationWith({}),
+      layout: 'left-right',
+      branchActions: {
+        patchItems: [],
+        mainItems: [
+          {
+            id: 'checkout',
+            label: 'Checkout',
+            disabled: false,
+            visible: true,
+            icon: null,
+            onSelect: vi.fn(),
+          },
+        ],
+        destructiveItems: [],
+        dialogs: null,
+      },
+    })
+
+    expect(container?.querySelector('button[aria-label="action.menu"]')).not.toBeNull()
+    expect(container?.querySelector('[data-testid="branch-detail-toolbar-divider"]')).toBeNull()
+  })
 })
 
-function renderToolbar(options: { terminalCount: number; navigation: MainWindowNavigationActions }): HTMLButtonElement {
+function renderToolbar(options: {
+  terminalCount: number
+  navigation: MainWindowNavigationActions
+  detailFocusMode?: boolean
+  collapsed?: boolean
+  layout?: RepoWorkspaceLayout
+  branchActions?: BranchActionItemGroups
+}): HTMLButtonElement {
   const repo = seedRepoState({
     id: REPO_ID,
     branches: [createRepoBranch('feature/worktree', { worktree: { path: WORKTREE_PATH } })],
@@ -97,21 +188,25 @@ function renderToolbar(options: { terminalCount: number; navigation: MainWindowN
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)
+  queryClient = new QueryClient()
   act(() => {
     root!.render(
-      <MainWindowNavigationProvider value={options.navigation}>
-        <TerminalSessionReadContext.Provider value={readContext}>
-          <BranchDetailToolbar
-            repo={repo}
-            detail={detail}
-            detailId="detail"
-            contentId="content"
-            collapsed={false}
-            focusMode={false}
-            layout={DEFAULT_WORKSPACE_LAYOUT}
-          />
-        </TerminalSessionReadContext.Provider>
-      </MainWindowNavigationProvider>,
+      <QueryClientProvider client={queryClient!}>
+        <MainWindowNavigationProvider value={options.navigation}>
+          <TerminalSessionReadContext.Provider value={readContext}>
+            <BranchDetailToolbar
+              repo={repo}
+              detail={detail}
+              detailId="detail"
+              contentId="content"
+              collapsed={options.collapsed ?? false}
+              detailFocusMode={options.detailFocusMode ?? false}
+              layout={options.layout ?? DEFAULT_WORKSPACE_LAYOUT}
+              branchActions={options.branchActions}
+            />
+          </TerminalSessionReadContext.Provider>
+        </MainWindowNavigationProvider>
+      </QueryClientProvider>,
     )
   })
 

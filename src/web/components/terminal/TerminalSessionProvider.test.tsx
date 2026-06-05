@@ -9,7 +9,9 @@ import { useTerminalSessionContext } from '#/web/components/terminal/terminal-se
 import { useTerminalCount, useTerminalSessionSummaries } from '#/web/components/terminal/terminal-session-store.ts'
 import { worktreeTerminalKey } from '#/web/components/terminal/terminal-session-utils.ts'
 import { setRendererBridgeForTests } from '#/web/renderer-bridge.ts'
-import { useSettingsStore } from '#/web/stores/settings.ts'
+import { defaultSettingsSnapshot } from '#/shared/settings-defaults.ts'
+import { mainWindowQueryClient } from '#/web/main-window-queries.ts'
+import { settingsSnapshotQueryKey } from '#/web/settings-queries.ts'
 import { createRepoBranch, resetReposStore, seedRepoState } from '#/web/stores/repos/test-utils.ts'
 import { useReposStore } from '#/web/stores/repos/store.ts'
 import type {
@@ -292,7 +294,11 @@ beforeEach(() => {
   })
   resetReposStore()
   window.sessionStorage.setItem('goblin:web-terminal-attachment-id', 'attachment_local')
-  useSettingsStore.setState({ terminalNotificationsEnabled: false })
+  mainWindowQueryClient.clear()
+  mainWindowQueryClient.setQueryData(
+    settingsSnapshotQueryKey(),
+    defaultSettingsSnapshot({ terminalNotificationsEnabled: false }),
+  )
   document.body.innerHTML = ''
   Object.defineProperty(window, 'goblinNative', {
     configurable: true,
@@ -527,7 +533,10 @@ describe('TerminalSessionProvider', () => {
       selectedBranch: 'feature/worktree',
       detailTab: 'terminal',
     })
-    useSettingsStore.setState({ terminalNotificationsEnabled: true })
+    mainWindowQueryClient.setQueryData(
+      settingsSnapshotQueryKey(),
+      defaultSettingsSnapshot({ terminalNotificationsEnabled: true }),
+    )
     const hasFocus = vi.spyOn(document, 'hasFocus').mockReturnValue(false)
     const notifyBell = vi.fn(async () => true)
     Object.assign(window.goblinNative.terminal, { notifyBell })
@@ -641,7 +650,10 @@ describe('TerminalSessionProvider', () => {
       selectedBranch: 'feature/worktree',
       detailTab: 'terminal',
     })
-    useSettingsStore.setState({ terminalNotificationsEnabled: true })
+    mainWindowQueryClient.setQueryData(
+      settingsSnapshotQueryKey(),
+      defaultSettingsSnapshot({ terminalNotificationsEnabled: true }),
+    )
     const hasFocus = vi.spyOn(document, 'hasFocus').mockReturnValue(false)
     const notifyBell = vi.fn(async () => true)
     Object.assign(window.goblinNative.terminal, { notifyBell })
@@ -865,30 +877,134 @@ describe('TerminalSessionProvider', () => {
     }
   })
 
+  test('initial mount only syncs the current repo session list', async () => {
+    const firstRepo = seedRepoState({
+      id: REPO_ID,
+      branches: [createRepoBranch('feature/worktree', { worktree: { path: WORKTREE_PATH } })],
+      selectedBranch: 'feature/worktree',
+      detailTab: 'terminal',
+    })
+    const secondRepo = {
+      ...firstRepo,
+      id: SECOND_REPO_ID,
+      instanceToken: firstRepo.instanceToken + 1,
+      data: {
+        ...firstRepo.data,
+        branches: [createRepoBranch('feature/other', { worktree: { path: SECOND_WORKTREE_PATH } })],
+        worktreesByPath: {
+          [SECOND_WORKTREE_PATH]: {
+            path: SECOND_WORKTREE_PATH,
+            branch: 'feature/other',
+            isMain: false,
+            isLocked: false,
+          },
+        },
+      },
+      ui: {
+        ...firstRepo.ui,
+        selectedBranch: 'feature/other',
+        detailTab: 'terminal',
+      },
+    } satisfies typeof firstRepo
+    useReposStore.setState((state) => ({
+      ...state,
+      repos: {
+        ...state.repos,
+        [SECOND_REPO_ID]: secondRepo,
+      },
+      order: [REPO_ID, SECOND_REPO_ID],
+    }))
+    const { unmount } = await renderProviderWithProbe(worktreeTerminalKey(REPO_ID, WORKTREE_PATH), REPO_ID)
+
+    try {
+      await vi.waitFor(() => expect(listSessionsMock).toHaveBeenCalledTimes(1))
+      expect(listSessionsMock).toHaveBeenCalledWith({ repoRoot: REPO_ID })
+    } finally {
+      await unmount()
+    }
+  })
+
   test('focus sync only refreshes the current repo session list', async () => {
+    const firstRepo = seedRepoState({
+      id: REPO_ID,
+      branches: [createRepoBranch('feature/worktree', { worktree: { path: WORKTREE_PATH } })],
+      selectedBranch: 'feature/worktree',
+      detailTab: 'terminal',
+    })
+    const secondRepo = {
+      ...firstRepo,
+      id: SECOND_REPO_ID,
+      instanceToken: firstRepo.instanceToken + 1,
+      data: {
+        ...firstRepo.data,
+        branches: [createRepoBranch('feature/other', { worktree: { path: SECOND_WORKTREE_PATH } })],
+        worktreesByPath: {
+          [SECOND_WORKTREE_PATH]: {
+            path: SECOND_WORKTREE_PATH,
+            branch: 'feature/other',
+            isMain: false,
+            isLocked: false,
+          },
+        },
+      },
+      ui: {
+        ...firstRepo.ui,
+        selectedBranch: 'feature/other',
+        detailTab: 'terminal',
+      },
+    } satisfies typeof firstRepo
+    useReposStore.setState((state) => ({
+      ...state,
+      repos: {
+        ...state.repos,
+        [SECOND_REPO_ID]: secondRepo,
+      },
+      order: [REPO_ID, SECOND_REPO_ID],
+    }))
+    const { unmount } = await renderProviderWithProbe(worktreeTerminalKey(REPO_ID, WORKTREE_PATH), REPO_ID)
+
+    try {
+      await vi.waitFor(() => expect(listSessionsMock).toHaveBeenCalledTimes(1))
+      listSessionsMock.mockClear()
+      await act(async () => {
+        window.dispatchEvent(new Event('focus'))
+      })
+      await vi.waitFor(() => expect(listSessionsMock).toHaveBeenCalledTimes(1))
+      expect(listSessionsMock).toHaveBeenCalledWith({ repoRoot: REPO_ID })
+    } finally {
+      await unmount()
+    }
+  })
+
+  test('does not resync sessions when repo changes do not affect terminal worktree mapping', async () => {
     seedRepoState({
       id: REPO_ID,
       branches: [createRepoBranch('feature/worktree', { worktree: { path: WORKTREE_PATH } })],
       selectedBranch: 'feature/worktree',
       detailTab: 'terminal',
     })
-    seedRepoState({
-      id: SECOND_REPO_ID,
-      branches: [createRepoBranch('feature/other', { worktree: { path: SECOND_WORKTREE_PATH } })],
-      selectedBranch: 'feature/other',
-      detailTab: 'terminal',
-    })
-    const { unmount } = await renderProvider(REPO_ID)
+    const { unmount } = await renderProviderWithProbe(worktreeTerminalKey(REPO_ID, WORKTREE_PATH), REPO_ID)
 
     try {
+      await vi.waitFor(() => expect(listSessionsMock).toHaveBeenCalledTimes(1))
       listSessionsMock.mockClear()
       await act(async () => {
-        window.dispatchEvent(new Event('focus'))
-        await Promise.resolve()
+        useReposStore.setState((state) => ({
+          ...state,
+          repos: {
+            ...state.repos,
+            [REPO_ID]: {
+              ...state.repos[REPO_ID]!,
+              remote: {
+                ...state.repos[REPO_ID]!.remote,
+                fetchFailed: true,
+              },
+            },
+          },
+        }))
       })
-
-      expect(listSessionsMock).toHaveBeenCalledTimes(1)
-      expect(listSessionsMock).toHaveBeenCalledWith({ repoRoot: REPO_ID })
+      await Promise.resolve()
+      expect(listSessionsMock).not.toHaveBeenCalled()
     } finally {
       await unmount()
     }

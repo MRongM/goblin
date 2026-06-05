@@ -66,6 +66,19 @@ class MockNotification {
 
 describe('terminal web host bridge', () => {
   beforeEach(() => {
+    const createStorage = () => {
+      const store: Record<string, string> = {}
+      return {
+        getItem: (k: string) => store[k] ?? null,
+        setItem: (k: string, v: string) => { store[k] = v },
+        removeItem: (k: string) => { delete store[k] },
+        clear: () => { for (const k of Object.keys(store)) delete store[k] },
+        key: (i: number) => Object.keys(store)[i] ?? null,
+        get length() { return Object.keys(store).length },
+      }
+    }
+    Object.defineProperty(window, 'localStorage', { value: createStorage(), configurable: true })
+    Object.defineProperty(window, 'sessionStorage', { value: createStorage(), configurable: true })
     vi.restoreAllMocks()
     vi.resetModules()
     setRendererBridgeForTests(null)
@@ -357,6 +370,23 @@ describe('terminal web host bridge', () => {
 
     expect(onOutput).toHaveBeenCalledTimes(1)
     expect(onOutput).toHaveBeenCalledWith({ sessionId: 'term_new', data: 'fresh', seq: 2, processName: 'zsh' })
+    dispose()
+    vi.useRealTimers()
+  })
+
+  test('stops reconnecting terminal sockets after app quitting starts', async () => {
+    vi.useFakeTimers()
+    const { markAppQuitting } = await import('#/web/app-lifecycle.ts')
+    const { terminalBridge } = await import('#/web/terminal.ts')
+    const dispose = terminalBridge.onOutput(() => {})
+    const socket = MockWebSocket.instances[0]
+    if (!socket) throw new Error('missing initial terminal socket')
+
+    markAppQuitting()
+    await vi.advanceTimersByTimeAsync(300)
+
+    expect(socket.readyState).toBe(MockWebSocket.CLOSED)
+    expect(MockWebSocket.instances).toHaveLength(1)
     dispose()
     vi.useRealTimers()
   })

@@ -71,6 +71,13 @@ export interface TerminalSessionBase {
   worktreePath: string
 }
 
+export interface TerminalRepoSnapshot {
+  instanceToken: number
+  branchByWorktreePath: Record<string, string>
+}
+
+export type TerminalRepoIndex = Record<string, TerminalRepoSnapshot>
+
 export interface TerminalSessionSummary {
   key: string
   worktreeTerminalKey: string
@@ -94,6 +101,7 @@ export interface TerminalSessionContextValue {
   createTerminal: (base: TerminalSessionBase) => Promise<string>
   selectTerminal: (worktreeTerminalKey: string, key: string) => void
   scrollToBottom: (key: string) => void
+  scrollLines: (key: string, amount: number) => void
   clearBell: (key: string) => boolean
   closeTerminalAndDismissDetailIfLast: (key: string, base: TerminalSessionBase) => TerminalSessionSummary[]
   attach: (descriptor: TerminalDescriptor, host: HTMLElement) => void
@@ -131,6 +139,7 @@ export interface ManagedTerminalSessionLike {
   findPrevious: (term: string) => TerminalSearchResult
   clearSearch: () => void
   scrollToBottom: () => void
+  scrollLines: (amount: number) => void
   writeInput: (data: string) => void
   takeover: () => void
   handleOwnership: (event: TerminalOwnershipViewModel) => void

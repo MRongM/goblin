@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useReposStore } from '#/web/stores/repos/store.ts'
-import type { RepoBranchState, RepoState } from '#/web/stores/repos/types.ts'
+import type { RepoBranchState } from '#/web/stores/repos/types.ts'
 import { BranchActionDialogs, type RemoveConfirm } from '#/web/components/BranchActionDialogs.tsx'
 import type { ExecResult } from '#/web/types.ts'
 import { PROTECTED_BRANCHES } from '#/shared/git-types.ts'
@@ -12,6 +12,7 @@ import {
 } from '#/web/app-data-client.ts'
 import {
   branchActionBusyItemId,
+  type BranchActionRepo,
   isBranchActionBlocked,
   type BranchActionItemId,
 } from '#/web/hooks/branch-action-state.ts'
@@ -37,7 +38,7 @@ export interface BranchActionCapabilities {
   canOpenEditor: boolean
 }
 
-export function getBranchActionCapabilities(repo: RepoState, branch: RepoBranchState): BranchActionCapabilities {
+export function getBranchActionCapabilities(repo: BranchActionRepo, branch: RepoBranchState): BranchActionCapabilities {
   const isCurrent = branch.name === repo.data.currentBranch
   const checkedOutInAnotherWorktree = !!branch.worktree?.path && !isCurrent
   const isProtected = PROTECTED_BRANCHES.has(branch.name)
@@ -54,12 +55,12 @@ export function getBranchActionCapabilities(repo: RepoState, branch: RepoBranchS
     canPull: !!branch.tracking,
     canPush: repo.remote.hasRemotes === true,
     canOpenRemote: repo.remote.hasBrowserRemote === true || repo.remote.hasGitHubRemote === true,
-    canOpenTerminal: !!branch.worktree?.path,
+    canOpenTerminal: !!branch.worktree?.path && !repo.remote.target,
     canOpenEditor: !!branch.worktree?.path && !repo.remote.target,
   }
 }
 
-export function useBranchActions(repo: RepoState, branch: RepoBranchState) {
+export function useBranchActions(repo: BranchActionRepo, branch: RepoBranchState) {
   const navigation = useMainWindowNavigation()
   const setLastResult = useReposStore((s) => s.setLastResult)
   const runBranchAction = useReposStore((s) => s.runBranchAction)
@@ -132,11 +133,11 @@ export function useBranchActions(repo: RepoState, branch: RepoBranchState) {
   }
 
   function checkout() {
-    return runRepoAction({ kind: 'checkout', branch: branch.name })
+    void runRepoAction({ kind: 'checkout', branch: branch.name })
   }
 
   function pull() {
-    return runRepoAction({ kind: 'pull', branch: branch.name, worktreePath: branch.worktree?.path })
+    void runRepoAction({ kind: 'pull', branch: branch.name, worktreePath: branch.worktree?.path })
   }
 
   function push() {
@@ -145,7 +146,7 @@ export function useBranchActions(repo: RepoState, branch: RepoBranchState) {
       pushConfirm.openWith(branch.name)
       return
     }
-    return runRepoAction({ kind: 'push', branch: branch.name })
+    void runRepoAction({ kind: 'push', branch: branch.name })
   }
 
   function openTerminal() {
@@ -184,7 +185,7 @@ export function useBranchActions(repo: RepoState, branch: RepoBranchState) {
   }
 
   function deleteBranch(target: string, force = false, alsoDeleteUpstream = false) {
-    return runRepoAction(
+    void runRepoAction(
       { kind: 'deleteBranch', branch: target, force, alsoDeleteUpstream },
       {
         deferResultMessages: force ? [] : ['error.branch-not-fully-merged'],
@@ -205,7 +206,7 @@ export function useBranchActions(repo: RepoState, branch: RepoBranchState) {
     forceDeleteBranch: boolean,
     alsoDeleteUpstream = false,
   ) {
-    return runRepoAction(
+    void runRepoAction(
       {
         kind: 'removeWorktree',
         branch: target.branch,

@@ -12,11 +12,14 @@ interface TerminalBrokerOptions {
 }
 
 export class TerminalRealtimeBroker {
+  private readonly options: TerminalBrokerOptions
   private readonly socketsByClientId = new Map<string, Set<TerminalRealtimeSocket>>()
   private readonly socketMetaBySocket = new WeakMap<TerminalRealtimeSocket, { clientId: string; attachmentId: string }>()
   private readonly socketCountByAttachmentKey = new Map<string, number>()
 
-  constructor(private readonly options: TerminalBrokerOptions) {}
+  constructor(options: TerminalBrokerOptions) {
+    this.options = options
+  }
 
   registerSocket(clientId: string, attachmentId: string, socket: TerminalRealtimeSocket): void {
     let sockets = this.socketsByClientId.get(clientId)
@@ -72,6 +75,13 @@ export class TerminalRealtimeBroker {
   }
 
   disconnectAll(): void {
+    for (const sockets of this.socketsByClientId.values()) {
+      for (const socket of Array.from(sockets)) {
+        try {
+          socket.close(1001, 'server shutting down')
+        } catch {}
+      }
+    }
     this.socketsByClientId.clear()
     this.socketCountByAttachmentKey.clear()
   }

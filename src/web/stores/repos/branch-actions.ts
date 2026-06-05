@@ -10,7 +10,6 @@ import {
   cancelResource,
   finishResourceError,
   finishResourceSuccess,
-  resourceBusy,
   startResource,
 } from '#/web/stores/repos/resources.ts'
 import type {
@@ -24,7 +23,7 @@ import {
 } from '#/web/stores/repos/branch-action-scheduler.ts'
 import type { RepoEventAction, RepoState, ReposGet, ReposSet } from '#/web/stores/repos/types.ts'
 import type { ExecResult } from '#/web/types.ts'
-import { runBranchActionRefreshWorkflow } from '#/web/stores/repos/refresh-workflows.ts'
+import { runRepoRefreshIntent } from '#/web/stores/repos/refresh-coordinator.ts'
 import {
   checkoutRepositoryBranch,
   createRepositoryWorktree,
@@ -120,7 +119,7 @@ function evaluateRepoBranchActionSchedule(repo: RepoState, action: RepoBranchAct
   const branchOperation = repoOperation(repo.id, 'branchAction')
   return evaluateBranchActionScheduleDecision({
     actionKind: action.kind,
-    fetchBusy: resourceBusy(repo.resources.fetch) || fetchOperation.phase !== 'idle',
+    fetchBusy: fetchOperation.phase !== 'idle',
     branchOperationPhase: branchOperation.phase,
     coreRefreshBusy: coreRefreshBusy(repo.id),
   })
@@ -188,6 +187,13 @@ function runBranchActionRpc(action: RepoBranchAction, repoId: string, signal?: A
 
 export function createBranchActions(set: ReposSet, get: ReposGet) {
   return {
+    submitBranchAction(id: string, action: RepoBranchAction, options?: RunBranchActionOptions): void {
+      const repo = get().repos[id]
+      const token = options?.token ?? repo?.instanceToken
+      if (!repo || repo.instanceToken !== token) return
+      void get().runBranchAction(id, action, options)
+    },
+
     async runBranchAction(
       id: string,
       action: RepoBranchAction,
@@ -232,7 +238,9 @@ export function createBranchActions(set: ReposSet, get: ReposGet) {
         if (!result.ok && result.message === BRANCH_ACTION_WAIT_TIMEOUT_MESSAGE) return
         if (result.ok || options?.refreshOnError !== false) {
           const repo = get().repos[id]
-          if (repo?.instanceToken === token) await runBranchActionRefreshWorkflow(get, { id, token })
+          if (repo?.instanceToken === token) {
+            await runRepoRefreshIntent(get, { kind: 'core-data-changed', reason: 'branch-action', id, token })
+          }
         }
         if (result.ok && network) get().clearFetchFailed(id, token)
       }
