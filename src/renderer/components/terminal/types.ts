@@ -1,5 +1,6 @@
 import type { TerminalExitEvent, TerminalOutputEvent } from '#/shared/terminal.ts'
 import type { RemoteRepoTarget } from '#/shared/remote-repo.ts'
+import type { AiCliExecutionState } from '#/renderer/components/terminal/ai-cli-status.ts'
 
 export type TerminalPhase = 'opening' | 'open' | 'error'
 
@@ -46,6 +47,7 @@ export interface TerminalSnapshot {
   processName: string
   search?: TerminalSearchResult | null
   progress?: TerminalProgressState | null
+  aiCli?: AiCliExecutionState | null
 }
 
 export interface TerminalSearchResult {
@@ -67,6 +69,8 @@ export interface TerminalSessionSummary {
   phase: TerminalPhase
   active: boolean
   hasBell: boolean
+  aiCli?: AiCliExecutionState | null
+  aiCliBusy: boolean
 }
 
 export interface TerminalSessionContextValue {
@@ -75,6 +79,7 @@ export interface TerminalSessionContextValue {
   createTerminal: (base: TerminalSessionBase) => string
   activeDescriptor: (groupKey: string) => TerminalDescriptor | null
   sessionSummaries: (groupKey: string) => TerminalSessionSummary[]
+  aiCliBusyByGroup: (groupKey: string) => boolean
   unreadBellCountByRepo: (repoId: string) => number
   setActive: (groupKey: string, key: string) => void
   clearBell: (key: string) => boolean

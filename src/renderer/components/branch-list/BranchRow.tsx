@@ -1,5 +1,5 @@
 import { type CSSProperties, type HTMLAttributes, type RefObject } from 'react'
-import { ArrowDown, ArrowUp, Check, FolderTree, GitBranch } from 'lucide-react'
+import { ArrowDown, ArrowUp, Check, FolderTree, GitBranch, Loader2 } from 'lucide-react'
 import { useT, type Lang } from '#/renderer/stores/i18n.ts'
 import type { RepoBranchState, RepoState } from '#/renderer/stores/repos/types.ts'
 import { getBranchWorktreeState } from '#/renderer/stores/repos/worktree-state.ts'
@@ -20,6 +20,7 @@ interface BranchRowProps {
   onOpenBranchStatus: (branch: string) => void
   selectedRef: RefObject<HTMLLIElement | null>
   showActions?: boolean
+  worktreeAiCliBusy?: boolean
   actionMenuOpen?: boolean
   onActionMenuOpenChange?: (open: boolean) => void
   drag?: {
@@ -60,6 +61,7 @@ export function BranchRow({
   onOpenBranchStatus,
   selectedRef,
   showActions = true,
+  worktreeAiCliBusy = false,
   actionMenuOpen,
   onActionMenuOpenChange,
   drag,
@@ -120,7 +122,9 @@ export function BranchRow({
     >
       <div className="pointer-events-none relative z-10 grid min-w-0 grid-cols-[1rem_minmax(0,1fr)] gap-x-2 gap-y-0.5 px-4 py-2">
         <span className="flex w-4 shrink-0 items-center justify-center">
-          {isCurrent ? (
+          {worktreeAiCliBusy ? (
+            <Loader2 size={14} className="goblin-branch-row__ai-spinner animate-spin text-brand-text" />
+          ) : isCurrent ? (
             <Check size={14} className="text-success" />
           ) : isWorktree ? (
             <FolderTree size={14} className={worktreeDirty ? 'text-attention' : 'text-brand-text'} />

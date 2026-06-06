@@ -900,6 +900,36 @@ describe('ManagedTerminalSession', () => {
     expect(xtermMocks.terminals[0]!.write).toHaveBeenCalledWith('firstsecond')
   })
 
+  test('updates AI CLI state from terminal output', async () => {
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const session = new ManagedTerminalSession(descriptor, vi.fn())
+    session.attach(host)
+    await flushTerminalStart()
+    await flushUntil(() => session.snapshot().phase === 'open')
+
+    session.handleOutput({ sessionId: 'session-1', data: 'thinking\n', seq: 1, processName: 'codex' })
+
+    expect(session.snapshot().aiCli).toMatchObject({ provider: 'codex', status: 'running' })
+  })
+
+  test('clears AI CLI state on terminal exit and restart', async () => {
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const session = new ManagedTerminalSession(descriptor, vi.fn())
+    session.attach(host)
+    await flushTerminalStart()
+    await flushUntil(() => session.snapshot().phase === 'open')
+    session.handleOutput({ sessionId: 'session-1', data: 'thinking\n', seq: 1, processName: 'claude' })
+    expect(session.snapshot().aiCli).toMatchObject({ provider: 'claude', status: 'running' })
+
+    expect(session.handleExit({ sessionId: 'session-1' })).toBe(true)
+    expect(session.snapshot().aiCli).toBeUndefined()
+
+    session.restart()
+    expect(session.snapshot().aiCli).toBeUndefined()
+  })
+
   test('flushes matching terminal exits before the provider dismisses the session', async () => {
     const host = document.createElement('div')
     document.body.appendChild(host)

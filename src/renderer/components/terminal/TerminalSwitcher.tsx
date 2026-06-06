@@ -1,4 +1,4 @@
-import { Plus, Terminal as TerminalIcon, Trash2 } from 'lucide-react'
+import { Loader2, Plus, Terminal as TerminalIcon, Trash2 } from 'lucide-react'
 import { Badge } from '#/renderer/components/ui/badge.tsx'
 import { Button } from '#/renderer/components/ui/button.tsx'
 import { ScrollArea } from '#/renderer/components/ui/scroll-area.tsx'
@@ -85,7 +85,11 @@ export function TerminalSwitcher({
                   aria-label={session.title}
                   aria-current={session.active ? 'true' : undefined}
                 >
-                  <TerminalIcon size={16} />
+                  {session.aiCliBusy ? (
+                    <Loader2 size={16} className="goblin-terminal-switcher__ai-spinner animate-spin" />
+                  ) : (
+                    <TerminalIcon size={16} />
+                  )}
                   <span>{session.title}</span>
                   {session.hasBell && (
                     <>

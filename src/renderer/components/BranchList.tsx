@@ -2,7 +2,16 @@
 // lightweight sync metadata. The list supports manual ordering in the active
 // branch filter while keeping row action menus controlled by the parent list.
 
-import { useCallback, useEffect, useRef, useState, type ComponentProps, type ReactElement, type RefObject } from 'react'
+import {
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type ComponentProps,
+  type ReactElement,
+  type RefObject,
+} from 'react'
 import { RefreshCw } from 'lucide-react'
 import {
   DndContext,
@@ -26,6 +35,8 @@ import { branchActionsAvailable } from '#/renderer/hooks/branch-action-state.ts'
 import { resourceBusy } from '#/renderer/stores/repos/resources.ts'
 import type { RepoBranchState, RepoState } from '#/renderer/stores/repos/types.ts'
 import { getWorktreeSource, type WorktreeSourceMap } from '#/renderer/stores/repos/worktree-sources.ts'
+import { TerminalSessionContext } from '#/renderer/components/terminal/terminal-session-context.ts'
+import { terminalSessionGroupKey } from '#/renderer/components/terminal/terminal-session-utils.ts'
 
 interface Props {
   repoId: string
@@ -243,6 +254,21 @@ function BranchRows({
   onOpenBranchStatus: (branch: string) => void
   sortable?: boolean
 }) {
+  const terminalContext = useContext(TerminalSessionContext)
+  const worktreeAiCliBusy = useCallback(
+    (branch: RepoBranchState): boolean => {
+      const worktreePath = branch.worktree?.path
+      if (!worktreePath || !terminalContext) return false
+      const groupKey = terminalSessionGroupKey(
+        repo.kind === 'remote'
+          ? { kind: 'remote', repoId: repo.id, worktreePath }
+          : { kind: 'local', repoRoot: repo.id, worktreePath },
+      )
+      return terminalContext.aiCliBusyByGroup(groupKey)
+    },
+    [repo.id, repo.kind, terminalContext],
+  )
+
   return (
     <ul className="divide-y divide-separator">
       {branches.map((branch) => {
@@ -257,6 +283,7 @@ function BranchRows({
             lang={lang}
             selectedRef={selectedRef}
             showActions={showActions && branchActionsAvailable(repo, branch)}
+            worktreeAiCliBusy={worktreeAiCliBusy(branch)}
             onSelectBranch={onSelectBranch}
             onOpenBranchStatus={onOpenBranchStatus}
             actionMenuOpen={openActionMenu?.repoId === repo.id && openActionMenu.branch === branch.name}

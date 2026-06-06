@@ -77,6 +77,7 @@ function terminalContext(overrides: Partial<TerminalSessionContextValue>): Termi
     createTerminal: () => '',
     activeDescriptor: () => null,
     sessionSummaries: () => [],
+    aiCliBusyByGroup: () => false,
     unreadBellCountByRepo: () => 0,
     setActive: () => {},
     clearBell: () => false,

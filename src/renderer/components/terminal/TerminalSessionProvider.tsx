@@ -5,6 +5,7 @@ import { useReposStore } from '#/renderer/stores/repos/store.ts'
 import { terminalBridge } from '#/renderer/terminal.ts'
 import { ManagedTerminalSession } from '#/renderer/components/terminal/ManagedTerminalSession.ts'
 import { createTerminalBellController } from '#/renderer/components/terminal/terminal-bell-controller.ts'
+import { aiCliBusy } from '#/renderer/components/terminal/ai-cli-status.ts'
 import {
   isTerminalDescriptorLive,
   terminalDescriptor,
@@ -63,6 +64,7 @@ export function TerminalSessionProvider({ children }: TerminalSessionProviderPro
       .sort((a, b) => a.descriptor.index - b.descriptor.index)
       .map((session) => {
         const snapshot = session.snapshot()
+        const aiBusy = aiCliBusy(snapshot.aiCli)
         return {
           key: session.descriptor.key,
           groupKey,
@@ -72,8 +74,16 @@ export function TerminalSessionProvider({ children }: TerminalSessionProviderPro
           phase: snapshot.phase,
           active: session.descriptor.key === activeKey,
           hasBell: bellController.hasBell(session.descriptor.key),
+          aiCli: snapshot.aiCli ?? null,
+          aiCliBusy: aiBusy,
         }
       })
+  }, [])
+
+  const aiCliBusyByGroup = useCallback((groupKey: string): boolean => {
+    return Array.from(sessionsRef.current.values()).some((session) => {
+      return session.descriptor.groupKey === groupKey && aiCliBusy(session.snapshot().aiCli)
+    })
   }, [])
 
   const unreadBellCountByRepo = useCallback(
@@ -288,6 +298,7 @@ export function TerminalSessionProvider({ children }: TerminalSessionProviderPro
       createTerminal,
       activeDescriptor,
       sessionSummaries,
+      aiCliBusyByGroup,
       unreadBellCountByRepo,
       setActive,
       clearBell,
@@ -305,6 +316,7 @@ export function TerminalSessionProvider({ children }: TerminalSessionProviderPro
     }),
     [
       activeDescriptor,
+      aiCliBusyByGroup,
       attach,
       clearSearch,
       closeTerminalAndDismissDetailIfLast,

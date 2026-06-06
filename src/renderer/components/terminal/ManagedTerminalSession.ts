@@ -29,6 +29,10 @@ import {
   terminalThemeForCurrentDocument,
 } from '#/renderer/components/terminal/terminal-theme.ts'
 import {
+  detectAiCliExecutionState,
+  type AiCliExecutionState,
+} from '#/renderer/components/terminal/ai-cli-status.ts'
+import {
   isMacNavigatorPlatform,
   terminalInputForMacOptionArrow,
 } from '#/renderer/components/terminal/terminal-keyboard.ts'
@@ -89,6 +93,7 @@ export class ManagedTerminalSession {
   private lastPtyRows = 0
   private searchResult: TerminalSearchResult | null = null
   private progressState: TerminalProgressState | null = null
+  private aiCliState: AiCliExecutionState | null = null
   private processName = 'terminal'
   private fontFitTimer: number | null = null
 
@@ -169,6 +174,7 @@ export class ManagedTerminalSession {
     const snapshot: TerminalSnapshot = { phase: this.phase, message: this.message, processName: this.processName }
     if (this.searchResult) snapshot.search = this.searchResult
     if (this.progressState) snapshot.progress = this.progressState
+    if (this.aiCliState) snapshot.aiCli = this.aiCliState
     return snapshot
   }
 
@@ -201,6 +207,7 @@ export class ManagedTerminalSession {
   handleOutput(event: TerminalOutputEvent): void {
     if (event.sessionId !== this.ptySessionId) return
     this.setProcessName(event.processName)
+    this.updateAiCliState(event.processName, event.data)
     if (this.replayBoundarySeq !== null) {
       this.replayPendingOutput.push(event)
       return
@@ -214,6 +221,7 @@ export class ManagedTerminalSession {
     this.ptySessionId = null
     this.clearTerminalFocusIfOwned()
     this.blurIfFocused()
+    this.clearAiCliState()
     return true
   }
 
@@ -405,6 +413,7 @@ export class ManagedTerminalSession {
     this.progressAddon = null
     this.searchResult = null
     this.progressState = null
+    this.aiCliState = null
     this.term?.dispose()
     this.term = null
     this.xtermHost.replaceChildren()
@@ -722,6 +731,19 @@ export class ManagedTerminalSession {
     const next = processName.trim() || 'terminal'
     if (this.processName === next) return
     this.processName = next
+    this.notify()
+  }
+
+  private updateAiCliState(processName: string, chunk: string): void {
+    const next = detectAiCliExecutionState({ processName, chunk, previous: this.aiCliState })
+    if (next === this.aiCliState) return
+    this.aiCliState = next
+    this.notify()
+  }
+
+  private clearAiCliState(): void {
+    if (!this.aiCliState) return
+    this.aiCliState = null
     this.notify()
   }
 

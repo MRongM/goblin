@@ -18,12 +18,20 @@ import type {
 } from '#/renderer/components/terminal/types.ts'
 import type { TerminalExitEvent, TerminalOutputEvent } from '#/shared/terminal.ts'
 
-const mockSessions = vi.hoisted(() => [] as Array<{ descriptor: TerminalDescriptor; emitBell: (event: TerminalBellEvent) => void }>)
+const mockSessions = vi.hoisted(
+  () =>
+    [] as Array<{
+      descriptor: TerminalDescriptor
+      emitBell: (event: TerminalBellEvent) => void
+      setSnapshot: (snapshot: TerminalSnapshot) => void
+    }>,
+)
 
 vi.mock('#/renderer/components/terminal/ManagedTerminalSession.ts', () => {
   class ManagedTerminalSession {
     descriptor: TerminalDescriptor
     private readonly onBell: (descriptor: TerminalDescriptor, event: TerminalBellEvent) => void
+    private currentSnapshot: TerminalSnapshot | null = null
 
     constructor(
       descriptor: TerminalDescriptor,
@@ -35,6 +43,9 @@ vi.mock('#/renderer/components/terminal/ManagedTerminalSession.ts', () => {
       mockSessions.push({
         descriptor,
         emitBell: (event) => this.onBell(this.descriptor, event),
+        setSnapshot: (snapshot) => {
+          this.currentSnapshot = snapshot
+        },
       })
     }
 
@@ -51,7 +62,7 @@ vi.mock('#/renderer/components/terminal/ManagedTerminalSession.ts', () => {
     dispose() {}
 
     snapshot(): TerminalSnapshot {
-      return { phase: 'open', message: null, processName: `terminal ${this.descriptor.index}` }
+      return this.currentSnapshot ?? { phase: 'open', message: null, processName: `terminal ${this.descriptor.index}` }
     }
 
     isTerminalFocusTarget(): boolean {
@@ -251,6 +262,51 @@ describe('TerminalSessionProvider', () => {
       expect(setBadge).toHaveBeenLastCalledWith(0)
     } finally {
       hasFocus.mockRestore()
+      await unmount()
+    }
+  })
+
+  test('derives AI CLI busy summaries by terminal group', async () => {
+    seedRepoState({
+      id: REPO_ID,
+      branches: [createRepoBranch('feature/worktree', { worktree: { path: WORKTREE_PATH } })],
+      selectedBranch: 'feature/worktree',
+      detailTab: 'terminal',
+    })
+    const { getContext, unmount } = await renderProvider()
+
+    try {
+      const base = { repoRoot: REPO_ID, branch: 'feature/worktree', worktreePath: WORKTREE_PATH }
+      await act(async () => {
+        getContext().ensureDefault(base)
+      })
+
+      const groupKey = terminalSessionGroupKey({ kind: 'local', repoRoot: REPO_ID, worktreePath: WORKTREE_PATH })
+      const firstSession = mockSessions.find((session) => session.descriptor.terminalId === 'terminal-1')
+      if (!firstSession) throw new Error('missing terminal-1 mock session')
+      firstSession.setSnapshot({
+        phase: 'open',
+        message: null,
+        processName: 'codex',
+        aiCli: { provider: 'codex', status: 'running', updatedAt: 1 },
+      })
+
+      expect(getContext().aiCliBusyByGroup(groupKey)).toBe(true)
+      expect(getContext().sessionSummaries(groupKey)[0]).toMatchObject({
+        aiCliBusy: true,
+        aiCli: { provider: 'codex', status: 'running' },
+      })
+
+      firstSession.setSnapshot({
+        phase: 'open',
+        message: null,
+        processName: 'codex',
+        aiCli: { provider: 'codex', status: 'waiting', updatedAt: 2 },
+      })
+
+      expect(getContext().aiCliBusyByGroup(groupKey)).toBe(false)
+      expect(getContext().sessionSummaries(groupKey)[0]).toMatchObject({ aiCliBusy: false })
+    } finally {
       await unmount()
     }
   })

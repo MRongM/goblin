@@ -7,6 +7,8 @@ import { emptyRepo } from '#/renderer/stores/repos/helpers.ts'
 import { useReposStore } from '#/renderer/stores/repos/store.ts'
 import { createBranch, resetReposStore } from '#/renderer/stores/repos/test-utils.ts'
 import { worktreeSourceKey } from '#/renderer/stores/repos/worktree-sources.ts'
+import { TerminalSessionContext } from '#/renderer/components/terminal/terminal-session-context.ts'
+import type { TerminalSessionContextValue, TerminalSnapshot } from '#/renderer/components/terminal/types.ts'
 
 const dndState = vi.hoisted(() => ({
   latestDragEnd: null as null | ((event: { active: { id: string }; over: { id: string } | null }) => void),
@@ -205,4 +207,58 @@ describe('BranchList remote snapshot failure', () => {
 
     expect(host.textContent).toContain('branches.source-exact')
   })
+
+  test('shows a worktree spinner only when a worktree has active AI CLI work', async () => {
+    const repo = emptyRepo('/repo', 'repo')
+    repo.data.branches = [createBranch('main'), createBranch('feature/x', { worktreePath: '/repo-feature-x' })]
+    repo.data.currentBranch = 'main'
+    repo.ui.selectedBranch = 'main'
+    useReposStore.setState({
+      repos: { [repo.id]: repo },
+      order: [repo.id],
+      activeId: repo.id,
+      sessionReady: true,
+    })
+
+    await act(async () => {
+      renderBranchList(root, repo.id, {
+        aiCliBusyByGroup: (groupKey) => groupKey === 'local\0/repo\0/repo-feature-x',
+      })
+    })
+
+    expect(host.querySelectorAll('.goblin-branch-row__ai-spinner')).toHaveLength(1)
+  })
 })
+
+function renderBranchList(root: Root, repoId: string, terminalOverrides: Partial<TerminalSessionContextValue> = {}) {
+  const snapshot: TerminalSnapshot = { phase: 'open', message: null, processName: 'terminal' }
+  const terminalContext: TerminalSessionContextValue = {
+    version: 0,
+    ensureDefault: () => '',
+    createTerminal: () => '',
+    activeDescriptor: () => null,
+    sessionSummaries: () => [],
+    aiCliBusyByGroup: () => false,
+    unreadBellCountByRepo: () => 0,
+    setActive: () => {},
+    clearBell: () => false,
+    closeTerminalAndDismissDetailIfLast: () => [],
+    attach: () => {},
+    detach: () => {},
+    restart: () => {},
+    snapshot: () => snapshot,
+    isTerminalFocusTarget: () => false,
+    findNext: () => ({ resultIndex: -1, resultCount: 0, found: false }),
+    findPrevious: () => ({ resultIndex: -1, resultCount: 0, found: false }),
+    clearSearch: () => {},
+    writeInput: () => {},
+    serialize: () => '',
+    ...terminalOverrides,
+  }
+
+  root.render(
+    <TerminalSessionContext.Provider value={terminalContext}>
+      <BranchList repoId={repoId} />
+    </TerminalSessionContext.Provider>,
+  )
+}

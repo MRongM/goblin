@@ -49,6 +49,7 @@ describe('TerminalSwitcher', () => {
               phase: 'open',
               active: true,
               hasBell: false,
+              aiCliBusy: false,
             },
             {
               key: 'terminal-2',
@@ -59,6 +60,7 @@ describe('TerminalSwitcher', () => {
               phase: 'open',
               active: false,
               hasBell: true,
+              aiCliBusy: false,
             },
           ]}
           onNew={onNew}
@@ -82,6 +84,57 @@ describe('TerminalSwitcher', () => {
       expect(onNew).not.toHaveBeenCalled()
       expect(container.querySelector('.goblin-terminal-switcher__badge')?.textContent).toBe('1')
       expect(container.querySelectorAll('.goblin-terminal-switcher__bell-dot')).toHaveLength(1)
+    } finally {
+      await act(async () => root.unmount())
+      container.remove()
+    }
+  })
+
+  test('shows a spinner only for AI-busy terminal rows', async () => {
+    ;(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root: Root = createRoot(container)
+
+    await act(async () => {
+      root.render(
+        <TerminalSwitcher
+          groupKey="repo::worktree"
+          offsetForSearch={false}
+          sessions={[
+            {
+              key: 'terminal-1',
+              groupKey: 'repo::worktree',
+              terminalId: 'terminal-1',
+              index: 1,
+              title: 'codex',
+              phase: 'open',
+              active: true,
+              hasBell: false,
+              aiCli: { provider: 'codex', status: 'running', updatedAt: 1 },
+              aiCliBusy: true,
+            },
+            {
+              key: 'terminal-2',
+              groupKey: 'repo::worktree',
+              terminalId: 'terminal-2',
+              index: 2,
+              title: 'zsh',
+              phase: 'open',
+              active: false,
+              hasBell: false,
+              aiCliBusy: false,
+            },
+          ]}
+          onNew={() => {}}
+          onSelect={() => {}}
+          onClose={() => {}}
+        />,
+      )
+    })
+
+    try {
+      expect(container.querySelectorAll('.goblin-terminal-switcher__ai-spinner')).toHaveLength(1)
     } finally {
       await act(async () => root.unmount())
       container.remove()
