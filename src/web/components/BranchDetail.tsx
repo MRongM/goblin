@@ -11,6 +11,7 @@ import { BranchDetailToolbar } from '#/web/components/branch-detail/BranchDetail
 import { BranchDetailContent } from '#/web/components/branch-detail/BranchDetailContent.tsx'
 import { DEFAULT_WORKSPACE_LAYOUT } from '#/shared/workspace-layout.ts'
 import { useBranchActionItems } from '#/web/hooks/useBranchActionItems.ts'
+import { useBranchActionShortcutRegistry } from '#/web/hooks/useBranchActionShortcutRegistry.ts'
 interface Props {
   repoId: string
   layout?: RepoWorkspaceLayout
@@ -29,6 +30,7 @@ function branchDetailRepoEqual(a: BranchDetailRepo | undefined, b: BranchDetailR
       a.data.branches === b.data.branches &&
       a.data.currentBranch === b.data.currentBranch &&
       a.data.status === b.data.status &&
+      a.data.statusLoaded === b.data.statusLoaded &&
       a.data.worktreesByPath === b.data.worktreesByPath &&
       a.ui.selectedBranch === b.ui.selectedBranch &&
       a.ui.detailTab === b.ui.detailTab &&
@@ -63,6 +65,7 @@ export function BranchDetail({
               branches: repo.data.branches,
               currentBranch: repo.data.currentBranch,
               status: repo.data.status,
+              statusLoaded: repo.data.statusLoaded,
               worktreesByPath: repo.data.worktreesByPath,
             },
             ui: {
@@ -156,6 +159,7 @@ function BranchDetailWithActions({
   layout,
 }: BranchDetailWithActionsProps) {
   const actions = useBranchActionItems(repo, branch)
+  useBranchActionShortcutRegistry(actions)
 
   return (
     <>

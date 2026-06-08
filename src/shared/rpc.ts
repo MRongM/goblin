@@ -8,11 +8,22 @@ import type {
   RepoRemoteInfo,
   WorktreeStatus,
 } from '#/shared/git-types.ts'
-import { WORKSPACE_LAYOUTS } from '#/shared/workspace-layout.ts'
-import { COLOR_THEMES } from '#/shared/color-theme.ts'
 import type { WorkspaceDetailPaneSizes, WorkspaceLayout } from '#/shared/workspace-layout.ts'
 import type { ColorTheme } from '#/shared/color-theme.ts'
 import type { SettingsPage } from '#/shared/settings-pages.ts'
+import type {
+  EditorAppAvailability,
+  EditorPref,
+  Lang,
+  LangPref,
+  ResolvedEditorApp,
+  ResolvedTerminalApp,
+  ResolvedTheme,
+  SettingsPrefs,
+  TerminalAppAvailability,
+  TerminalPref,
+  ThemePref,
+} from '#/shared/settings.ts'
 import type {
   RemoteConnectionInput,
   RemoteDiagnosticsResult,
@@ -24,9 +35,33 @@ import type {
   SshConfigHostsResult,
 } from '#/shared/remote-repo.ts'
 import type { RepoQueryInvalidationEvent } from '#/shared/repo-query-invalidation.ts'
+import {
+  NativeShellProjectionSchema,
+  type NativeShellProjection,
+} from '#/shared/native-shell-projection.ts'
+import { RemoteAbsolutePathSchema } from '#/shared/remote-repo-schema.ts'
 
 export type { WorkspaceLayout } from '#/shared/workspace-layout.ts'
 export type { SettingsPage } from '#/shared/settings-pages.ts'
+export type {
+  EditorAppAvailability,
+  EditorPref,
+  Lang,
+  LangPref,
+  ResolvedEditorApp,
+  ResolvedTerminalApp,
+  ResolvedTheme,
+  SettingsPrefs,
+  TerminalAppAvailability,
+  TerminalPref,
+  ThemePref,
+} from '#/shared/settings.ts'
+export type {
+  NativeRecentReposProjection,
+  NativeSettingsProjectionPatch,
+  NativeSettingsProjectionState,
+  NativeShellProjection,
+} from '#/shared/native-shell-projection.ts'
 
 export interface LanInfo {
   host: string
@@ -34,16 +69,6 @@ export interface LanInfo {
   lanUrls: string[]
 }
 
-export type ThemePref = 'auto' | 'light' | 'dark'
-export type ResolvedTheme = 'light' | 'dark'
-export type LangPref = 'auto' | 'en' | 'zh' | 'ko' | 'ja'
-export type Lang = 'en' | 'zh' | 'ko' | 'ja'
-export type TerminalPref = 'auto' | 'ghostty' | 'terminal'
-export type EditorPref = 'auto' | 'vscode' | 'cursor' | 'windsurf'
-export type ResolvedTerminalApp = Exclude<TerminalPref, 'auto'>
-export type ResolvedEditorApp = Exclude<EditorPref, 'auto'>
-export type TerminalAppAvailability = Record<ResolvedTerminalApp, boolean>
-export type EditorAppAvailability = Record<ResolvedEditorApp, boolean>
 export type NetworkOpKind = 'user' | 'background'
 
 export interface ThemeState {
@@ -64,23 +89,7 @@ export interface SessionState {
   selectedTerminalByWorktree?: Record<string, string>
 }
 
-export interface SettingsPrefs {
-  theme: ThemePref
-  colorTheme: ColorTheme
-  lang: LangPref
-  fetchIntervalSec: number
-  terminalNotificationsEnabled: boolean
-  shortcutsDisabled: boolean
-  globalShortcutDisabled: boolean
-  swapCloseShortcuts: boolean
-  toggleDetailOnActionBarBlankClick: boolean
-  globalShortcut: string
-  terminalApp: TerminalPref
-  editorApp: EditorPref
-  lanEnabled: boolean
-}
-
-export interface SettingsSnapshot extends Omit<SettingsPrefs, 'lang'> {
+export interface SettingsSnapshot extends SettingsPrefs {
   globalShortcutRegistered: boolean
   session: SessionState
   recentRepos: RepoSessionEntry[]
@@ -127,10 +136,17 @@ export interface ExternalAppsSnapshot {
   editor: EditorAppState
 }
 
-export interface I18nPayload {
+export interface I18nSnapshot {
   lang: Lang
   pref: LangPref
   dict: Record<string, string>
+}
+
+export interface SettingsPrefsUpdateResponse {
+  ok: true
+  settings: SettingsPrefs
+  i18n?: I18nSnapshot
+  externalApps?: ExternalAppsSnapshot
 }
 
 export interface RepoSnapshot {
@@ -173,8 +189,11 @@ export type RpcResponse =
   | { ok: true; data: unknown }
   | { ok: false; error: { message: string; code?: string; name?: string } }
 
+export type I18nChangedEvent =
+  | { type: 'i18n-changed'; snapshot: I18nSnapshot; payload?: never }
+  | { type: 'i18n-changed'; payload: I18nSnapshot; snapshot?: never }
+
 export type RpcEvent =
-  | { type: 'theme-changed'; state: ThemeState }
   | { type: 'fetch-interval-changed'; sec: number }
   | { type: 'terminal-notifications-changed'; enabled: boolean }
   | { type: 'shortcuts-disabled-changed'; disabled: boolean }
@@ -186,7 +205,7 @@ export type RpcEvent =
   | ({ type: 'editor-app-changed' } & EditorAppState)
   | { type: 'github-cli-changed'; state: GitHubCliState }
   | { type: 'settings-write-error'; message: string }
-  | { type: 'i18n-changed'; payload: I18nPayload }
+  | I18nChangedEvent
   | RepoQueryInvalidationEvent
 
 export interface AppRpcHandlers {
@@ -257,7 +276,7 @@ export interface AppRpcHandlers {
     setTerminalApp: (input: { pref: TerminalPref }) => Promise<TerminalAppState>
     setEditorApp: (input: { pref: EditorPref }) => Promise<EditorAppState>
     saveSession: (input: { session: SessionState }) => Promise<void>
-    applyRecentReposProjection: (input: { recentRepos: RepoSessionEntry[]; addedRepo?: RepoSessionEntry }) => Promise<void>
+    applyShellProjection: (input: NativeShellProjection) => Promise<void>
     addRecentRepo: (input: { repo: RepoSessionEntry }) => Promise<RepoSessionEntry[]>
     clearRecentRepos: () => Promise<void>
   }
@@ -270,15 +289,16 @@ export interface AppRpcHandlers {
     refresh: (input: { hosts?: string[] } | undefined) => Promise<GitHubCliState>
   }
   i18n: {
-    get: () => Promise<I18nPayload>
-    setPref: (input: { pref: LangPref }) => Promise<I18nPayload | null>
+    get: () => Promise<I18nSnapshot>
+    setPref: (input: { pref: LangPref }) => Promise<I18nSnapshot | null>
   }
 }
 
 export interface NativeRpcHandlers {
   settings: {
     setGlobalShortcut: (input: { accelerator: string }) => Promise<GlobalShortcutState>
-    applyRecentReposProjection: (input: { recentRepos: RepoSessionEntry[]; addedRepo?: RepoSessionEntry }) => Promise<void>
+    applyShellProjection: (input: NativeShellProjection) => Promise<void>
+    clearNativeRecentDocuments: () => Promise<void>
   }
 }
 
@@ -294,39 +314,15 @@ const PortNumber = v.pipe(FiniteNumber, v.integer(), v.minValue(1), v.maxValue(6
 const CwdInput = v.object({ cwd: v.string() })
 const BranchInput = v.object({ cwd: v.string(), branch: v.string() })
 
-const RemoteAbsolutePath = v.pipe(
-  v.string(),
-  v.check((value) => value.startsWith('/') && !value.includes('\0'), 'Invalid remote path'),
-)
-
 const RemoteTargetSchema = v.object({
   id: v.string(),
   alias: v.string(),
   host: v.string(),
   user: v.string(),
   port: PortNumber,
-  remotePath: RemoteAbsolutePath,
+  remotePath: RemoteAbsolutePathSchema,
   displayName: v.string(),
 })
-
-const RemoteRepoRefSchema = v.object({
-  id: v.string(),
-  alias: v.string(),
-  remotePath: RemoteAbsolutePath,
-  displayName: v.string(),
-})
-
-const RepoSessionEntrySchema = v.union([
-  v.object({
-    kind: v.literal('local'),
-    id: v.string(),
-  }),
-  v.object({
-    kind: v.literal('remote'),
-    id: v.string(),
-    ref: RemoteRepoRefSchema,
-  }),
-])
 
 const RemoteConnectionInputSchema = v.object({
   alias: v.string(),
@@ -360,10 +356,8 @@ type NativeRpcProcedureSchemas = {
 export const RPC_PROCEDURE_SCHEMAS: NativeRpcProcedureSchemas = {
   settings: {
     setGlobalShortcut: v.object({ accelerator: v.string() }),
-    applyRecentReposProjection: v.object({
-      recentRepos: v.array(RepoSessionEntrySchema),
-      addedRepo: v.optional(RepoSessionEntrySchema),
-    }),
+    applyShellProjection: NativeShellProjectionSchema,
+    clearNativeRecentDocuments: EmptyInput,
   },
 }
 

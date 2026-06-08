@@ -38,7 +38,6 @@ const mocks = vi.hoisted(() => {
       template.splice(0, template.length, ...nextTemplate)
       return nextTemplate
     }),
-    clearSettingsRecentRepos: vi.fn(async () => true),
     setApplicationMenu: vi.fn(),
   }
 })
@@ -74,18 +73,12 @@ vi.mock('#/main/window-registry.ts', () => ({
 }))
 
 vi.mock('#/main/i18n/index.ts', () => ({
-  applyLangPref: vi.fn(),
   t: vi.fn((key: string) => key),
-}))
-
-vi.mock('#/main/settings-server-client.ts', () => ({
-  clearSettingsRecentRepos: mocks.clearSettingsRecentRepos,
 }))
 
 vi.mock('#/main/menu-state.ts', () => ({
   readMenuRuntimeState: mocks.readMenuRuntimeState,
-  setMenuLangPref: vi.fn(),
-  setMenuRecentRepos: vi.fn(),
+  applyMenuRuntimeState: vi.fn(),
   setMenuWorkspaceLayout: vi.fn(),
 }))
 
@@ -105,7 +98,9 @@ vi.mock('#/main/external-url.ts', () => ({
 
 vi.mock('#/main/theme.ts', () => ({
   getTheme: vi.fn(() => ({ pref: 'auto', resolved: 'light', colorTheme: 'macos' })),
-  setThemePref: vi.fn(),
+  applyThemeSettingsProjection: vi.fn(),
+  initTheme: vi.fn(),
+  subscribeTheme: vi.fn(() => () => {}),
 }))
 
 describe('app menu actions', () => {
@@ -204,6 +199,32 @@ describe('app menu actions', () => {
     })
   })
 
+  test('routes appearance changes through renderer intent instead of mutating settings in main', async () => {
+    const { buildAppMenu } = await import('#/main/menu.ts')
+
+    buildAppMenu()
+    clickNestedMenuItem('Goblin', 'settings.appearance', 'settings.appearance.dark')
+    await Promise.resolve()
+
+    expect(mocks.sendRendererEffectIntent).toHaveBeenCalledWith(mocks.win, {
+      type: 'theme-pref-set-requested',
+      pref: 'dark',
+    })
+  })
+
+  test('routes language changes through renderer intent instead of mutating settings in main', async () => {
+    const { buildAppMenu } = await import('#/main/menu.ts')
+
+    buildAppMenu()
+    clickNestedMenuItem('Goblin', 'settings.lang', 'settings.lang.ko')
+    await Promise.resolve()
+
+    expect(mocks.sendRendererEffectIntent).toHaveBeenCalledWith(mocks.win, {
+      type: 'lang-pref-set-requested',
+      pref: 'ko',
+    })
+  })
+
   test('wires the remote open accelerator from the file menu', async () => {
     const { buildAppMenu } = await import('#/main/menu.ts')
 
@@ -212,6 +233,18 @@ describe('app menu actions', () => {
     const fileMenu = mocks.template.find((entry) => entry.label === 'menu.file')
     const remoteItem = fileMenu?.submenu?.find((entry: any) => entry.label === 'menu.file.open-remote-repo')
     expect(remoteItem?.accelerator).toBe('CmdOrCtrl+Shift+R')
+  })
+
+  test('keeps the intentional default close shortcut mapping', async () => {
+    const { buildAppMenu } = await import('#/main/menu.ts')
+
+    buildAppMenu()
+
+    const fileMenu = mocks.template.find((entry) => entry.label === 'menu.file')
+    const closeTabItem = fileMenu?.submenu?.find((entry: any) => entry.label === 'menu.file.close-tab')
+    const closeWindowItem = fileMenu?.submenu?.find((entry: any) => entry.label === 'menu.file.close-window')
+    expect(closeTabItem?.accelerator).toBe('CmdOrCtrl+Shift+W')
+    expect(closeWindowItem?.accelerator).toBe('CmdOrCtrl+W')
   })
 
   test('wires the terminal primary action accelerator from the view menu', async () => {
@@ -231,7 +264,58 @@ describe('app menu actions', () => {
     })
   })
 
-  test('clears recent repos through the server-backed path and OS recent documents', async () => {
+  test('wires changes and terminal detail accelerators from the view menu', async () => {
+    const { buildAppMenu } = await import('#/main/menu.ts')
+
+    buildAppMenu()
+
+    const viewMenu = mocks.template.find((entry) => entry.label === 'menu.view')
+    const statusItem = viewMenu?.submenu?.find((entry: any) => entry.label === 'menu.view.status')
+    const changesItem = viewMenu?.submenu?.find((entry: any) => entry.label === 'menu.view.changes')
+    const terminalItem = viewMenu?.submenu?.find((entry: any) => entry.label === 'menu.view.terminal')
+
+    expect(statusItem?.accelerator).toBe('CmdOrCtrl+1')
+    expect(changesItem?.accelerator).toBe('CmdOrCtrl+2')
+    expect(terminalItem?.accelerator).toBe('CmdOrCtrl+3')
+  })
+
+  test('includes standard edit roles and full screen in the menu', async () => {
+    const { buildAppMenu } = await import('#/main/menu.ts')
+
+    buildAppMenu()
+
+    const editMenu = mocks.template.find((entry) => entry.label === 'menu.edit')
+    expect(editMenu?.submenu?.map((entry: any) => entry.label)).toEqual([
+      'menu.edit.undo',
+      'menu.edit.redo',
+      undefined,
+      'menu.edit.cut',
+      'menu.edit.copy',
+      'menu.edit.paste',
+      'menu.edit.paste-match-style',
+      'menu.edit.delete',
+      'menu.edit.select-all',
+    ])
+
+    const viewMenu = mocks.template.find((entry) => entry.label === 'menu.view')
+    const fullScreenItem = viewMenu?.submenu?.find((entry: any) => entry.label === 'menu.view.toggle-full-screen')
+    expect(fullScreenItem?.role).toBe('togglefullscreen')
+  })
+
+  test('puts native window management items before repo navigation', async () => {
+    const { buildAppMenu } = await import('#/main/menu.ts')
+
+    buildAppMenu()
+
+    const windowMenu = mocks.template.find((entry) => entry.label === 'menu.window')
+    expect(windowMenu?.submenu?.slice(0, 3).map((entry: any) => entry.label)).toEqual([
+      'menu.window.minimize',
+      'menu.window.zoom',
+      undefined,
+    ])
+  })
+
+  test('routes clear recent through renderer intent', async () => {
     mocks.readMenuRuntimeState.mockReturnValue({
       ...defaultMenuRuntimeState(),
       recentRepos: [{ kind: 'local', id: '/tmp/repo' }],
@@ -246,8 +330,9 @@ describe('app menu actions', () => {
     clearItem.click()
     await Promise.resolve()
 
-    expect(mocks.clearSettingsRecentRepos).toHaveBeenCalledTimes(1)
-    expect(mocks.clearRecentDocuments).toHaveBeenCalledTimes(1)
+    expect(mocks.sendRendererEffectIntent).toHaveBeenCalledWith(mocks.win, {
+      type: 'clear-recent-repos-requested',
+    })
   })
 
   test('opens the local web version from the file menu', async () => {
@@ -264,6 +349,14 @@ describe('app menu actions', () => {
 function clickMenuItem(menuLabel: string, itemLabel: string): void {
   const menu = mocks.template.find((entry) => entry.label === menuLabel)
   const item = menu?.submenu?.find((entry: any) => entry.label === itemLabel)
+  expect(item?.click).toBeTypeOf('function')
+  item.click()
+}
+
+function clickNestedMenuItem(menuLabel: string, parentItemLabel: string, itemLabel: string): void {
+  const menu = mocks.template.find((entry) => entry.label === menuLabel)
+  const parent = menu?.submenu?.find((entry: any) => entry.label === parentItemLabel)
+  const item = parent?.submenu?.find((entry: any) => entry.label === itemLabel)
   expect(item?.click).toBeTypeOf('function')
   item.click()
 }

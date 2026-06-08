@@ -1,10 +1,8 @@
 import type { NativeRpcHandlers } from '#/shared/rpc.ts'
 import { isReservedGlobalShortcut, parseGlobalShortcut } from '#/shared/accelerator.ts'
-import { DEFAULT_GLOBAL_SHORTCUT } from '#/shared/settings-defaults.ts'
 import { getSettingsPrefs, updateSettingsPrefs } from '#/main/settings-server-client.ts'
-import { broadcastNativeHostGlobalShortcutState } from '#/main/native-host-settings-effects.ts'
+import { applyNativeHostShellProjection, broadcastNativeHostGlobalShortcutState } from '#/main/native-host-settings-effects.ts'
 import { isGlobalShortcutRegistered, replaceGlobalShortcut } from '#/main/shortcuts.ts'
-import { applyNativeHostRecentReposProjection } from '#/main/native-host-settings-session.ts'
 
 // Native-host settings RPC handlers: read/write server-owned settings, then
 // apply the corresponding Electron-only effects when needed.
@@ -18,9 +16,14 @@ async function getRuntimeServerSettingsPrefs() {
 
 export function createNativeHostSettingsRpcHandlers(options: {
   addRecentDocument: (path: string) => void
+  clearRecentDocuments: () => void
 }): Pick<NativeRpcHandlers, 'settings'> {
   return {
     settings: {
+      applyShellProjection: async (input) => await applyNativeHostShellProjection(input, { addRecentDocument: options.addRecentDocument }),
+      clearNativeRecentDocuments: async () => {
+        options.clearRecentDocuments()
+      },
       setGlobalShortcut: async ({ accelerator }) => {
         const parsed = parseGlobalShortcut(accelerator)
         const serverSettings = await getRuntimeServerSettingsPrefs()
@@ -35,8 +38,6 @@ export function createNativeHostSettingsRpcHandlers(options: {
         await broadcastNativeHostGlobalShortcutState(payload.accelerator, payload.registered)
         return payload
       },
-      applyRecentReposProjection: async ({ recentRepos, addedRepo }) =>
-        applyNativeHostRecentReposProjection(recentRepos, { addedRepo, addRecentDocument: options.addRecentDocument }),
     },
   }
 }
