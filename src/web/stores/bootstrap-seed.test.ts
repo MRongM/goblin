@@ -45,9 +45,9 @@ describe('renderer bootstrap seeding', () => {
       },
     })
 
-    const { useSettingsStore } = await import('#/web/stores/settings.ts')
+    const { useSessionRestoreStore } = await import('#/web/stores/session-restore.ts')
 
-    expect(useSettingsStore.getState()).toMatchObject({ bootSessionSnapshot: null })
+    expect(useSessionRestoreStore.getState()).toMatchObject({ bootSessionSnapshot: null })
   })
 
   test('seeds i18n store from preload bootstrap including pref', async () => {
@@ -90,7 +90,7 @@ describe('renderer bootstrap seeding', () => {
       pref: 'en',
       dict: Object.freeze({ hello: 'hello' }),
     })
-    vi.doMock('#/web/app-data-client.ts', () => ({
+    vi.doMock('#/web/settings-client.ts', () => ({
       getI18nSnapshot: vi.fn(async () => nextSnapshot),
       setI18nPref: vi.fn(async () => nextSnapshot),
     }))

@@ -1,38 +1,27 @@
 import { useEffect } from 'react'
 import QRCode from 'qrcode'
-import { queryOptions, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { queryOptions, useQuery, useQueryClient } from '@tanstack/react-query'
 import type {
-  EditorAppState,
-  EditorPref,
   ExternalAppsSnapshot,
   GitHubCliState,
-  GlobalShortcutState,
   LanInfo,
   SettingsSnapshot,
-  TerminalAppState,
-  TerminalPref,
 } from '#/shared/rpc.ts'
 import {
   getExternalAppsSnapshot,
   getGitHubCliState,
   getLanInfo,
   getSettingsSnapshot,
-  refreshExternalAppsSnapshot,
-  refreshGitHubCliState,
-  setGlobalShortcut,
-  setGlobalShortcutDisabled,
-  setLanEnabled,
-  setPreferredEditorApp,
-  setPreferredTerminalApp,
-  setSettingsFetchInterval,
-  setShortcutsDisabled,
-  setSwapCloseShortcuts,
-  setTerminalNotificationsEnabled,
-  setToggleDetailOnActionBarBlankClick,
-} from '#/web/app-data-client.ts'
+} from '#/web/settings-client.ts'
 import { getInitialBootstrap } from '#/web/bootstrap.ts'
 import { subscribeSettingsInvalidation } from '#/web/settings-invalidation-ingress.ts'
 import { DEFAULT_COLOR_THEME } from '#/shared/color-theme.ts'
+import {
+  externalAppsQueryKey,
+  githubCliQueryKey,
+  lanInfoQueryKey,
+  settingsSnapshotQueryKey,
+} from '#/web/settings-query-cache.ts'
 import { DEFAULT_DETAIL_PANE_SIZES, DEFAULT_WORKSPACE_LAYOUT } from '#/shared/workspace-layout.ts'
 
 function initialSettingsSnapshot(): SettingsSnapshot | undefined {
@@ -87,21 +76,7 @@ function initialGitHubCliState(): GitHubCliState {
   }
 }
 
-export function settingsSnapshotQueryKey() {
-  return ['settings', 'snapshot'] as const
-}
-
-export function externalAppsQueryKey() {
-  return ['settings', 'external-apps'] as const
-}
-
-export function githubCliQueryKey(hosts?: string[]) {
-  return ['settings', 'github-cli', ...(hosts?.filter((host) => host.trim()).sort() ?? [])] as const
-}
-
-export function lanInfoQueryKey() {
-  return ['settings', 'lan'] as const
-}
+export { externalAppsQueryKey, githubCliQueryKey, lanInfoQueryKey, settingsSnapshotQueryKey } from '#/web/settings-query-cache.ts'
 
 export function settingsSnapshotQueryOptions() {
   return queryOptions<SettingsSnapshot>({
@@ -173,33 +148,6 @@ export function useLanInfoQuery() {
   return useQuery(lanInfoQueryOptions())
 }
 
-function updateSettingsSnapshotCache(
-  queryClient: ReturnType<typeof useQueryClient>,
-  update: (current: SettingsSnapshot) => SettingsSnapshot,
-) {
-  queryClient.setQueryData(settingsSnapshotQueryKey(), (current: SettingsSnapshot | undefined) =>
-    current ? update(current) : current,
-  )
-}
-
-function updateExternalAppsCache(
-  queryClient: ReturnType<typeof useQueryClient>,
-  update: (current: ExternalAppsSnapshot) => ExternalAppsSnapshot,
-) {
-  queryClient.setQueryData(externalAppsQueryKey(), (current: ExternalAppsSnapshot | undefined) =>
-    current ? update(current) : current,
-  )
-}
-
-function updateGitHubCliCache(
-  queryClient: ReturnType<typeof useQueryClient>,
-  hosts: string[] | undefined,
-  state: GitHubCliState,
-) {
-  queryClient.setQueryData(githubCliQueryKey(hosts), state)
-  if (!hosts || hosts.length === 0) queryClient.setQueryData(githubCliQueryKey(), state)
-}
-
 export function useSettingsQueryInvalidationSync() {
   const queryClient = useQueryClient()
   useEffect(
@@ -214,131 +162,4 @@ export function useSettingsQueryInvalidationSync() {
       }),
     [queryClient],
   )
-}
-
-export function useSetFetchIntervalMutation() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: setSettingsFetchInterval,
-    onSuccess(fetchIntervalSec) {
-      updateSettingsSnapshotCache(queryClient, (current) => ({ ...current, fetchIntervalSec }))
-    },
-  })
-}
-
-export function useSetTerminalNotificationsEnabledMutation() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: setTerminalNotificationsEnabled,
-    onSuccess(_value, enabled) {
-      updateSettingsSnapshotCache(queryClient, (current) => ({ ...current, terminalNotificationsEnabled: enabled }))
-    },
-  })
-}
-
-export function useSetShortcutsDisabledMutation() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: setShortcutsDisabled,
-    onSuccess(_value, disabled) {
-      updateSettingsSnapshotCache(queryClient, (current) => ({ ...current, shortcutsDisabled: disabled }))
-    },
-  })
-}
-
-export function useSetGlobalShortcutDisabledMutation() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: setGlobalShortcutDisabled,
-    onSuccess(_value, disabled) {
-      updateSettingsSnapshotCache(queryClient, (current) => ({ ...current, globalShortcutDisabled: disabled }))
-    },
-  })
-}
-
-export function useSetSwapCloseShortcutsMutation() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: setSwapCloseShortcuts,
-    onSuccess(_value, swapped) {
-      updateSettingsSnapshotCache(queryClient, (current) => ({ ...current, swapCloseShortcuts: swapped }))
-    },
-  })
-}
-
-export function useSetToggleDetailOnActionBarBlankClickMutation() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: setToggleDetailOnActionBarBlankClick,
-    onSuccess(_value, enabled) {
-      updateSettingsSnapshotCache(queryClient, (current) => ({ ...current, toggleDetailOnActionBarBlankClick: enabled }))
-    },
-  })
-}
-
-export function useSetGlobalShortcutMutation() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: setGlobalShortcut,
-    onSuccess(state: GlobalShortcutState) {
-      updateSettingsSnapshotCache(queryClient, (current) => ({
-        ...current,
-        globalShortcut: state.accelerator,
-        globalShortcutRegistered: state.registered,
-      }))
-    },
-  })
-}
-
-export function useSetTerminalAppMutation() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: setPreferredTerminalApp,
-    onSuccess(state: TerminalAppState) {
-      updateExternalAppsCache(queryClient, (current) => ({ ...current, terminal: state }))
-      updateSettingsSnapshotCache(queryClient, (current) => ({ ...current, terminalApp: state.pref }))
-    },
-  })
-}
-
-export function useSetEditorAppMutation() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: setPreferredEditorApp,
-    onSuccess(state: EditorAppState) {
-      updateExternalAppsCache(queryClient, (current) => ({ ...current, editor: state }))
-      updateSettingsSnapshotCache(queryClient, (current) => ({ ...current, editorApp: state.pref }))
-    },
-  })
-}
-
-export function useRefreshExternalAppsMutation() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: refreshExternalAppsSnapshot,
-    onSuccess(state) {
-      queryClient.setQueryData(externalAppsQueryKey(), state)
-    },
-  })
-}
-
-export function useRefreshGitHubCliMutation(hosts?: string[]) {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: () => refreshGitHubCliState(hosts),
-    onSuccess(state) {
-      updateGitHubCliCache(queryClient, hosts, state)
-    },
-  })
-}
-
-export function useSetLanEnabledMutation() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: setLanEnabled,
-    onSuccess(_value, enabled) {
-      updateSettingsSnapshotCache(queryClient, (current) => ({ ...current, lanEnabled: enabled }))
-      void queryClient.invalidateQueries({ queryKey: lanInfoQueryKey() })
-    },
-  })
 }

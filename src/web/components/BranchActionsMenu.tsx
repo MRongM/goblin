@@ -1,4 +1,4 @@
-import { ChevronDown, Loader2 } from 'lucide-react'
+import { Loader2, MoreHorizontal } from 'lucide-react'
 import type { RepoBranchState } from '#/web/stores/repos/types.ts'
 import { useT } from '#/web/stores/i18n.ts'
 import { Button } from '#/web/components/ui/button.tsx'
@@ -78,8 +78,7 @@ export function BranchActionsDropdown({
           onClick={(e) => e.stopPropagation()}
           onDoubleClick={(e) => e.stopPropagation()}
         >
-          {busyAction ? <Loader2 size={16} className="animate-spin" /> : <ChevronDown />}
-          {t('action.menu')}
+          {busyAction ? <Loader2 size={16} className="animate-spin" /> : <MoreHorizontal className="size-4" />}
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>

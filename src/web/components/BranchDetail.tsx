@@ -97,10 +97,12 @@ export function BranchDetail({
   const detail = getSelectedBranchDetailPresentation(repo)
   const contentId = `${detailId}-content`
 
+  const focusMode = layout === 'top-bottom' && detailFocusMode
+
   return (
     <section className="flex min-h-0 flex-1 flex-col bg-background">
-      {detail.branch ? (
-        <BranchDetailWithActions
+      {detail.branch && !focusMode ? (
+        <BranchShortcutHandler
           key={`${repo.id}:${detail.branch.name}`}
           repo={repo}
           detail={detail}
@@ -137,7 +139,7 @@ export function BranchDetail({
   )
 }
 
-interface BranchDetailWithActionsProps {
+interface BranchShortcutHandlerProps {
   repo: BranchDetailRepo
   detail: SelectedBranchDetailPresentation
   branch: NonNullable<SelectedBranchDetailPresentation['branch']>
@@ -148,7 +150,7 @@ interface BranchDetailWithActionsProps {
   layout: RepoWorkspaceLayout
 }
 
-function BranchDetailWithActions({
+function BranchShortcutHandler({
   repo,
   detail,
   branch,
@@ -157,7 +159,7 @@ function BranchDetailWithActions({
   collapsed,
   detailFocusMode,
   layout,
-}: BranchDetailWithActionsProps) {
+}: BranchShortcutHandlerProps) {
   const actions = useBranchActionItems(repo, branch)
   useBranchActionShortcutRegistry(actions)
 
@@ -171,7 +173,6 @@ function BranchDetailWithActions({
         collapsed={collapsed}
         detailFocusMode={detailFocusMode}
         layout={layout}
-        branchActions={actions}
       />
       {actions.dialogs}
       {!collapsed && (

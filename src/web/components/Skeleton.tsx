@@ -93,7 +93,6 @@ export function BranchDetailSkeleton({
   detailFocusMode?: boolean
 }) {
   const behavior = repoWorkspaceBehavior(layout, collapsed, detailFocusMode)
-  const showBranchActions = layout === 'left-right' || behavior.mode === 'focus'
   const showPanelControls = behavior.detailFocusAllowed || behavior.detailCollapseAllowed
 
   return (
@@ -114,14 +113,6 @@ export function BranchDetailSkeleton({
         </div>
         <div aria-hidden="true" className="min-w-2 flex-1 self-stretch" />
         <div className="flex shrink-0 items-center gap-1">
-          {showBranchActions && (
-            <div data-testid="branch-detail-skeleton-action">
-              <Bar w="72px" h="24px" tone="strong" />
-            </div>
-          )}
-          {showBranchActions && showPanelControls && (
-            <div aria-hidden="true" className="mx-1 h-4 border-l border-separator/70" />
-          )}
           {behavior.detailFocusAllowed && <Bar w="28px" h="28px" tone="strong" />}
           {behavior.detailCollapseAllowed && <Bar w="28px" h="28px" tone="strong" />}
         </div>
@@ -148,6 +139,9 @@ function RepoToolbarSkeleton({ focusMode = false, compact = false }: { focusMode
             <Bar w="120px" h="14px" tone="strong" />
             <Bar w="44px" h="16px" />
             <Bar w="96px" h="11px" />
+            <div data-testid="repo-toolbar-skeleton-focus-actions">
+              <Bar w="24px" h="24px" tone="strong" />
+            </div>
           </>
         ) : compact ? (
           <ToolbarPagerSkeleton />
