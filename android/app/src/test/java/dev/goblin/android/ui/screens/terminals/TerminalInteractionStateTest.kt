@@ -216,16 +216,28 @@ class TerminalInteractionStateTest {
     }
 
     @Test
-    fun `helper key labels include ctrl l after ctrl c`() {
+    fun `helper key labels hide quick yes and no inputs`() {
         val labels = terminalHelperKeyLabels(ctrlModifierActive = false)
 
-        assertEquals("CTRL+C", labels[3])
-        assertEquals("CTRL+L", labels[4])
-        assertEquals("Tab", labels[5])
+        assertFalse(labels.contains("YES"))
+        assertFalse(labels.contains("NO"))
+        assertEquals("CTRL+C", labels[1])
+        assertEquals("CTRL+L", labels[2])
+        assertEquals("Tab", labels[3])
+    }
+
+    @Test
+    fun `helper key labels render in two rows`() {
+        val rows = terminalHelperKeyRows(ctrlModifierActive = false)
+
+        assertEquals(2, rows.size)
+        assertEquals(listOf("ENTER", "CTRL+C", "CTRL+L", "Tab", "Esc", "Ctrl"), rows[0])
+        assertEquals(listOf("Up", "Down", "Left", "Right", "Paste"), rows[1])
     }
 
     @Test
     fun `top bar is hidden while terminal is maximized`() {
+        assertTrue(TerminalDefaultMaximized)
         assertTrue(terminalTopBarVisible(terminalMaximized = false))
         assertFalse(terminalTopBarVisible(terminalMaximized = true))
         assertEquals("Maximize", terminalMaximizeActionLabel(terminalMaximized = false))

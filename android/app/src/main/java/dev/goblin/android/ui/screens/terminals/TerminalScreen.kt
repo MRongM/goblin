@@ -89,9 +89,8 @@ fun TerminalScreen(
     }
     var terminalSessions by remember { mutableStateOf(terminalSessionManager.sessions()) }
     var ctrlModifierActive by remember { mutableStateOf(false) }
-    var terminalMaximized by remember { mutableStateOf(false) }
+    var terminalMaximized by remember { mutableStateOf(TerminalDefaultMaximized) }
     var terminalFontSizeSp by remember { mutableStateOf(TerminalDefaultFontSizeSp) }
-    var isSendingQuickInput by remember { mutableStateOf(false) }
     var isSendingCommandInput by remember { mutableStateOf(false) }
     var commandInput by remember(activeSessionId) { mutableStateOf("") }
     var terminalActionMenuExpanded by remember { mutableStateOf(false) }
@@ -179,16 +178,6 @@ fun TerminalScreen(
             syncTerminalForeground()
             setSending(false)
             onResult(sent)
-        }
-    }
-
-    fun sendQuickInput(value: String) {
-        sendTerminalInputLocked(
-            value = terminalQuickInput(value),
-            isSending = isSendingQuickInput,
-            setSending = { isSendingQuickInput = it },
-        ) { sent ->
-            inputNotice = if (sent) null else "Terminal is not connected."
         }
     }
 
@@ -500,15 +489,13 @@ fun TerminalScreen(
                     )
                 }
                 HelperKeyRow(
-                    enabled = inputAvailable && !isSendingQuickInput,
+                    enabled = inputAvailable,
                     ctrlModifierActive = ctrlModifierActive,
                     onCtrlToggle = { ctrlModifierActive = !ctrlModifierActive },
                     onCtrlC = { sendControlInput("\u0003") },
                     onCtrlL = { sendControlInput(terminalControlCharacter('L') ?: "\u000C") },
                     onEnter = { sendTerminalInputLocked("\r", false, { _ -> }) },
                     onEsc = { sendTerminalInputLocked("\u001b", false, { _ -> }) },
-                    onQuickConfirm = { sendQuickInput(TerminalQuickConfirmInput) },
-                    onQuickCancel = { sendQuickInput(TerminalQuickCancelInput) },
                     onTab = { sendTerminalInputLocked("\t", false, { _ -> }) },
                     onArrow = { code -> sendTerminalInputLocked(code, false, { _ -> }) },
                     onPaste = {
@@ -684,33 +671,37 @@ private fun HelperKeyRow(
     onCtrlL: () -> Unit,
     onEnter: () -> Unit,
     onEsc: () -> Unit,
-    onQuickConfirm: () -> Unit,
-    onQuickCancel: () -> Unit,
     onTab: () -> Unit,
     onArrow: (String) -> Unit,
     onPaste: () -> Unit,
 ) {
     val labels = terminalHelperKeyLabels(ctrlModifierActive)
-    Row(
-        modifier = Modifier.horizontalScroll(rememberScrollState()),
-        horizontalArrangement = Arrangement.spacedBy(GoblinSpacing.Xs),
+    val actions = listOf<() -> Unit>(
+        onEnter,
+        onCtrlC,
+        onCtrlL,
+        onTab,
+        onEsc,
+        onCtrlToggle,
+        { onArrow("\u001b[A") },
+        { onArrow("\u001b[B") },
+        { onArrow("\u001b[D") },
+        { onArrow("\u001b[C") },
+        onPaste,
+    )
+    Column(
+        verticalArrangement = Arrangement.spacedBy(GoblinSpacing.Xs),
     ) {
-        TerminalTextButton(text = labels[0], enabled = enabled, onClick = onEnter)
-        TerminalTextButton(text = labels[1], enabled = enabled, onClick = onQuickConfirm)
-        TerminalTextButton(text = labels[2], enabled = enabled, onClick = onQuickCancel)
-        TerminalTextButton(text = labels[3], enabled = enabled, onClick = onCtrlC)
-        TerminalTextButton(text = labels[4], enabled = enabled, onClick = onCtrlL)
-        TerminalTextButton(text = labels[5], enabled = enabled, onClick = onTab)
-        TerminalTextButton(text = labels[6], enabled = enabled, onClick = onEsc)
-        TerminalTextButton(
-            text = labels[7],
-            enabled = enabled,
-            onClick = onCtrlToggle,
-        )
-        TerminalTextButton(text = labels[8], enabled = enabled, onClick = { onArrow("\u001b[A") })
-        TerminalTextButton(text = labels[9], enabled = enabled, onClick = { onArrow("\u001b[B") })
-        TerminalTextButton(text = labels[10], enabled = enabled, onClick = { onArrow("\u001b[D") })
-        TerminalTextButton(text = labels[11], enabled = enabled, onClick = { onArrow("\u001b[C") })
-        TerminalTextButton(text = labels[12], enabled = enabled, onClick = onPaste)
+        terminalHelperKeyRows(ctrlModifierActive).forEachIndexed { rowIndex, rowLabels ->
+            Row(
+                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(GoblinSpacing.Xs),
+            ) {
+                rowLabels.forEachIndexed { columnIndex, label ->
+                    val actionIndex = rowIndex * TerminalHelperButtonsPerRow + columnIndex
+                    TerminalTextButton(text = label, enabled = enabled, onClick = actions[actionIndex])
+                }
+            }
+        }
     }
 }

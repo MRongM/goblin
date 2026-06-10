@@ -15,13 +15,13 @@ internal const val TerminalBackClosesSessionHint = "Back stops this temporary te
 internal const val TerminalQuickConfirmInput = "YES"
 internal const val TerminalQuickCancelInput = "NO"
 
+internal const val TerminalDefaultMaximized = true
 internal const val TerminalStickToBottomThresholdPx = 48
+internal const val TerminalHelperButtonsPerRow = 6
 
 internal fun terminalHelperKeyLabels(ctrlModifierActive: Boolean): List<String> =
     listOf(
         "ENTER",
-        "YES",
-        "NO",
         "CTRL+C",
         "CTRL+L",
         "Tab",
@@ -33,6 +33,9 @@ internal fun terminalHelperKeyLabels(ctrlModifierActive: Boolean): List<String> 
         "Right",
         "Paste",
     )
+
+internal fun terminalHelperKeyRows(ctrlModifierActive: Boolean): List<List<String>> =
+    terminalHelperKeyLabels(ctrlModifierActive).chunked(TerminalHelperButtonsPerRow)
 
 internal fun terminalTopBarVisible(terminalMaximized: Boolean): Boolean = !terminalMaximized
 
