@@ -31,11 +31,20 @@ export function isTerminalDescriptorLive(repos: ReposStore['repos'], descriptor:
   return !!repo?.data.branches.some((branch) => branch.worktree?.path === descriptor.worktreePath)
 }
 
+export function stripTerminalControlSequences(value: string): string {
+  return value
+    .replace(/\x1b(?:[@-Z\-_]|\[[0-?]*[ -/]*[@-~])/g, '')
+    .replace(/\x1b\][^\x07]*\x07/g, '')
+    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '')
+}
+
 export function compactTerminalTitle(title: string): string {
   const normalized = normalizeTitle(title)
   if (!normalized) return ''
   const labelStripped = stripLeadingLabel(normalized)
   if (labelStripped !== normalized) return compactTerminalTitle(labelStripped)
+  const ubuntuVmStripped = stripUbuntuVmPrefix(labelStripped)
+  if (ubuntuVmStripped !== labelStripped) return compactTerminalTitle(ubuntuVmStripped)
   const split = splitTerminalTitle(normalized)
   if (split) {
     const context = compactContext(split.leading)
@@ -108,6 +117,12 @@ function stripLeadingLabel(value: string): string {
   const match = /^(devin):\s+(.+)$/i.exec(value)
   if (!match) return value
   return match[2]?.trim() || value
+}
+
+function stripUbuntuVmPrefix(value: string): string {
+  const match = /^ubuntu@VM[^:]+:\s*(.+)$/i.exec(value)
+  if (!match) return value
+  return match[1]?.trim() || value
 }
 
 const MAX_COMPACT_TERMINAL_TITLE_LENGTH = 32

@@ -57,6 +57,8 @@ export interface TerminalSnapshot {
   attachment?: TerminalAttachmentSnapshot | null
   search?: TerminalSearchResult | null
   progress?: TerminalProgressState | null
+  /** Viewer-mode output summary: stripped recent terminal output. */
+  outputSummary?: string | null
 }
 
 export interface TerminalSearchResult {
@@ -103,7 +105,7 @@ export interface TerminalSessionContextValue {
   scrollToBottom: (key: string) => void
   scrollLines: (key: string, amount: number) => void
   clearBell: (key: string) => boolean
-  closeTerminalAndDismissDetailIfLast: (key: string, base: TerminalSessionBase) => TerminalSessionSummary[]
+  closeTerminalAndDismissDetailIfLast: (key: string, base: TerminalSessionBase) => void
   attach: (descriptor: TerminalDescriptor, host: HTMLElement) => void
   detach: (key: string, host: HTMLElement) => void
   restart: (key: string) => void

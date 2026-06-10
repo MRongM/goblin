@@ -2,7 +2,6 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
-  useMemo,
   useRef,
   useState,
   type DragEvent,
@@ -18,11 +17,13 @@ import { pathForDroppedFile } from '#/web/app-shell-client.ts'
 import { useT } from '#/web/stores/i18n.ts'
 import { worktreeTerminalKey } from '#/web/components/terminal/terminal-session-utils.ts'
 import { useTerminalSessionContext } from '#/web/components/terminal/terminal-session-context.ts'
-import { useWorktreeTerminalSnapshot, useTerminalSnapshot } from '#/web/components/terminal/terminal-session-store.ts'
-import { TerminalSwitcher } from '#/web/components/terminal/TerminalSwitcher.tsx'
+import {
+  useWorktreeTerminalSelectedDescriptor,
+  useWorktreeTerminalCount,
+  useTerminalSnapshot,
+} from '#/web/components/terminal/terminal-session-store.ts'
 import { MobileTerminalToolbar } from '#/web/components/terminal/mobile-terminal-toolbar.tsx'
 import { isMobileDevice } from '#/web/components/terminal/mobile-detection.ts'
-import type { TerminalSessionBase } from '#/web/components/terminal/types.ts'
 interface TerminalSlotProps {
   repoRoot: string
   branch: string
@@ -37,13 +38,9 @@ export function TerminalSlot({ repoRoot, branch, worktreePath }: TerminalSlotPro
   const [searchTerm, setSearchTerm] = useState('')
   const context = useTerminalSessionContext()
   const {
-    createTerminal,
-    selectTerminal,
     clearBell,
-    closeTerminalAndDismissDetailIfLast,
     attach,
     detach,
-    scrollToBottom,
     scrollLines,
     isTerminalFocusTarget,
     findNext,
@@ -51,18 +48,13 @@ export function TerminalSlot({ repoRoot, branch, worktreePath }: TerminalSlotPro
     clearSearch,
     writeInput,
     takeover,
+    restart,
   } = context
   const terminalWorktreeKey = worktreeTerminalKey(repoRoot, worktreePath)
-  const base = useMemo<TerminalSessionBase>(
-    () => ({ repoRoot, branch, worktreePath }),
-    [branch, repoRoot, worktreePath],
-  )
-  const worktreeSnapshot = useWorktreeTerminalSnapshot(terminalWorktreeKey)
-  const descriptor = worktreeSnapshot.selectedDescriptor
+  const descriptor = useWorktreeTerminalSelectedDescriptor(terminalWorktreeKey)
   const key = descriptor?.key ?? null
-  const summaries = worktreeSnapshot.sessions
   const snapshot = useTerminalSnapshot(key)
-  const hasSessions = worktreeSnapshot.count > 0
+  const hasSessions = useWorktreeTerminalCount(terminalWorktreeKey) > 0
 
   useLayoutEffect(() => {
     const host = hostRef.current
@@ -97,15 +89,6 @@ export function TerminalSlot({ repoRoot, branch, worktreePath }: TerminalSlotPro
     }
   }, [clearSearch, key])
 
-  const newTerminal = useCallback(() => {
-    void createTerminal(base)
-  }, [base, createTerminal])
-  const closeTerminalKey = useCallback(
-    (terminalKey: string) => {
-      closeTerminalAndDismissDetailIfLast(terminalKey, base)
-    },
-    [base, closeTerminalAndDismissDetailIfLast],
-  )
   const closeSearch = useCallback(() => {
     setSearchOpen(false)
     setSearchTerm('')
@@ -207,19 +190,15 @@ export function TerminalSlot({ repoRoot, branch, worktreePath }: TerminalSlotPro
 
   const progress = snapshot.progress
   const attachment = snapshot.attachment
-  const isReadOnly = hasSessions && snapshot.phase === 'open' && !!attachment && attachment.role !== 'controller'
-  const attachmentBannerKey =
-    attachment?.role === 'viewer'
-      ? 'terminal.mirror-controlled'
-      : attachment?.role === 'unowned'
-        ? 'terminal.unowned'
-        : null
+  const isController = hasSessions && snapshot.phase === 'open' && attachment?.role === 'controller'
+  const isReadonly = hasSessions && snapshot.phase === 'open' && (attachment?.role === 'viewer' || attachment?.role === 'unowned')
+  const readonlyBadge = attachment?.role === 'viewer' ? t('terminal.mirror-controlled') : t('terminal.unowned')
   const progressVariant =
     progress?.state === 2 ? 'error' : progress?.state === 4 ? 'warning' : progress?.state === 3 ? 'indeterminate' : ''
 
   return (
     <div
-      className={cn('goblin-terminal-slot focus-visible:outline-none', isReadOnly && 'goblin-terminal-slot--mirror')}
+      className="goblin-terminal-slot focus-visible:outline-none"
       tabIndex={-1}
       onFocusCapture={handleFocus}
       onBlurCapture={handleBlur}
@@ -246,8 +225,8 @@ export function TerminalSlot({ repoRoot, branch, worktreePath }: TerminalSlotPro
       )}
       <div
         ref={hostRef}
-        className={cn('goblin-terminal-slot__host', isReadOnly && 'goblin-terminal-slot__host--mirror')}
-        aria-readonly={isReadOnly || undefined}
+        className={cn('goblin-terminal-slot__host', isReadonly && 'goblin-terminal-slot__host--hidden')}
+        aria-readonly={(!isController && hasSessions) || undefined}
       >
         {!hasSessions && (
           <div className="goblin-terminal-slot__empty">
@@ -285,30 +264,21 @@ export function TerminalSlot({ repoRoot, branch, worktreePath }: TerminalSlotPro
             </Button>
           </div>
         )}
-        <TerminalSwitcher
-          worktreeTerminalKey={terminalWorktreeKey}
-          sessions={summaries}
-          onNew={newTerminal}
-          onSelect={selectTerminal}
-          onScrollToBottom={scrollToBottom}
-          onClose={closeTerminalKey}
-        />
-        {isMobileDevice() && hasSessions && key && (
+        {isMobileDevice() && isController && key && (
           <MobileTerminalToolbar
             onInput={(data) => writeInput(key, data)}
             onScrollLines={(amount) => scrollLines(key, amount)}
-            disabled={isReadOnly}
           />
         )}
       </div>
-      {isReadOnly && <div className="goblin-terminal-slot__mirror-overlay" aria-hidden="true" />}
-      {isReadOnly && attachmentBannerKey && (
-        <div className="goblin-terminal-slot__mirror-banner" role="status" aria-live="polite">
-          <span>{t(attachmentBannerKey)}</span>
-          <Button type="button" size="sm" variant="secondary" onClick={() => key && takeover(key)} disabled={!key}>
-            {t('terminal.takeover')}
-          </Button>
-        </div>
+      {isReadonly && (
+        <ViewerOverlay
+          badge={readonlyBadge}
+          takeoverLabel={t('terminal.takeover')}
+          snapshot={snapshot}
+          takeoverKey={key}
+          onTakeover={takeover}
+        />
       )}
       {hasSessions && snapshot.phase === 'opening' && (
         <div className="goblin-terminal-slot__status-overlay">
@@ -316,8 +286,13 @@ export function TerminalSlot({ repoRoot, branch, worktreePath }: TerminalSlotPro
         </div>
       )}
       {hasSessions && snapshot.phase === 'error' && snapshot.message !== 'terminal.empty' && (
-        <div className="goblin-terminal-slot__status-overlay">
+        <div className="goblin-terminal-slot__status-overlay goblin-terminal-slot__status-overlay--error">
           <span>{t(snapshot.message ?? 'error.unknown')}</span>
+          {key && (
+            <Button type="button" size="sm" variant="ghost" onClick={() => restart(key)}>
+              {t('terminal.restart')}
+            </Button>
+          )}
         </div>
       )}
       {dragOver && (
@@ -325,6 +300,42 @@ export function TerminalSlot({ repoRoot, branch, worktreePath }: TerminalSlotPro
           <span>{t('terminal.drop-hint')}</span>
         </div>
       )}
+    </div>
+  )
+}
+
+interface ViewerOverlayProps {
+  badge: string
+  takeoverLabel: string
+  snapshot: ReturnType<typeof useTerminalSnapshot>
+  takeoverKey: string | null
+  onTakeover: (key: string) => void
+}
+
+function ViewerOverlay({ badge, takeoverLabel, snapshot, takeoverKey, onTakeover }: ViewerOverlayProps) {
+  return (
+    <div className="goblin-terminal-slot__viewer-overlay">
+      <div className="goblin-terminal-slot__viewer-content">
+        <div className="goblin-terminal-slot__viewer-badge">{badge}</div>
+        <div className="goblin-terminal-slot__viewer-meta">
+          <span className="goblin-terminal-slot__viewer-process">{snapshot.processName}</span>
+          {snapshot.canonicalTitle && (
+            <span className="goblin-terminal-slot__viewer-title">{snapshot.canonicalTitle}</span>
+          )}
+        </div>
+        {snapshot.outputSummary && (
+          <pre className="goblin-terminal-slot__viewer-output">{snapshot.outputSummary}</pre>
+        )}
+        <Button
+          type="button"
+          size="sm"
+          variant="secondary"
+          onClick={() => takeoverKey && onTakeover(takeoverKey)}
+          disabled={!takeoverKey}
+        >
+          {takeoverLabel}
+        </Button>
+      </div>
     </div>
   )
 }

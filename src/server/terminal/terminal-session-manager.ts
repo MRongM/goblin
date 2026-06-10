@@ -67,7 +67,8 @@ interface TerminalSession<TOwner extends string | number> {
   disposables: Array<{ dispose: () => void }>
   render: TerminalRenderState
   processName: string
-  attachments: Map<string, TerminalAttachmentState>
+  attachmentId: string | null
+  attachment: TerminalAttachmentState | null
   controller: TerminalController | null
   allowImplicitAttachControl: boolean
 }
@@ -102,8 +103,6 @@ export class TerminalSessionManager<TOwner extends string | number> {
     if (existing) {
       if (input.attachmentId) {
         registerTerminalAttachment(existing, input.attachmentId, size.cols, size.rows, input.attachmentConnected)
-      } else {
-        this.resizeSessionPty(existing, size.cols, size.rows)
       }
       return this.attachResult(existing)
     }
@@ -123,7 +122,8 @@ export class TerminalSessionManager<TOwner extends string | number> {
       disposables: [],
       render: createEmptyTerminalRenderState(),
       processName: '',
-      attachments: new Map(),
+      attachmentId: null,
+      attachment: null,
       controller: null,
       allowImplicitAttachControl: true,
     }
@@ -131,7 +131,7 @@ export class TerminalSessionManager<TOwner extends string | number> {
     this.sessionIdByOwnerKey.set(ownerKey, id)
     if (input.attachmentId) {
       registerTerminalAttachment(session, input.attachmentId, size.cols, size.rows, input.attachmentConnected ?? true)
-      session.controller = session.attachments.get(input.attachmentId)?.connected
+      session.controller = session.attachment?.connected
         ? { attachmentId: input.attachmentId, status: 'connected' }
         : null
     }
@@ -173,8 +173,6 @@ export class TerminalSessionManager<TOwner extends string | number> {
     if (attachmentId) {
       registerTerminalAttachment(session, attachmentId, size.cols, size.rows, attachmentConnected)
       this.applyOwnershipEffect(session, attachTerminalAttachment(session, attachmentId))
-    } else {
-      this.resizeSessionPty(session, size.cols, size.rows)
     }
     return this.attachResult(session)
   }
@@ -192,10 +190,9 @@ export class TerminalSessionManager<TOwner extends string | number> {
     if (!size) return false
     const session = this.ownedSession(ownerId, sessionId)
     if (!session) return false
-    if (attachmentId) {
-      registerTerminalAttachment(session, attachmentId, size.cols, size.rows, attachmentConnected)
-      if (session.controller?.attachmentId !== attachmentId) return false
-    }
+    if (!attachmentId) return false
+    registerTerminalAttachment(session, attachmentId, size.cols, size.rows, attachmentConnected)
+    if (session.controller?.attachmentId !== attachmentId) return false
     return this.resizeSessionPty(session, size.cols, size.rows)
   }
 

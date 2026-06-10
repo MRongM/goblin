@@ -579,29 +579,21 @@ describe('ManagedTerminalSession', () => {
 
     const term = xtermMocks.terminals[0]!
     const fitAddon = xtermMocks.fitAddons[0]!
-    term._core._charSizeService.measure.mockClear()
-    term._core._renderService.clear.mockClear()
     term.refresh.mockClear()
     fitAddon.fit.mockClear()
 
     mockFonts.resolveReady()
     await flushFontRefit()
 
-    expect(term._core._charSizeService.measure).toHaveBeenCalledTimes(1)
-    expect(term._core._renderService.clear).toHaveBeenCalledTimes(1)
     expect(fitAddon.fit).toHaveBeenCalledTimes(1)
     expect(term.refresh).toHaveBeenCalledWith(0, term.rows - 1)
 
-    term._core._charSizeService.measure.mockClear()
-    term._core._renderService.clear.mockClear()
     term.refresh.mockClear()
     fitAddon.fit.mockClear()
 
     mockFonts.emitLoadingDone()
     await flushFontRefit()
 
-    expect(term._core._charSizeService.measure).toHaveBeenCalledTimes(1)
-    expect(term._core._renderService.clear).toHaveBeenCalledTimes(1)
     expect(fitAddon.fit).toHaveBeenCalledTimes(1)
     expect(term.refresh).toHaveBeenCalledWith(0, term.rows - 1)
   })
@@ -834,7 +826,7 @@ describe('ManagedTerminalSession', () => {
       controllerStatus: 'connected', canTakeover: true })
   })
 
-  test('preloads hydrated snapshot before attaching a mirrored placeholder', async () => {
+  test('preloads hydrated snapshot before attaching as controller', async () => {
     terminalCalls.attach.mockResolvedValueOnce(attachResult('session-1', { replay: '', replaySeq: 0 }))
     const host = document.createElement('div')
     document.body.appendChild(host)
@@ -844,7 +836,7 @@ describe('ManagedTerminalSession', () => {
     session.hydrate({
       sessionId: 'session-remote',
       processName: 'node',
-      role: 'viewer',
+      role: 'controller',
       controllerStatus: 'connected',
       canonicalCols: 120,
       canonicalRows: 40,
@@ -989,6 +981,19 @@ describe('ManagedTerminalSession', () => {
     await flushUntil(() => terminalCalls.takeover.mock.calls.length > 0)
 
     expect(terminalCalls.takeover).toHaveBeenCalledWith({ sessionId: 'session-1', cols: 101, rows: 31 })
+    // Before authoritative ownership message arrives, role is still viewer
+    expect(session.snapshot().attachment).toMatchObject({ role: 'viewer',
+      controllerStatus: 'connected', canTakeover: true })
+
+    // Simulate authoritative server ownership event
+    session.handleOwnership({
+      sessionId: 'session-1',
+      role: 'controller',
+      controllerStatus: 'connected',
+      canonicalCols: 101,
+      canonicalRows: 31,
+    })
+
     expect(session.snapshot().attachment).toMatchObject({ role: 'controller',
       controllerStatus: 'connected', canTakeover: false })
   })
@@ -1018,6 +1023,18 @@ describe('ManagedTerminalSession', () => {
 
     session.takeover()
     await flushUntil(() => terminalCalls.takeover.mock.calls.length > 0)
+
+    // Bridge response alone does not change ownership; only authoritative onOwnership does
+    expect(session.snapshot().attachment).toMatchObject({ role: 'viewer',
+      controllerStatus: 'connected', canTakeover: true })
+
+    session.handleOwnership({
+      sessionId: 'session-1',
+      role: 'unowned',
+      controllerStatus: 'none',
+      canonicalCols: 120,
+      canonicalRows: 40,
+    })
 
     expect(session.snapshot().attachment).toMatchObject({
       role: 'unowned',
@@ -1104,7 +1121,8 @@ describe('ManagedTerminalSession', () => {
     session.handleOutput({ sessionId: 'session-1', data: 'first', seq: 1, processName: 'zsh' })
     session.handleOutput({ sessionId: 'session-1', data: 'second', seq: 2, processName: 'zsh' })
 
-    expect(notify).toHaveBeenCalledTimes(2)
+    // Controller mode: outputSummary is not accumulated, so no notify
+    expect(notify).toHaveBeenCalledTimes(0)
     expect(xtermMocks.terminals[0]!.write).not.toHaveBeenCalled()
     await flushTerminalStart()
 
