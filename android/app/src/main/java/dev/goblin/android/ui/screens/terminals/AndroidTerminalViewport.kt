@@ -36,6 +36,9 @@ internal fun AndroidTerminalViewport(
     emulatorController: RemoteTerminalEmulatorController?,
     fitToScreen: Boolean,
     fontSizeSp: Int,
+    onOpenUrl: (String) -> Unit,
+    onCopyText: (String) -> Boolean,
+    onOpenSelectedText: (String) -> Boolean,
 ) {
     val banner = terminalSessionBannerMessage(state)
     BoxWithConstraints(
@@ -80,6 +83,11 @@ internal fun AndroidTerminalViewport(
                             setHorizontalViewportWidthPx(horizontalViewportWidthPx)
                             setFitToScreen(fitToScreen)
                             setFontSizeSp(fontSizeSp)
+                            setExternalInteractions(
+                                onOpenUrl = onOpenUrl,
+                                onCopyText = onCopyText,
+                                onOpenSelectedText = onOpenSelectedText,
+                            )
                             bind(currentController)
                             requestFocus()
                         }
@@ -88,6 +96,11 @@ internal fun AndroidTerminalViewport(
                         view.setHorizontalViewportWidthPx(horizontalViewportWidthPx)
                         view.setFitToScreen(fitToScreen)
                         view.setFontSizeSp(fontSizeSp)
+                        view.setExternalInteractions(
+                            onOpenUrl = onOpenUrl,
+                            onCopyText = onCopyText,
+                            onOpenSelectedText = onOpenSelectedText,
+                        )
                         view.bind(currentController)
                         view.requestFocus()
                     },

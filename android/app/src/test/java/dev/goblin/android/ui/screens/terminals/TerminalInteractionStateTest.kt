@@ -177,6 +177,17 @@ class TerminalInteractionStateTest {
     }
 
     @Test
+    fun `command input is hidden by default`() {
+        assertFalse(TerminalCommandInputDefaultVisible)
+    }
+
+    @Test
+    fun `command input visibility menu label reflects state`() {
+        assertEquals("Show command input", terminalCommandInputVisibilityActionLabel(visible = false))
+        assertEquals("Hide command input", terminalCommandInputVisibilityActionLabel(visible = true))
+    }
+
+    @Test
     fun `terminal command controls stay compact`() {
         assertTrue(TerminalCommandInputHeight.value <= 40f)
         assertTrue(TerminalActionButtonHeight.value <= 36f)
@@ -221,9 +232,12 @@ class TerminalInteractionStateTest {
 
         assertFalse(labels.contains("YES"))
         assertFalse(labels.contains("NO"))
-        assertEquals("CTRL+C", labels[1])
-        assertEquals("CTRL+L", labels[2])
-        assertEquals("Tab", labels[3])
+        assertEquals("ENTER", labels[0])
+        assertEquals("⌫", labels[1])
+        assertEquals("CTRL+C", labels[2])
+        assertEquals("CTRL+L", labels[3])
+        assertEquals("Tab", labels[4])
+        assertEquals("Esc", labels[5])
     }
 
     @Test
@@ -231,8 +245,48 @@ class TerminalInteractionStateTest {
         val rows = terminalHelperKeyRows(ctrlModifierActive = false)
 
         assertEquals(2, rows.size)
-        assertEquals(listOf("ENTER", "CTRL+C", "CTRL+L", "Tab", "Esc", "Ctrl"), rows[0])
-        assertEquals(listOf("Up", "Down", "Left", "Right", "Paste"), rows[1])
+        assertEquals(listOf("ENTER", "⌫", "CTRL+C", "CTRL+L", "Tab", "Esc"), rows[0])
+        assertEquals(listOf("Ctrl", "Up", "Down", "Left", "Right", "Paste"), rows[1])
+    }
+
+    @Test
+    fun `selected text browser action opens http and https urls directly`() {
+        assertEquals(
+            TerminalSelectedTextBrowserAction.OpenUrl("https://example.test/repo"),
+            terminalSelectedTextBrowserAction(" https://example.test/repo "),
+        )
+        assertEquals(
+            TerminalSelectedTextBrowserAction.OpenUrl("http://example.test"),
+            terminalSelectedTextBrowserAction("http://example.test"),
+        )
+    }
+
+    @Test
+    fun `selected text browser action searches non http text`() {
+        assertEquals(
+            TerminalSelectedTextBrowserAction.Search("git status modified file"),
+            terminalSelectedTextBrowserAction(" git status\nmodified file "),
+        )
+        assertEquals(
+            TerminalSelectedTextBrowserAction.Search("ssh://example.test/repo"),
+            terminalSelectedTextBrowserAction("ssh://example.test/repo"),
+        )
+    }
+
+    @Test
+    fun `selected text browser action rejects blank selected text`() {
+        assertNull(terminalSelectedTextBrowserAction(""))
+        assertNull(terminalSelectedTextBrowserAction(" \n\t "))
+    }
+
+    @Test
+    fun `selected text browser action caps search text length`() {
+        val longText = "x".repeat(TerminalSelectedTextMaxLength + 8)
+
+        assertEquals(
+            TerminalSelectedTextBrowserAction.Search("x".repeat(TerminalSelectedTextMaxLength)),
+            terminalSelectedTextBrowserAction(longText),
+        )
     }
 
     @Test
@@ -252,6 +306,73 @@ class TerminalInteractionStateTest {
         assertTrue(terminalStickToBottom(scrollValue = 952, maxValue = 1000))
         assertTrue(terminalStickToBottom(scrollValue = 952, maxValue = 1000, thresholdPx = 48))
         assertFalse(terminalStickToBottom(scrollValue = 900, maxValue = 1000, thresholdPx = 48))
+    }
+
+    @Test
+    fun `global project sessions exclude temporary terminals and sort by creation`() {
+        val sessions = listOf(
+            terminalRecord(id = "session-b", repositoryId = "repo-b", remotePath = "/srv/b", openedAt = 200L),
+            terminalRecord(id = "temporary", repositoryId = null, remotePath = "/", openedAt = 50L),
+            terminalRecord(id = "session-c", repositoryId = "repo-c", remotePath = "/srv/c", openedAt = 100L),
+            terminalRecord(id = "session-a", repositoryId = "repo-a", remotePath = "/srv/a", openedAt = 100L),
+        )
+
+        assertEquals(
+            listOf("session-a", "session-c", "session-b"),
+            terminalGlobalProjectCreatedSessions(sessions).map { it.id },
+        )
+    }
+
+    @Test
+    fun `terminal cycle session id wraps forward and backward`() {
+        val sessions = listOf(
+            terminalRecord(id = "session-a", repositoryId = "repo-a", remotePath = "/srv/a", openedAt = 100L),
+            terminalRecord(id = "session-b", repositoryId = "repo-b", remotePath = "/srv/b", openedAt = 200L),
+            terminalRecord(id = "session-c", repositoryId = "repo-c", remotePath = "/srv/c", openedAt = 300L),
+        )
+
+        assertEquals("session-b", terminalCycleSessionId(sessions, activeSessionId = "session-a", direction = 1))
+        assertEquals("session-a", terminalCycleSessionId(sessions, activeSessionId = "session-c", direction = 1))
+        assertEquals("session-c", terminalCycleSessionId(sessions, activeSessionId = "session-a", direction = -1))
+    }
+
+    @Test
+    fun `terminal cycle session id returns null without switch targets`() {
+        val session = terminalRecord(id = "session-a", repositoryId = "repo-a", remotePath = "/srv/a", openedAt = 100L)
+
+        assertNull(terminalCycleSessionId(emptyList(), activeSessionId = null, direction = 1))
+        assertNull(terminalCycleSessionId(listOf(session), activeSessionId = "session-a", direction = 1))
+    }
+
+    @Test
+    fun `terminal cycle session id uses first item when active session is missing`() {
+        val sessions = listOf(
+            terminalRecord(id = "session-a", repositoryId = "repo-a", remotePath = "/srv/a", openedAt = 100L),
+            terminalRecord(id = "session-b", repositoryId = "repo-b", remotePath = "/srv/b", openedAt = 200L),
+            terminalRecord(id = "session-c", repositoryId = "repo-c", remotePath = "/srv/c", openedAt = 300L),
+        )
+
+        assertEquals("session-b", terminalCycleSessionId(sessions, activeSessionId = "temporary", direction = 1))
+        assertEquals("session-c", terminalCycleSessionId(sessions, activeSessionId = "temporary", direction = -1))
+    }
+
+    @Test
+    fun `workspace created sessions include only same workspace and same normalized path`() {
+        val sessions = listOf(
+            terminalRecord(id = "same-a", hostId = "host-1", repositoryId = "repo-1", remotePath = "/srv/app", openedAt = 100L),
+            terminalRecord(id = "same-b", hostId = "host-1-alias", repositoryId = "repo-1", remotePath = "/srv/app/", openedAt = 200L),
+            terminalRecord(id = "other-path", hostId = "host-1", repositoryId = "repo-1", remotePath = "/srv/other", openedAt = 300L),
+            terminalRecord(id = "other-host", hostId = "host-2", repositoryId = "repo-1", remotePath = "/srv/app", openedAt = 400L),
+        )
+
+        assertEquals(
+            listOf("same-a", "same-b"),
+            terminalWorkspaceCreatedSessions(
+                sessions = sessions,
+                hostIds = setOf("host-1", "host-1-alias"),
+                remotePath = "/srv/app",
+            ).map { it.id },
+        )
     }
 
     @Test

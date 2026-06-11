@@ -1,6 +1,12 @@
 package dev.goblin.android.ui.screens.terminals
 
+import android.app.SearchManager
+import android.content.ActivityNotFoundException
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -17,6 +23,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -45,15 +52,20 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import dev.goblin.android.domain.ssh.RemoteTarget
 import dev.goblin.android.domain.ssh.SshHostProfile
 import dev.goblin.android.notifications.NotificationPermissionPolicy
 import dev.goblin.android.terminals.TerminalForegroundBridge
 import dev.goblin.android.terminals.TerminalSessionManager
+import dev.goblin.android.terminals.TerminalSessionRecord
 import dev.goblin.android.terminals.TerminalSessionState
 import dev.goblin.android.terminals.TerminalSessionStatus
 import dev.goblin.android.ui.screens.terminals.terminalWorkspaceCreatedSessions
@@ -66,6 +78,8 @@ import kotlinx.coroutines.withContext
 
 internal val TerminalCommandInputHeight = 40.dp
 internal val TerminalActionButtonHeight = 36.dp
+private val TerminalSwitchArrowButtonMinWidth = 38.dp
+private val TerminalSwitchArrowFontSize = 18.sp
 private val TerminalCommandInputShape = RoundedCornerShape(6.dp)
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -81,6 +95,7 @@ fun TerminalScreen(
     terminalForegroundBridge: TerminalForegroundBridge,
     fitToScreen: Boolean,
     onFitToScreenChange: (Boolean) -> Unit,
+    onSwitchGlobalTerminal: (TerminalSessionRecord) -> Unit,
     onBack: (String?) -> Unit,
 ) {
     var terminalState: TerminalSessionState by remember { mutableStateOf(TerminalSessionState.Idle) }
@@ -91,6 +106,7 @@ fun TerminalScreen(
     var ctrlModifierActive by remember { mutableStateOf(false) }
     var terminalMaximized by remember { mutableStateOf(TerminalDefaultMaximized) }
     var terminalFontSizeSp by remember { mutableStateOf(TerminalDefaultFontSizeSp) }
+    var commandInputVisible by remember { mutableStateOf(TerminalCommandInputDefaultVisible) }
     var isSendingCommandInput by remember { mutableStateOf(false) }
     var commandInput by remember(activeSessionId) { mutableStateOf("") }
     var terminalActionMenuExpanded by remember { mutableStateOf(false) }
@@ -110,6 +126,79 @@ fun TerminalScreen(
         terminalForegroundBridge.sync()
     }
     val activeTerminalPath = remotePath.ifBlank { "/" }
+
+    fun openTerminalUrl(url: String): Boolean {
+        val safeUrl = terminalSafeExternalUrl(url)
+        if (safeUrl == null) {
+            inputNotice = "URL is not supported."
+            return false
+        }
+        return try {
+            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(safeUrl)))
+            inputNotice = null
+            true
+        } catch (_: ActivityNotFoundException) {
+            inputNotice = "No browser available."
+            false
+        } catch (_: Exception) {
+            inputNotice = "Could not open browser."
+            false
+        }
+    }
+
+    fun searchTerminalText(query: String): Boolean {
+        if (query.isBlank()) {
+            inputNotice = "Selection is empty."
+            return false
+        }
+        return try {
+            context.startActivity(
+                Intent(Intent.ACTION_WEB_SEARCH)
+                    .putExtra(SearchManager.QUERY, query),
+            )
+            inputNotice = null
+            true
+        } catch (_: ActivityNotFoundException) {
+            inputNotice = "No browser available."
+            false
+        } catch (_: Exception) {
+            inputNotice = "Could not open browser."
+            false
+        }
+    }
+
+    fun openSelectedTerminalText(text: String): Boolean {
+        val action = terminalSelectedTextBrowserAction(text)
+        if (action == null) {
+            inputNotice = "Selection is empty."
+            return false
+        }
+        return when (action) {
+            is TerminalSelectedTextBrowserAction.OpenUrl -> openTerminalUrl(action.url)
+            is TerminalSelectedTextBrowserAction.Search -> searchTerminalText(action.query)
+        }
+    }
+
+    fun copyTerminalSelection(text: String): Boolean {
+        if (text.isBlank()) {
+            inputNotice = "Selection is empty."
+            return false
+        }
+        return try {
+            val manager = ContextCompat.getSystemService(context, ClipboardManager::class.java)
+            if (manager == null) {
+                inputNotice = "Copy failed."
+                false
+            } else {
+                manager.setPrimaryClip(ClipData.newPlainText("Goblin terminal selection", text))
+                inputNotice = "Copied."
+                true
+            }
+        } catch (_: Exception) {
+            inputNotice = "Copy failed."
+            false
+        }
+    }
 
     fun syncTerminalForeground() {
         val permissionGranted = ContextCompat.checkSelfPermission(
@@ -243,6 +332,17 @@ fun TerminalScreen(
         switchToSession(availableSessions[nextIndex].id)
     }
 
+    fun cycleGlobalProjectTerminal(direction: Int) {
+        val availableSessions = terminalGlobalProjectCreatedSessions(terminalSessions)
+        val targetSessionId = terminalCycleSessionId(
+            sessions = availableSessions,
+            activeSessionId = activeSessionId,
+            direction = direction,
+        ) ?: return
+        val targetSession = availableSessions.firstOrNull { it.id == targetSessionId } ?: return
+        onSwitchGlobalTerminal(targetSession)
+    }
+
     DisposableEffect(activeSessionId) {
         val sessionId = activeSessionId
         if (sessionId == null) {
@@ -320,6 +420,8 @@ fun TerminalScreen(
         remotePath = activeTerminalPath,
     )
     val hasWorkspaceSwitchTargets = workspaceSessions.size > 1
+    val globalProjectSessions = terminalGlobalProjectCreatedSessions(terminalSessions)
+    val hasGlobalSwitchTargets = globalProjectSessions.size > 1
     val inlineActions = terminalDetailInlineActions(terminalState)
     val topBarInfo = terminalStatusLine(host = host, remotePath = remotePath, state = terminalState)
     val emulatorController = activeSessionId?.let { terminalSessionManager.emulatorController(it) }
@@ -387,6 +489,13 @@ fun TerminalScreen(
                                 text = { Text(terminalMaximizeActionLabel(terminalMaximized)) },
                                 onClick = {
                                     terminalMaximized = !terminalMaximized
+                                    terminalActionMenuExpanded = false
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(terminalCommandInputVisibilityActionLabel(commandInputVisible)) },
+                                onClick = {
+                                    commandInputVisible = !commandInputVisible
                                     terminalActionMenuExpanded = false
                                 },
                             )
@@ -468,26 +577,10 @@ fun TerminalScreen(
                     emulatorController = emulatorController,
                     fitToScreen = fitToScreen,
                     fontSizeSp = terminalFontSizeSp,
+                    onOpenUrl = { openTerminalUrl(it) },
+                    onCopyText = ::copyTerminalSelection,
+                    onOpenSelectedText = ::openSelectedTerminalText,
                 )
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(GoblinSpacing.Xs),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    CompactCommandInput(
-                        modifier = Modifier.weight(1f),
-                        value = commandInput,
-                        onValueChange = { commandInput = it },
-                        enabled = commandInputEnabled,
-                        placeholder = terminalCommandInputPlaceholder(terminalState),
-                        onSend = { sendCommandInput() },
-                    )
-                    TerminalTextButton(
-                        text = "Send",
-                        enabled = commandInputEnabled && commandInput.isNotEmpty(),
-                        onClick = { sendCommandInput() },
-                    )
-                }
                 HelperKeyRow(
                     enabled = inputAvailable,
                     ctrlModifierActive = ctrlModifierActive,
@@ -495,6 +588,7 @@ fun TerminalScreen(
                     onCtrlC = { sendControlInput("\u0003") },
                     onCtrlL = { sendControlInput(terminalControlCharacter('L') ?: "\u000C") },
                     onEnter = { sendTerminalInputLocked("\r", false, { _ -> }) },
+                    onBackspace = { sendTerminalInputLocked("\u007F", false, { _ -> }) },
                     onEsc = { sendTerminalInputLocked("\u001b", false, { _ -> }) },
                     onTab = { sendTerminalInputLocked("\t", false, { _ -> }) },
                     onArrow = { code -> sendTerminalInputLocked(code, false, { _ -> }) },
@@ -519,13 +613,40 @@ fun TerminalScreen(
                         }
                     },
                 )
+                if (commandInputVisible) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(GoblinSpacing.Xs),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        CompactCommandInput(
+                            modifier = Modifier.weight(1f),
+                            value = commandInput,
+                            onValueChange = { commandInput = it },
+                            enabled = commandInputEnabled,
+                            placeholder = terminalCommandInputPlaceholder(terminalState),
+                            onSend = { sendCommandInput() },
+                        )
+                        TerminalTextButton(
+                            text = "Send",
+                            enabled = commandInputEnabled && commandInput.isNotEmpty(),
+                            onClick = { sendCommandInput() },
+                        )
+                    }
+                }
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(GoblinSpacing.Xs),
                 ) {
+                    if (hasGlobalSwitchTargets) {
+                        TerminalSwitchArrowButton(text = "⇈", onClick = { cycleGlobalProjectTerminal(-1) })
+                        TerminalSwitchArrowButton(text = "⇊", onClick = { cycleGlobalProjectTerminal(1) })
+                    }
                     if (hasWorkspaceSwitchTargets) {
-                        TerminalTextButton(text = "↑", onClick = { cycleWorkspaceTerminal(-1) })
-                        TerminalTextButton(text = "↓", onClick = { cycleWorkspaceTerminal(1) })
+                        TerminalSwitchArrowButton(text = "↑", onClick = { cycleWorkspaceTerminal(-1) })
+                        TerminalSwitchArrowButton(text = "↓", onClick = { cycleWorkspaceTerminal(1) })
                     }
                     if (terminalRestoreInlineActionVisible(terminalMaximized)) {
                         TerminalTextButton(
@@ -602,9 +723,22 @@ private fun CompactCommandInput(
     } else {
         GoblinColors.TerminalDisabledForeground
     }
+    var fieldValue by remember {
+        mutableStateOf(TextFieldValue(text = value, selection = TextRange(value.length)))
+    }
+
+    LaunchedEffect(value) {
+        if (value != fieldValue.text) {
+            fieldValue = TextFieldValue(text = value, selection = TextRange(value.length))
+        }
+    }
+
     BasicTextField(
-        value = value,
-        onValueChange = onValueChange,
+        value = fieldValue,
+        onValueChange = { next ->
+            fieldValue = next
+            if (next.text != value) onValueChange(next.text)
+        },
         enabled = enabled,
         singleLine = true,
         textStyle = MaterialTheme.typography.bodySmall.copy(color = textColor),
@@ -622,7 +756,7 @@ private fun CompactCommandInput(
                     .padding(horizontal = 10.dp),
                 contentAlignment = Alignment.CenterStart,
             ) {
-                if (value.isEmpty()) {
+                if (fieldValue.text.isEmpty()) {
                     Text(
                         text = placeholder,
                         color = GoblinColors.TerminalInputPlaceholder,
@@ -643,6 +777,7 @@ private fun TerminalTextButton(
     enabled: Boolean = true,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    textStyle: TextStyle = MaterialTheme.typography.labelMedium,
 ) {
     TextButton(
         modifier = modifier.height(TerminalActionButtonHeight),
@@ -655,11 +790,26 @@ private fun TerminalTextButton(
     ) {
         Text(
             text = text,
-            style = MaterialTheme.typography.labelMedium,
+            style = textStyle,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
     }
+}
+
+@Composable
+private fun TerminalSwitchArrowButton(
+    text: String,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+) {
+    TerminalTextButton(
+        text = text,
+        enabled = enabled,
+        onClick = onClick,
+        modifier = Modifier.widthIn(min = TerminalSwitchArrowButtonMinWidth),
+        textStyle = MaterialTheme.typography.labelLarge.copy(fontSize = TerminalSwitchArrowFontSize),
+    )
 }
 
 @Composable
@@ -670,6 +820,7 @@ private fun HelperKeyRow(
     onCtrlC: () -> Unit,
     onCtrlL: () -> Unit,
     onEnter: () -> Unit,
+    onBackspace: () -> Unit,
     onEsc: () -> Unit,
     onTab: () -> Unit,
     onArrow: (String) -> Unit,
@@ -678,6 +829,7 @@ private fun HelperKeyRow(
     val labels = terminalHelperKeyLabels(ctrlModifierActive)
     val actions = listOf<() -> Unit>(
         onEnter,
+        onBackspace,
         onCtrlC,
         onCtrlL,
         onTab,

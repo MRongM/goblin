@@ -5,6 +5,7 @@ import dev.goblin.android.terminals.TerminalDisconnectedReason
 import dev.goblin.android.terminals.TerminalSessionRecord
 import dev.goblin.android.terminals.TerminalSessionState
 import dev.goblin.android.terminals.TerminalSessionStatus
+import java.net.URI
 
 internal const val TerminalDisconnectedMessage = "Terminal disconnected. Reconnect or return to diagnostics."
 
@@ -22,6 +23,7 @@ internal const val TerminalHelperButtonsPerRow = 6
 internal fun terminalHelperKeyLabels(ctrlModifierActive: Boolean): List<String> =
     listOf(
         "ENTER",
+        "⌫",
         "CTRL+C",
         "CTRL+L",
         "Tab",
@@ -108,6 +110,25 @@ internal fun terminalWorkspaceCreatedSessions(
     ).sortedWith(terminalWorkspaceCreatedSessionComparator)
 }
 
+internal fun terminalGlobalProjectCreatedSessions(
+    sessions: List<TerminalSessionRecord>,
+): List<TerminalSessionRecord> {
+    return sessions
+        .filter { it.repositoryId != null }
+        .sortedWith(terminalWorkspaceCreatedSessionComparator)
+}
+
+internal fun terminalCycleSessionId(
+    sessions: List<TerminalSessionRecord>,
+    activeSessionId: String?,
+    direction: Int,
+): String? {
+    if (sessions.size <= 1) return null
+    val currentIndex = sessions.indexOfFirst { it.id == activeSessionId }.takeIf { it >= 0 } ?: 0
+    val nextIndex = (currentIndex + direction).mod(sessions.size)
+    return sessions[nextIndex].id
+}
+
 internal fun terminalWorkspaceSessionCountsByPath(
     sessions: List<TerminalSessionRecord>,
     hostId: String,
@@ -179,6 +200,11 @@ internal fun terminalCommandInputPlaceholder(state: TerminalSessionState): Strin
         terminalInputUnavailableMessage(state) ?: "Terminal is not connected."
     }
 
+internal const val TerminalCommandInputDefaultVisible = false
+
+internal fun terminalCommandInputVisibilityActionLabel(visible: Boolean): String =
+    if (visible) "Hide command input" else "Show command input"
+
 internal fun terminalReconnectAvailable(state: TerminalSessionState): Boolean = when (state) {
     TerminalSessionState.Idle,
     is TerminalSessionState.Exited,
@@ -216,6 +242,37 @@ internal fun terminalInputUnavailableMessage(state: TerminalSessionState): Strin
 }
 
 internal fun terminalLineInput(value: String): String = "$value\r"
+
+internal const val TerminalSelectedTextMaxLength = 4096
+
+internal sealed interface TerminalSelectedTextBrowserAction {
+    data class OpenUrl(val url: String) : TerminalSelectedTextBrowserAction
+    data class Search(val query: String) : TerminalSelectedTextBrowserAction
+}
+
+internal fun terminalSelectedTextBrowserAction(
+    selectedText: String,
+    maxLength: Int = TerminalSelectedTextMaxLength,
+): TerminalSelectedTextBrowserAction? {
+    val normalized = selectedText
+        .trim()
+        .replace(Regex("\\s+"), " ")
+        .take(maxLength.coerceAtLeast(1))
+    if (normalized.isBlank()) return null
+
+    return terminalDirectBrowserUrl(normalized)
+        ?.let(TerminalSelectedTextBrowserAction::OpenUrl)
+        ?: TerminalSelectedTextBrowserAction.Search(normalized)
+}
+
+private fun terminalDirectBrowserUrl(value: String): String? {
+    if (value.any { it.isWhitespace() || it.isISOControl() }) return null
+    val uri = runCatching { URI(value) }.getOrNull() ?: return null
+    val scheme = uri.scheme?.lowercase()
+    if (scheme != "http" && scheme != "https") return null
+    if (uri.host.isNullOrBlank()) return null
+    return value
+}
 
 internal fun terminalQuickInput(value: String): String = "$value\r"
 

@@ -420,6 +420,10 @@ fun GoblinAndroidApp(
                         terminalFitToScreen = fitToScreen
                         terminalSettingsStore.setTerminalFitToScreen(fitToScreen)
                     },
+                    onSwitchGlobalTerminal = { session ->
+                        terminalSessionManager.touchSession(session.id)
+                        route = AppRoute.terminal(session)
+                    },
                     backHint = if (isHostTemporaryTerminal(currentRoute.remotePath, currentRoute.repositoryId)) {
                         TerminalBackClosesSessionHint
                     } else {
