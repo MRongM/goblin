@@ -24,7 +24,6 @@ const mocks = vi.hoisted(() => {
   const win = { isDestroyed: () => false, webContents: { isDestroyed: () => false, send: vi.fn() } }
   return {
     appGetPath: vi.fn<(name: string) => string>((name: string) => (name === 'home' ? '/home/user' : '/data')),
-    clearRecentDocuments: vi.fn(),
     openHttpExternal: vi.fn(() => Promise.resolve(true)),
     readMenuRuntimeState: vi.fn<() => MockMenuRuntimeState>(() => defaultMenuRuntimeState()),
     template,
@@ -45,7 +44,6 @@ const mocks = vi.hoisted(() => {
 vi.mock('electron', () => ({
   app: {
     name: 'Goblin',
-    clearRecentDocuments: mocks.clearRecentDocuments,
     getPath: mocks.appGetPath,
   },
   BrowserWindow: {
@@ -104,7 +102,7 @@ vi.mock('#/main/theme.ts', () => ({
 }))
 
 describe('app menu actions', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.resetModules()
     vi.clearAllMocks()
     mocks.template.length = 0
@@ -114,6 +112,8 @@ describe('app menu actions', () => {
     mocks.getFocusedWindow.mockReturnValue(null)
     mocks.focusedRegisteredSurface.mockReturnValue(null)
     mocks.activateMainWindow.mockResolvedValue(mocks.win)
+    const { platform } = await import('#/main/menu.ts')
+    vi.spyOn(platform, 'isMacOS').mockReturnValue(true)
   })
 
   test('activates the main window before sending an action when no window exists', async () => {
@@ -264,7 +264,7 @@ describe('app menu actions', () => {
     })
   })
 
-  test('wires changes and terminal detail accelerators from the view menu', async () => {
+  test('wires status, changes, and numbered terminal accelerators from the view menu', async () => {
     const { buildAppMenu } = await import('#/main/menu.ts')
 
     buildAppMenu()
@@ -273,10 +273,22 @@ describe('app menu actions', () => {
     const statusItem = viewMenu?.submenu?.find((entry: any) => entry.label === 'menu.view.status')
     const changesItem = viewMenu?.submenu?.find((entry: any) => entry.label === 'menu.view.changes')
     const terminalItem = viewMenu?.submenu?.find((entry: any) => entry.label === 'menu.view.terminal')
+    const firstTerminalItem = viewMenu?.submenu?.find((entry: any) => entry.label === 'menu.view.terminal 1')
+    const lastTerminalItem = viewMenu?.submenu?.find((entry: any) => entry.label === 'menu.view.terminal 7')
 
     expect(statusItem?.accelerator).toBe('CmdOrCtrl+1')
     expect(changesItem?.accelerator).toBe('CmdOrCtrl+2')
-    expect(terminalItem?.accelerator).toBe('CmdOrCtrl+3')
+    expect(terminalItem?.accelerator).toBeUndefined()
+    expect(firstTerminalItem?.accelerator).toBe('CmdOrCtrl+3')
+    expect(lastTerminalItem?.accelerator).toBe('CmdOrCtrl+9')
+
+    firstTerminalItem.click()
+    await Promise.resolve()
+
+    expect(mocks.sendRendererEffectIntent).toHaveBeenCalledWith(mocks.win, {
+      type: 'select-terminal-requested',
+      index: 1,
+    })
   })
 
   test('includes standard edit roles and full screen in the menu', async () => {

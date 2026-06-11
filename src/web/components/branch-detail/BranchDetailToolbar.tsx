@@ -1,4 +1,4 @@
-import { ChevronDown, Maximize2, Minimize2 } from 'lucide-react'
+import { ArrowUp, Maximize2, Minimize2, Minus } from 'lucide-react'
 import type { KeyboardEvent } from 'react'
 import { useCallback, useMemo } from 'react'
 import { useStoreWithEqualityFn } from 'zustand/traditional'
@@ -11,15 +11,16 @@ import { Toolbar } from '#/web/components/Layout.tsx'
 import { detailTabNavigationKey, navigatedDetailTab, visibleDetailTabs } from '#/web/lib/detail-tabs.ts'
 import { cn } from '#/web/lib/cn.ts'
 import { repoWorkspaceBehavior } from '#/web/lib/workspace-layout.ts'
-import { worktreeTerminalKey } from '#/web/components/terminal/terminal-session-utils.ts'
+import { worktreeTerminalKey } from '#/web/components/terminal/terminal-session-keys.ts'
 import { useWorktreeTerminalSnapshot } from '#/web/components/terminal/terminal-session-store.ts'
 import { useTerminalSessionContext } from '#/web/components/terminal/terminal-session-context.ts'
-import { TerminalSwitcherDropdown } from '#/web/components/terminal/TerminalSwitcherDropdown.tsx'
+import { EMPTY_TERMINAL_TAB_FOCUS_KEY, TerminalTabs } from '#/web/components/terminal/TerminalTabs.tsx'
 import { useMainWindowNavigation } from '#/web/main-window-navigation.tsx'
 import type { TerminalSessionBase } from '#/web/components/terminal/types.ts'
 import type { BranchDetailRepo, SelectedBranchDetailPresentation } from '#/web/components/branch-detail/model.ts'
 import { useRuntimeShortcutSettings } from '#/web/runtime-settings-shortcuts.ts'
 import { useIsCompactUi } from '#/web/hooks/useResponsiveUiMode.tsx'
+import { useFocusRegistry } from '#/web/components/tab-strip/useFocusRegistry.ts'
 import {
   branchDetailToolbarStoreActionsEqual,
   branchDetailToolbarStoreActionsFromStore,
@@ -65,6 +66,8 @@ export function BranchDetailToolbar({
 
   const worktreeSnapshot = useWorktreeTerminalSnapshot(terminalWorktreeKey)
   const terminalSessions = worktreeSnapshot.sessions
+  const detailTabFocusRegistry = useFocusRegistry<'status' | 'changes', HTMLButtonElement>()
+  const terminalTabFocusRegistry = useFocusRegistry<string, HTMLButtonElement>()
 
   const terminalBase = useMemo<TerminalSessionBase | null>(
     () =>
@@ -76,8 +79,34 @@ export function BranchDetailToolbar({
 
   const handleNewTerminal = useCallback(() => {
     if (!terminalBase) return
+    if (repo.ui.detailTab !== 'terminal') {
+      navigation.showRepoDetailTab(repo.id, 'terminal')
+    }
+    setDetailCollapsed(false)
     void createTerminal(terminalBase)
-  }, [createTerminal, terminalBase])
+  }, [createTerminal, terminalBase, navigation, repo.id, repo.ui.detailTab, setDetailCollapsed])
+
+  const handleSelectTerminal = useCallback(
+    (worktreeKey: string, key: string) => {
+      if (repo.ui.detailTab !== 'terminal') {
+        navigation.showRepoDetailTab(repo.id, 'terminal')
+      }
+      setDetailCollapsed(false)
+      selectTerminal(worktreeKey, key)
+    },
+    [repo.ui.detailTab, repo.id, navigation, selectTerminal, setDetailCollapsed],
+  )
+
+  const handleScrollToBottom = useCallback(
+    (key: string) => {
+      if (repo.ui.detailTab !== 'terminal') {
+        navigation.showRepoDetailTab(repo.id, 'terminal')
+      }
+      setDetailCollapsed(false)
+      scrollToBottom(key)
+    },
+    [repo.ui.detailTab, repo.id, navigation, scrollToBottom, setDetailCollapsed],
+  )
 
   const handleCloseTerminal = useCallback(
     (key: string) => {
@@ -90,6 +119,16 @@ export function BranchDetailToolbar({
   // No selected branch means there is no tab/action target; BranchDetailContent renders the empty state.
   if (!detail.branch) return null
 
+  const focusedTerminalSession = terminalSessions.find((session) => session.selected) ?? terminalSessions[0] ?? null
+
+  function focusTerminalTab() {
+    terminalTabFocusRegistry.focus(focusedTerminalSession?.key ?? EMPTY_TERMINAL_TAB_FOCUS_KEY)
+  }
+
+  function focusDetailTab(tabId: 'status' | 'changes') {
+    detailTabFocusRegistry.focus(tabId)
+  }
+
   function handleTabKeyDown(e: KeyboardEvent<HTMLButtonElement>, tabId: DetailTab) {
     const key = detailTabNavigationKey(e.key)
     if (!key) return
@@ -97,8 +136,11 @@ export function BranchDetailToolbar({
     const nextTab = navigatedDetailTab(tabId, key, !!detail.branch?.worktree?.path)
     navigation.showRepoDetailTab(repo.id, nextTab)
     setDetailCollapsed(false)
-    // The tablist stays mounted even when the panel is collapsed; optional chaining guards transient unmounts.
-    window.requestAnimationFrame(() => document.getElementById(`${detailId}-${nextTab}-tab`)?.focus())
+    if (nextTab === 'terminal') {
+      focusTerminalTab()
+      return
+    }
+    if (nextTab === 'status' || nextTab === 'changes') focusDetailTab(nextTab)
   }
 
   const detailToggleTitle = t(
@@ -110,48 +152,87 @@ export function BranchDetailToolbar({
         ? 'branch-detail.expand-title'
         : 'branch-detail.collapse-title',
   )
-  const showPanelControls = behavior.detailFocusAllowed || behavior.detailCollapseAllowed
   const focusTogglePressed = behavior.detailFocusMode
 
   return (
     <Toolbar variant="detail">
-      <div className="flex shrink-0 gap-1" role="tablist" aria-label={t('tab.branch-detail')}>
-        {tabs.map((tab) => {
-          const selected = repo.ui.detailTab === tab.id
-          const visuallySelected = !collapsed && selected
-          return (
-            <Button
-              key={tab.id}
-              id={`${detailId}-${tab.id}-tab`}
-              type="button"
-              variant="ghost"
-              role="tab"
-              aria-selected={selected}
-              aria-expanded={selected ? !collapsed : undefined}
-              aria-controls={collapsed ? undefined : `${detailId}-${tab.id}-panel`}
-              tabIndex={selected ? 0 : -1}
-              onClick={() => {
-                navigation.showRepoDetailTab(repo.id, tab.id)
+      <div className="flex h-full min-w-0 items-center gap-1 overflow-hidden">
+        <div className="flex h-full shrink-0 items-center gap-1" role="tablist" aria-label={t('tab.branch-detail')}>
+          {tabs
+            .filter((tab) => tab.id !== 'terminal')
+            .map((tab) => {
+              const tabId = tab.id === 'status' ? 'status' : 'changes'
+              const selected = repo.ui.detailTab === tab.id
+              const visuallySelected = !collapsed && selected
+              return (
+                <Button
+                  key={tab.id}
+                  ref={detailTabFocusRegistry.setRef(tabId)}
+                  id={`${detailId}-${tab.id}-tab`}
+                  type="button"
+                  variant="ghost"
+                  role="tab"
+                  aria-selected={selected}
+                  aria-expanded={selected ? !collapsed : undefined}
+                  aria-controls={collapsed ? undefined : `${detailId}-${tab.id}-panel`}
+                  tabIndex={selected ? 0 : -1}
+                  onClick={() => {
+                    navigation.showRepoDetailTab(repo.id, tab.id)
+                    setDetailCollapsed(false)
+                  }}
+                  onKeyDown={(e) => handleTabKeyDown(e, tabId)}
+                  className={cn(
+                    'h-7 gap-1.5 px-2.5 text-sm font-normal',
+                    visuallySelected
+                      ? 'bg-selected text-selected-foreground'
+                      : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground',
+                  )}
+                >
+                  {t(tab.labelKey)}
+                  {tab.id === 'changes' && detail.statusCount > 0 && !compact && (
+                    <Badge variant="attention" className="font-normal font-mono tabular-nums">
+                      {detail.statusCount}
+                    </Badge>
+                  )}
+                </Button>
+              )
+            })}
+        </div>
+        {terminalWorktreeKey && (
+          <>
+            <div className="mx-1 h-4 w-px bg-separator/70 self-center" aria-hidden="true" />
+            <TerminalTabs
+              worktreeTerminalKey={terminalWorktreeKey}
+              sessions={terminalSessions}
+              detailId={detailId}
+              responsiveCompact={compact}
+              panelActive={repo.ui.detailTab === 'terminal'}
+              focusRegistry={terminalTabFocusRegistry}
+              emptyFocusKey={EMPTY_TERMINAL_TAB_FOCUS_KEY}
+              onNew={handleNewTerminal}
+              onSelect={handleSelectTerminal}
+              onScrollToBottom={handleScrollToBottom}
+              onClose={handleCloseTerminal}
+              onNavigateOut={(direction) => {
+                if (direction === 'first' || direction === 'next') {
+                  navigation.showRepoDetailTab(repo.id, 'status')
+                  setDetailCollapsed(false)
+                  focusDetailTab('status')
+                  return
+                }
+                if (direction === 'last') {
+                  navigation.showRepoDetailTab(repo.id, 'terminal')
+                  setDetailCollapsed(false)
+                  focusTerminalTab()
+                  return
+                }
+                navigation.showRepoDetailTab(repo.id, 'changes')
                 setDetailCollapsed(false)
+                focusDetailTab('changes')
               }}
-              onKeyDown={(e) => handleTabKeyDown(e, tab.id)}
-              className={cn(
-                'h-7 gap-1.5 px-2.5 text-sm font-normal',
-                visuallySelected
-                  ? 'bg-selected text-selected-foreground'
-                  : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground',
-              )}
-            >
-              {t(tab.labelKey)}
-              {tab.id === 'changes' && detail.statusCount > 0 && !compact && (
-                <Badge variant="attention" className="font-normal font-mono tabular-nums">
-                  {detail.statusCount}
-                </Badge>
-              )}
-
-            </Button>
-          )
-        })}
+            />
+          </>
+        )}
       </div>
       <div
         aria-hidden="true"
@@ -159,19 +240,7 @@ export function BranchDetailToolbar({
         onClick={behavior.detailCollapseAllowed && toggleDetailOnActionBarBlankClick ? toggleDetailCollapsed : undefined}
       />
       <div className="flex shrink-0 items-center gap-1">
-        {repo.ui.detailTab === 'terminal' && terminalWorktreeKey && (
-          <>
-            <TerminalSwitcherDropdown
-              worktreeTerminalKey={terminalWorktreeKey}
-              sessions={terminalSessions}
-              onNew={handleNewTerminal}
-              onSelect={selectTerminal}
-              onScrollToBottom={scrollToBottom}
-              onClose={handleCloseTerminal}
-            />
-            {layout === 'top-bottom' && <div className="mx-1 h-4 w-px bg-separator/70" aria-hidden="true" />}
-          </>
-        )}
+        {layout === 'top-bottom' && <div className="mx-1 h-4 w-px bg-separator/70" aria-hidden="true" />}
         {behavior.detailFocusAllowed && (
           <Button
             variant="ghost"
@@ -197,7 +266,7 @@ export function BranchDetailToolbar({
             aria-expanded={!collapsed}
             aria-controls={collapsed ? undefined : contentId}
           >
-            <ChevronDown className={cn(collapsed && '-rotate-90')} />
+            {collapsed ? <ArrowUp /> : <Minus />}
           </Button>
         )}
       </div>

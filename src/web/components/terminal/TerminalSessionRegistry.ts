@@ -1,19 +1,17 @@
 import { setTerminalFocused } from '#/web/terminal-focus.ts'
 import { ManagedTerminalSession } from '#/web/components/terminal/ManagedTerminalSession.ts'
 import { createTerminalBellController } from '#/web/components/terminal/terminal-bell-controller.ts'
-import {
-  compactTerminalTitle,
-  terminalDescriptor,
-  worktreeTerminalKey,
-} from '#/web/components/terminal/terminal-session-utils.ts'
+import { terminalDescriptor } from '#/web/components/terminal/terminal-descriptor.ts'
+import { worktreeTerminalKey } from '#/web/components/terminal/terminal-session-keys.ts'
+import { compactTerminalProcessName, compactTerminalTitle } from '#/web/components/terminal/terminal-title.ts'
 import { terminalBridge } from '#/web/terminal.ts'
 import { readOrCreateWebTerminalAttachmentId } from '#/web/renderer-terminal-bridge.ts'
-import { resolveTerminalOwnership } from '#/shared/terminal.ts'
+import { parseTerminalIdIndex, resolveTerminalOwnership } from '#/shared/terminal.ts'
 import type {
   TerminalSessionSnapshot,
   TerminalSessionSummary as ServerTerminalSessionSummary,
 } from '#/shared/terminal.ts'
-import { branchForTerminalWorktree } from '#/web/components/terminal/terminal-repo-utils.ts'
+import { branchForTerminalWorktree } from '#/web/components/terminal/terminal-repo-index.ts'
 import type {
   TerminalDescriptor,
   TerminalRepoIndex,
@@ -33,13 +31,6 @@ function parseServerSessionKey(key: string): { repoRoot: string; worktreePath: s
   const parts = key.split('\0')
   if (parts.length !== 3 || !parts[0] || !parts[1] || !parts[2]) return null
   return { repoRoot: parts[0], worktreePath: parts[1], terminalId: parts[2] }
-}
-
-function terminalIndexFromId(terminalId: string): number | null {
-  const match = /^terminal-(\d+)$/.exec(terminalId)
-  if (!match) return null
-  const index = Number.parseInt(match[1] ?? '', 10)
-  return Number.isFinite(index) && index > 0 ? index : null
 }
 
 interface ReattachSnapshotCacheEntry {
@@ -172,7 +163,7 @@ export class TerminalSessionRegistry {
       const descriptor = terminalDescriptor(
         { repoRoot: parsed.repoRoot, branch, worktreePath: parsed.worktreePath },
         parsed.terminalId,
-        terminalIndexFromId(parsed.terminalId) ?? 1,
+        parseTerminalIdIndex(parsed.terminalId) ?? 1,
       )
       if (!this.sessions.has(descriptor.key)) {
         missingLocalCount += 1
@@ -304,6 +295,7 @@ export class TerminalSessionRegistry {
           index: session.descriptor.index,
           title: summarizeTerminalTitle(snapshot, session.descriptor.index),
           fullTitle: fullTerminalTitle(snapshot, session.descriptor.index),
+          originalTitle: terminalOriginalTitle(snapshot),
           phase: snapshot.phase,
           selected: session.descriptor.key === selectedKey,
           hasBell: this.bellController.hasBell(session.descriptor.key),
@@ -354,7 +346,7 @@ export class TerminalSessionRegistry {
       const serialized = session.serialize()
       const sessionId = session.currentSessionId()
       if (serialized && sessionId) {
-        this.reattachSnapshotCache.set(key, { sessionId, snapshot: serialized, snapshotSeq: Date.now() })
+        this.reattachSnapshotCache.set(key, { sessionId, snapshot: serialized, snapshotSeq: 0 })
       }
       session.detach(host, this.parkingRoot)
     }
@@ -602,12 +594,18 @@ export class TerminalSessionRegistry {
 }
 
 function summarizeTerminalTitle(snapshot: TerminalSnapshot, index: number): string {
-  const canonicalTitle = typeof snapshot.canonicalTitle === 'string' ? snapshot.canonicalTitle.trim() : ''
+  const canonicalTitle = terminalOriginalTitle(snapshot) ?? ''
   if (canonicalTitle) return compactTerminalTitle(canonicalTitle) || canonicalTitle
-  return snapshot.processName || `terminal ${index}`
+  const processName = compactTerminalProcessName(snapshot.processName)
+  return processName || `terminal ${index}`
 }
 
 function fullTerminalTitle(snapshot: TerminalSnapshot, index: number): string {
-  const canonicalTitle = typeof snapshot.canonicalTitle === 'string' ? snapshot.canonicalTitle.trim() : ''
+  const canonicalTitle = terminalOriginalTitle(snapshot) ?? ''
   return canonicalTitle || snapshot.processName || `terminal ${index}`
+}
+
+function terminalOriginalTitle(snapshot: TerminalSnapshot): string | null {
+  const canonicalTitle = typeof snapshot.canonicalTitle === 'string' ? snapshot.canonicalTitle.trim() : ''
+  return canonicalTitle || null
 }

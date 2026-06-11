@@ -28,6 +28,7 @@ import type { RendererEffectIntent } from '#/shared/renderer-effect-intents.ts'
 import { focusedRegisteredSurface } from '#/main/window-registry.ts'
 import { readMenuRuntimeState, setMenuWorkspaceLayout as setMenuWorkspaceLayoutState } from '#/main/menu-state.ts'
 import {
+  TERMINAL_SELECTION_SHORTCUTS,
   closeShortcutAccelerators,
   rendererMenuCommandById,
   resolveRendererMenuCommandAccelerator,
@@ -106,10 +107,16 @@ export function buildAppMenu(): void {
   Menu.setApplicationMenu(Menu.buildFromTemplate(createAppMenuTemplate(readMenuState())))
 }
 
+export const platform = {
+  isMacOS(): boolean {
+    return process.platform === 'darwin'
+  },
+}
+
 function readMenuState(): AppMenuState {
   const runtimeState = readMenuRuntimeState()
   return {
-    isMac: process.platform === 'darwin',
+    isMac: platform.isMacOS(),
     name: app.name,
     recentRepos: runtimeState.recentRepos,
     shortcutsDisabled: runtimeState.shortcutsDisabled,
@@ -228,6 +235,11 @@ function createViewMenu(state: AppMenuState): MenuItemConstructorOptions {
       createRendererCommandMenuItem(state, 'view-status'),
       createRendererCommandMenuItem(state, 'view-changes'),
       createRendererCommandMenuItem(state, 'view-terminal'),
+      ...TERMINAL_SELECTION_SHORTCUTS.map(({ index, accelerator: shortcut }) => ({
+        label: `${t('menu.view.terminal')} ${index}`,
+        accelerator: accelerator(state, shortcut),
+        click: () => send({ type: 'select-terminal-requested', index }),
+      })),
       createRendererCommandMenuItem(state, 'view-terminal-primary-action'),
       createWorkspaceLayoutMenu(state.workspaceLayout),
       createRendererCommandMenuItem(state, 'view-toggle-detail'),

@@ -82,6 +82,11 @@ vi.mock('#/main/menu.ts', () => ({
 
 vi.mock('#/main/menu-state.ts', () => ({
   initializeMenuRuntimeState: mocks.initializeMenuRuntimeState,
+  applyMenuRuntimeState: vi.fn(),
+}))
+
+vi.mock('#/main/recent-repos.ts', () => ({
+  syncRecentRepos: vi.fn(),
 }))
 
 vi.mock('#/main/i18n/index.ts', () => ({
