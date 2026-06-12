@@ -93,7 +93,7 @@ describe('normalizeRestorableRepoCache', () => {
     const invalid = cachedRepo(now) as any
     invalid.ui.worktreePathOrder = [123, '/tmp/worktree-a']
 
-    const normalized = normalizeRepoCache({ missing, invalid })
+    const normalized = normalizeRestorableRepoCache({ missing, invalid })
 
     expect(normalized.missing?.ui.worktreePathOrder).toEqual([])
     expect(normalized.invalid).toBeUndefined()
@@ -161,9 +161,9 @@ describe('persistRestorableRepoSnapshot', () => {
       worktreePathOrder: ['/repo'],
     })
 
-    persistRepoCache(useReposStore.setState, repo, 1)
+    persistRestorableRepoSnapshot(useReposStore.setState, repo, 1)
 
-    expect(useReposStore.getState().repoCache['/repo']?.ui.worktreePathOrder).toEqual(['/repo'])
+    expect(useReposStore.getState().restorableRepoCache['/repo']?.ui.worktreePathOrder).toEqual(['/repo'])
   })
 })
 

@@ -561,7 +561,7 @@ describe('settings-client', () => {
     }))
     vi.stubGlobal('fetch', fetchMock)
 
-    const { openRemoteRepositoryTerminal } = await import('#/web/app-data-client.ts')
+    const { openRemoteRepositoryTerminal } = await import('#/web/remote-client.ts')
 
     await expect(openRemoteRepositoryTerminal('ssh-config://prod/srv/repo', '/srv/repo-feature')).resolves.toEqual({
       ok: true,

@@ -19,7 +19,7 @@ import {
   type RemoteCommandResult,
 } from '#/system/ssh/commands.ts'
 import { type BranchSnapshotInfo, type ExecResult, type GitRemoteInfo, type LogEntry, type RepoRemoteInfo, type WorktreeInfo, type WorktreeStatus } from '#/shared/git-types.ts'
-import { validateBranchDeletionPolicy, validateCreateWorktreeInput, validateRemovableWorktreeState } from '#/shared/repo-action-policy.ts'
+import { validateBranchDeletionPolicy, validateRemovableWorktreeState } from '#/shared/repo-action-policy.ts'
 import type { RemoteRepoTarget } from '#/shared/remote-repo.ts'
 import { parseRemoteTrackingRefs, type CreateWorktreeInput } from '#/shared/worktree-create.ts'
 import { isSafeBranchName } from '#/shared/refnames.ts'
@@ -264,8 +264,7 @@ export async function createRemoteWorktree(
   target: RemoteRepoTarget,
   input: CreateWorktreeInput & { signal?: AbortSignal; run?: RemoteGitRunner },
 ): Promise<ExecResult> {
-  const invalid = validateCreateWorktreeInput(input.worktreePath, input.newBranch, input.baseBranch)
-  if (invalid) return invalid
+  if (!input.worktreePath.startsWith('/')) return { ok: false, message: 'error.invalid-path' }
   const run: RemoteGitRunner = input.run ?? ((command, t, runOptions) => runRemoteCommand(t, command, runOptions))
   const result = await run(
     {

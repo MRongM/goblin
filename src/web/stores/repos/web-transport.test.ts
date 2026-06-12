@@ -66,7 +66,7 @@ describe('repo web transport helpers', () => {
       json: async () => ({ ok: true, message: 'ok' }),
     }))
     vi.stubGlobal('fetch', fetchMock)
-    const { createRepositoryWorktree } = await import('#/web/app-data-client.ts')
+    const { createRepositoryWorktree } = await import('#/web/repo-client.ts')
 
     await expect(
       createRepositoryWorktree('/tmp/repo', {

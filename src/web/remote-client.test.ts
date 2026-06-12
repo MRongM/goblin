@@ -82,7 +82,7 @@ describe('remote client web helpers', () => {
       json: async () => ({ ok: true, message: '/srv/repo-feature' }),
     }))
     vi.stubGlobal('fetch', fetchMock)
-    const { openRemoteRepositoryEditor } = await import('#/web/app-data-client.ts')
+    const { openRemoteRepositoryEditor } = await import('#/web/remote-client.ts')
 
     await expect(openRemoteRepositoryEditor('ssh-config://prod/srv/repo', '/srv/repo-feature')).resolves.toEqual({
       ok: true,

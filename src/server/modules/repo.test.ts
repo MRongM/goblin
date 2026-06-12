@@ -332,7 +332,7 @@ describe('probeRepository path errors', () => {
 
 describe('repo mutation invalidation publishing', () => {
   test('createRepositoryWorktree passes object-shaped input to the backend and publishes source-token invalidation', async () => {
-    const { createRepositoryWorktree } = await import('#/server/modules/repo.ts')
+    const { createRepositoryWorktree } = await import('#/server/modules/repo-write-paths.ts')
 
     const result = await createRepositoryWorktree(
       '/tmp/repo',
@@ -356,7 +356,7 @@ describe('repo mutation invalidation publishing', () => {
 
   test('getRepositoryRemoteBranches returns local remote-tracking refs', async () => {
     mocks.getRemoteTrackingBranches.mockResolvedValueOnce(['origin/main', 'origin/feature/a'])
-    const { getRepositoryRemoteBranches } = await import('#/server/modules/repo.ts')
+    const { getRepositoryRemoteBranches } = await import('#/server/modules/repo-write-paths.ts')
 
     await expect(getRepositoryRemoteBranches('/tmp/repo')).resolves.toEqual(['origin/main', 'origin/feature/a'])
     expect(mocks.getRemoteTrackingBranches).toHaveBeenCalledWith('/tmp/repo', undefined)
@@ -439,7 +439,7 @@ describe('repo mutation invalidation publishing', () => {
   test('createRepositoryWorktree rejects non-absolute paths before calling git', async () => {
     const { createRepositoryWorktree } = await import('#/server/modules/repo-write-paths.ts')
 
-    const result = await createRepositoryWorktree('/tmp/repo', 'relative/path', 'feature/a', 'main')
+    const result = await createRepositoryWorktree('/tmp/repo', { worktreePath: 'relative/path', mode: { kind: 'newBranch', newBranch: 'feature/a', baseRef: 'main' } })
 
     expect(result).toEqual({ ok: false, message: 'error.invalid-path' })
     expect(mocks.createWorktree).not.toHaveBeenCalled()

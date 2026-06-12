@@ -21,7 +21,7 @@ import { useRemotePathSuggestions } from '#/web/hooks/useRemotePathSuggestions.t
 import { useIsCompactUi } from '#/web/hooks/useResponsiveUiMode.tsx'
 import type { RepoState } from '#/web/stores/repos/types.ts'
 import { useT } from '#/web/stores/i18n.ts'
-import { getRepositoryRemoteBranches } from '#/web/app-data-client.ts'
+import { getRepositoryRemoteBranches } from '#/web/repo-client.ts'
 import { defaultWorktreePath, formatWorktreePath, tildify, untildify } from '#/web/lib/paths.ts'
 import { cn } from '#/web/lib/cn.ts'
 import { validateBranchName } from '#/shared/refnames.ts'

@@ -176,7 +176,7 @@ describe('reorderWorktrees', () => {
       '/repo',
       '/tmp/worktree-a',
     ])
-    expect(useReposStore.getState().repoCache[REPO_ID]?.ui.worktreePathOrder).toEqual([
+    expect(useReposStore.getState().restorableRepoCache[REPO_ID]?.ui.worktreePathOrder).toEqual([
       '/tmp/worktree-b',
       '/repo',
       '/tmp/worktree-a',
@@ -190,7 +190,7 @@ describe('reorderWorktrees', () => {
     useReposStore.getState().reorderWorktrees(REPO_ID, '/missing', '/repo')
 
     expect(useReposStore.getState().repos[REPO_ID]).toBe(before)
-    expect(useReposStore.getState().repoCache[REPO_ID]).toBeUndefined()
+    expect(useReposStore.getState().restorableRepoCache[REPO_ID]).toBeUndefined()
   })
 })
 

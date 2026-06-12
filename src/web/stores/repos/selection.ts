@@ -48,6 +48,7 @@ type RestorableWorkspaceSelectionActions = Pick<
   | 'setDetailPaneSizes'
   | 'resetLayout'
   | 'setSelectedTerminal'
+  | 'reorderWorktrees'
 >
 
 type LocalWorkspaceSelectionActions = Pick<ReposStore, 'setBranchSearchQuery'>
@@ -231,6 +232,32 @@ function createRestorableWorkspaceSelectionActions(
         return { selectedTerminalByWorktree }
       })
     },
+
+    reorderWorktrees(id: string, fromPath: string, toPath: string) {
+      if (fromPath === toPath) return
+      let changed = false
+      let token: number | undefined
+      set((s) => {
+        const repo = s.repos[id]
+        if (!repo) return s
+        const currentPaths = repo.data.branches
+          .map((branch) => branch.worktree?.path)
+          .filter((path): path is string => !!path)
+        if (!currentPaths.includes(fromPath) || !currentPaths.includes(toPath)) return s
+        const order = normalizeWorktreePathOrder(repo.ui.worktreePathOrder, currentPaths)
+        const from = order.indexOf(fromPath)
+        const to = order.indexOf(toPath)
+        if (from === -1 || to === -1 || from === to) return s
+        const worktreePathOrder = arrayMove(order, from, to)
+        changed = true
+        token = repo.instanceToken
+        return replaceRepoState(s, repo, (r) => {
+          r.ui.worktreePathOrder = worktreePathOrder
+        })
+      })
+      const repo = get().repos[id]
+      if (changed && token !== undefined && repo) persistRestorableRepoSnapshot(set, repo, token)
+    },
   }
 }
 
@@ -285,46 +312,6 @@ function createRuntimeCoherentSelectionActions(
         })
       }
     },
-
-    reorderWorktrees(id: string, fromPath: string, toPath: string) {
-      if (fromPath === toPath) return
-      let changed = false
-      let token: number | undefined
-      set((s) => {
-        const repo = s.repos[id]
-        if (!repo) return s
-        const currentPaths = repo.data.branches
-          .map((branch) => branch.worktree?.path)
-          .filter((path): path is string => !!path)
-        if (!currentPaths.includes(fromPath) || !currentPaths.includes(toPath)) return s
-        const order = normalizeWorktreePathOrder(repo.ui.worktreePathOrder, currentPaths)
-        const from = order.indexOf(fromPath)
-        const to = order.indexOf(toPath)
-        if (from === -1 || to === -1 || from === to) return s
-        const worktreePathOrder = arrayMove(order, from, to)
-        changed = true
-        token = repo.instanceToken
-        return replaceRepoState(s, repo, (r) => {
-          r.ui.worktreePathOrder = worktreePathOrder
-        })
-      })
-      const repo = get().repos[id]
-      if (changed && token !== undefined && repo) persistRepoCache(set, repo, token)
-    },
-
-    setBranchSearchQuery(id: string, query: string) {
-      set((s) => {
-        if (!s.repos[id]) return s
-        const hasQuery = query.trim().length > 0
-        const currentQuery = s.branchSearchQueries[id]
-        if (hasQuery ? currentQuery === query : currentQuery === undefined) return s
-        const branchSearchQueries = { ...s.branchSearchQueries }
-        if (hasQuery) branchSearchQueries[id] = query
-        else delete branchSearchQueries[id]
-        return { branchSearchQueries }
-      })
-    },
-
 
     setDetailTab(id: string, tab: DetailTab) {
       let changed = false

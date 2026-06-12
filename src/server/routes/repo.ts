@@ -15,6 +15,7 @@ import {
   createRepositoryWorktree,
   deleteRepositoryBranch,
   fetchRepository,
+  getRepositoryRemoteBranches,
   openRepositoryEditor,
   openRepositoryRemote,
   openRepositoryTerminal,

@@ -3,6 +3,7 @@ import { postServerJson } from '#/web/lib/server-fetch.ts'
 import type { CloneRepoResult, PullRequestEntry, RepoSnapshot } from '#/shared/rpc.ts'
 import type { ExecResult, PullRequestFetchMode, WorktreeStatus } from '#/shared/git-types.ts'
 import type { ProbeResult } from '#/shared/rpc.ts'
+import type { CreateWorktreeInput } from '#/shared/worktree-create.ts'
 
 export async function probeRepository(cwd: string): Promise<ProbeResult> {
   return await postServerJson('/api/repo/probe', { cwd })
@@ -81,15 +82,13 @@ export async function pushRepositoryBranch(
 
 export async function createRepositoryWorktree(
   cwd: string,
-  worktreePath: string,
-  newBranch: string,
-  baseBranch: string,
+  input: CreateWorktreeInput,
   signal?: AbortSignal,
   sourceToken?: string,
 ): Promise<ExecResult> {
   return await postServerJson(
     '/api/repo/create-worktree',
-    { cwd, worktreePath, newBranch, baseBranch, sourceToken },
+    { cwd, ...input, sourceToken },
     { signal },
   )
 }
@@ -147,4 +146,8 @@ export async function openRepositoryEditor(path: string): Promise<ExecResult> {
 
 export async function setBackgroundSyncRepos(repoIds: string[]): Promise<void> {
   await postServerJson('/api/repo/background-sync-repos', { repoIds })
+}
+
+export async function getRepositoryRemoteBranches(cwd: string, signal?: AbortSignal): Promise<string[]> {
+  return await postServerJson('/api/repo/remote-branches', { cwd }, { signal })
 }

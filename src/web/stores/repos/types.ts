@@ -99,7 +99,7 @@ export type RepoAvailabilityState = { phase: 'available' } | { phase: 'unavailab
 export interface RestorableRepoSnapshot {
   savedAt: number
   name: string
-  data: Pick<RepoDataState, 'branches' | 'currentBranch' | 'status' | 'statusLoaded' | 'worktreesByPath'>
+  data: Pick<RepoDataState, 'branches' | 'currentBranch'>
   ui: Pick<RepoUiState, 'selectedBranch' | 'branchViewMode' | 'detailTab' | 'worktreePathOrder'>
 }
 
