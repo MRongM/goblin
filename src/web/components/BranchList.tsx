@@ -33,6 +33,7 @@ import type { BranchActionRepo } from '#/web/hooks/branch-action-state.ts'
 import type { RepoBranchState, RepoWorktreeState } from '#/web/stores/repos/types.ts'
 import { formatWorktreeListPath } from '#/web/lib/paths.ts'
 import type { RemoteRepoTarget } from '#/shared/remote-repo.ts'
+import { detailPanelStoreActionsEqual, detailPanelStoreActionsFromStore } from '#/web/stores/repos/selector-actions.ts'
 
 interface Props {
   repoId: string
@@ -80,7 +81,11 @@ function branchListRepoEqual(a: BranchListRepo | undefined, b: BranchListRepo | 
 
 export function BranchList({ repoId, showActions = true }: Props) {
   const t = useT()
-  const setDetailCollapsed = useReposStore((s) => s.setDetailCollapsed)
+  const { setDetailCollapsed } = useStoreWithEqualityFn(
+    useReposStore,
+    detailPanelStoreActionsFromStore,
+    detailPanelStoreActionsEqual,
+  )
   const reorderWorktrees = useReposStore((s) => s.reorderWorktrees)
   const navigation = useMainWindowNavigation()
   const selectedRef = useRef<HTMLLIElement | null>(null)

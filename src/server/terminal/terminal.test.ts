@@ -4,7 +4,9 @@ import {
   closeAllServerTerminalSessions,
   createServerTerminal,
   getServerTerminalSessionSnapshot,
+  handleRealtimeServerMessage,
   listServerTerminalSessions,
+  reorderServerTerminals,
   attachServerTerminal,
   registerTerminalSocket,
   restartServerTerminal,
@@ -222,6 +224,55 @@ describe('server terminal sessions', () => {
     unregisterTerminalSocket('client_1', 'attachment_a', socket)
   })
 
+  test('clears stale canonical title when the shell process name includes a path', async () => {
+    const socket = { send: vi.fn(), close: vi.fn() }
+    registerTerminalSocket('client_1', 'attachment_a', socket)
+    const sessionId = await createTerminalSession('client_1')
+
+    const attached = await attachServerTerminal('client_1', {
+      sessionId,
+      cols: 80,
+      rows: 24,
+    })
+
+    expect(attached.ok).toBe(true)
+    mockPtys[0]?.setProcess('devin')
+    mockPtys[0]?.emitData('\u001b]0;Devin — reviewing repo\u0007')
+    await vi.waitFor(async () => {
+      await expect(listServerTerminalSessions('client_1', '/repo')).resolves.toEqual([
+        expect.objectContaining({
+          sessionId,
+          processName: 'devin',
+          canonicalTitle: 'Devin — reviewing repo',
+        }),
+      ])
+    })
+
+    mockPtys[0]?.setProcess('/bin/bash')
+    mockPtys[0]?.emitData('$ ')
+    await vi.waitFor(async () => {
+      const titleMessages = socket.send.mock.calls
+        .map(([payload]) => JSON.parse(String(payload)))
+        .filter((message) => message.type === 'title')
+      expect(titleMessages.at(-1)).toMatchObject({
+        type: 'title',
+        event: {
+          sessionId,
+          canonicalTitle: null,
+        },
+      })
+      await expect(listServerTerminalSessions('client_1', '/repo')).resolves.toEqual([
+        expect.objectContaining({
+          sessionId,
+          processName: '/bin/bash',
+          canonicalTitle: null,
+        }),
+      ])
+    })
+
+    unregisterTerminalSocket('client_1', 'attachment_a', socket)
+  })
+
   test('broadcasts output and exit events to registered web terminal sockets', async () => {
     const socket = { send: vi.fn(), close: vi.fn() }
     registerTerminalSocket('client_1', 'attachment_a', socket)
@@ -253,6 +304,144 @@ describe('server terminal sessions', () => {
       event: { sessionId: expect.any(String) },
     })
 
+    unregisterTerminalSocket('client_1', 'attachment_a', socket)
+  })
+
+  test('rejects terminal reorder requests with duplicate keys', async () => {
+    await createTerminalSession('client_1')
+    await createTerminalSession('client_1')
+    await createTerminalSession('client_1')
+
+    const sessionsBefore = await listServerTerminalSessions('client_1', '/repo')
+    expect(sessionsBefore).toHaveLength(3)
+
+    const result = reorderServerTerminals('client_1', {
+      repoRoot: '/repo',
+      worktreePath: '/repo-linked',
+      orderedKeys: [
+        sessionsBefore[0]!.key,
+        sessionsBefore[1]!.key,
+        sessionsBefore[1]!.key,
+      ],
+    })
+
+    expect(result).toBe(false)
+    await expect(listServerTerminalSessions('client_1', '/repo')).resolves.toEqual(sessionsBefore)
+  })
+
+  test('sends attach response before flushing buffered output emitted during the attach request', async () => {
+    const socket = { send: vi.fn(), close: vi.fn() }
+    registerTerminalSocket('client_1', 'attachment_a', socket)
+    const sessionId = await createTerminalSession('client_1')
+    socket.send.mockClear()
+
+    handleRealtimeServerMessage(
+      'client_1',
+      'attachment_a',
+      socket,
+      JSON.stringify({
+        type: 'request',
+        requestId: 'req_attach',
+        action: 'attach',
+        input: { sessionId, cols: 80, rows: 24 },
+      }),
+    )
+    mockPtys[0]?.emitData('during-attach')
+
+    await vi.waitFor(() => {
+      expect(
+        socket.send.mock.calls.some(([payload]) => JSON.parse(String(payload)).type === 'response'),
+      ).toBe(true)
+      expect(
+        socket.send.mock.calls.some(([payload]) => JSON.parse(String(payload)).type === 'output'),
+      ).toBe(true)
+    })
+
+    const messages = socket.send.mock.calls.map(([payload]) => JSON.parse(String(payload)))
+    const responseIndex = messages.findIndex((message) => message.type === 'response')
+    const outputIndex = messages.findIndex((message) => message.type === 'output')
+    expect(responseIndex).toBeGreaterThanOrEqual(0)
+    expect(outputIndex).toBeGreaterThan(responseIndex)
+    expect(messages[responseIndex]).toMatchObject({
+      type: 'response',
+      requestId: 'req_attach',
+      ok: true,
+      action: 'attach',
+      payload: {
+        ok: true,
+        sessionId,
+      },
+    })
+    expect(messages[outputIndex]).toMatchObject({
+      type: 'output',
+      event: {
+        sessionId,
+        data: 'during-attach',
+        seq: 1,
+        processName: 'zsh',
+      },
+    })
+
+    unregisterTerminalSocket('client_1', 'attachment_a', socket)
+  })
+
+  test('drops buffered attach output when the socket disconnects before the paused request resumes', async () => {
+    const socket = {
+      send: vi.fn(() => {
+        throw new Error('socket closed')
+      }),
+      close: vi.fn(),
+    }
+    registerTerminalSocket('client_1', 'attachment_a', socket)
+    const sessionId = await createTerminalSession('client_1')
+    socket.send.mockClear()
+
+    handleRealtimeServerMessage(
+      'client_1',
+      'attachment_a',
+      socket,
+      JSON.stringify({
+        type: 'request',
+        requestId: 'req_attach_closed',
+        action: 'attach',
+        input: { sessionId, cols: 80, rows: 24 },
+      }),
+    )
+    mockPtys[0]?.emitData('during-attach')
+    unregisterTerminalSocket('client_1', 'attachment_a', socket)
+
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(socket.send).toHaveBeenCalledTimes(1)
+  })
+
+  test('deactivates the buffered socket when sending the attach response fails', async () => {
+    const socket = {
+      send: vi.fn(() => {
+        throw new Error('socket closed')
+      }),
+      close: vi.fn(),
+    }
+    registerTerminalSocket('client_1', 'attachment_a', socket)
+    const sessionId = await createTerminalSession('client_1')
+    socket.send.mockClear()
+
+    handleRealtimeServerMessage(
+      'client_1',
+      'attachment_a',
+      socket,
+      JSON.stringify({
+        type: 'request',
+        requestId: 'req_attach_send_fail',
+        action: 'attach',
+        input: { sessionId, cols: 80, rows: 24 },
+      }),
+    )
+    mockPtys[0]?.emitData('during-attach')
+
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(socket.send).toHaveBeenCalledTimes(1)
     unregisterTerminalSocket('client_1', 'attachment_a', socket)
   })
 
@@ -362,6 +551,7 @@ describe('server terminal sessions', () => {
       sessionId,
       cols: 100,
       rows: 30,
+      attachmentId: 'attachment_b',
     })
 
     expect(attachedAgain.ok).toBe(true)
@@ -401,7 +591,7 @@ describe('server terminal sessions', () => {
     if (!first.ok) return
 
     unregisterTerminalSocket('client_1', 'attachment_a', socketA)
-    await vi.advanceTimersByTimeAsync(3_000 + 1)
+    await vi.advanceTimersByTimeAsync(30_000 + 1)
 
     const socketB = { send: vi.fn(), close: vi.fn() }
     registerTerminalSocket('client_1', 'attachment_b', socketB)
@@ -575,7 +765,7 @@ describe('server terminal sessions', () => {
     expect(spawn).toHaveBeenCalledTimes(1)
 
     unregisterTerminalSocket('client_1', 'attachment_a', socket)
-    await vi.advanceTimersByTimeAsync(6 * 60 * 60 * 1000 + 1)
+    await vi.advanceTimersByTimeAsync(24 * 60 * 60 * 1000 + 1)
     await vi.runOnlyPendingTimersAsync()
     await Promise.resolve()
 
@@ -744,6 +934,37 @@ describe('server terminal sessions', () => {
     expect(mockPtys[0]?.resize).not.toHaveBeenCalledWith(120, 40)
 
     unregisterTerminalSocket('client_1', 'attachment_a', socketA)
+  })
+
+  test('batches rapid writes into a single ordered pty write via the input queue', async () => {
+    const socket = { send: vi.fn(), close: vi.fn() }
+    registerTerminalSocket('client_1', 'attachment_a', socket)
+    const sessionId = await createTerminalSession('client_1', { cols: 80, rows: 24 })
+
+    const attach = await attachServerTerminal('client_1', {
+      sessionId,
+      cols: 80,
+      rows: 24,
+      attachmentId: 'attachment_a',
+    })
+    expect(attach.ok).toBe(true)
+
+    writeServerTerminal('client_1', { sessionId, data: 'c', attachmentId: 'attachment_a' })
+    writeServerTerminal('client_1', { sessionId, data: 'l', attachmentId: 'attachment_a' })
+    writeServerTerminal('client_1', { sessionId, data: 'e', attachmentId: 'attachment_a' })
+    writeServerTerminal('client_1', { sessionId, data: 'a', attachmentId: 'attachment_a' })
+    writeServerTerminal('client_1', { sessionId, data: 'r', attachmentId: 'attachment_a' })
+
+    // Flush is scheduled as a microtask, so pty.write has not been called yet.
+    expect(mockPtys[0]?.write).toHaveBeenCalledTimes(0)
+
+    await new Promise<void>((resolve) => queueMicrotask(resolve))
+
+    // All rapid writes are batched into a single ordered pty.write call.
+    expect(mockPtys[0]?.write).toHaveBeenCalledTimes(1)
+    expect(mockPtys[0]?.write).toHaveBeenCalledWith('clear')
+
+    unregisterTerminalSocket('client_1', 'attachment_a', socket)
   })
 
 })

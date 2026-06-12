@@ -4,7 +4,6 @@ import { Button } from '#/web/components/ui/button.tsx'
 import { FormDialog } from '#/web/components/ui/form-dialog.tsx'
 import { Field, FieldDescription, FieldError, FieldLabel } from '#/web/components/ui/field.tsx'
 import { Input } from '#/web/components/ui/input.tsx'
-import { PanelInset } from '#/web/components/ui/panel.tsx'
 import { useMainWindowNavigation } from '#/web/main-window-navigation.tsx'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '#/web/components/ui/select.tsx'
 import { useRemotePathSuggestions } from '#/web/hooks/useRemotePathSuggestions.ts'
@@ -13,7 +12,7 @@ import {
   getRemoteSshHosts,
   resolveRemoteRepositoryTarget,
   testRemoteRepositoryConnection,
-} from '#/web/app-data-client.ts'
+} from '#/web/remote-client.ts'
 import { useT } from '#/web/stores/i18n.ts'
 import { useReposStore } from '#/web/stores/repos/store.ts'
 import { RemoteDiagnosticsPanel } from '#/web/components/RemoteDiagnosticsPanel.tsx'

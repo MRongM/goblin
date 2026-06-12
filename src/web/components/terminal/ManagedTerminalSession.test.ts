@@ -57,8 +57,11 @@ const xtermMocks = vi.hoisted(() => {
     element: HTMLDivElement | null = null
     modes = { applicationCursorKeysMode: false }
     refresh = vi.fn()
-    write = vi.fn()
+    write = vi.fn((_data: string, callback?: () => void) => {
+      if (callback) queueMicrotask(callback)
+    })
     reset = vi.fn()
+    scrollToBottom = vi.fn()
     dispose = vi.fn()
     focus = vi.fn(() => this.textarea?.focus())
     customKeyEventHandler: ((event: KeyboardEvent) => boolean) | null = null
@@ -190,7 +193,9 @@ const xtermMocks = vi.hoisted(() => {
     clearDecorations = vi.fn()
     clearActiveDecoration = vi.fn()
 
-    constructor(readonly options?: { highlightLimit?: number }) {
+    readonly options?: { highlightLimit?: number }
+    constructor(options?: { highlightLimit?: number }) {
+      this.options = options
       if (addonFailures.search) throw new Error('search addon failed')
       searchAddons.push(this)
     }
@@ -246,7 +251,9 @@ const xtermMocks = vi.hoisted(() => {
   class MockWebLinksAddon {
     term: MockTerminal | null = null
 
-    constructor(readonly handler?: (event: MouseEvent, uri: string) => void) {
+    readonly handler?: (event: MouseEvent, uri: string) => void
+    constructor(handler?: (event: MouseEvent, uri: string) => void) {
+      this.handler = handler
       if (addonFailures.webLinks) throw new Error('web links addon failed')
       webLinkAddons.push(this)
     }
@@ -331,7 +338,9 @@ class MockResizeObserver {
   observe = vi.fn()
   disconnect = vi.fn()
 
-  constructor(readonly cb: ResizeObserverCallback) {
+  readonly cb: ResizeObserverCallback
+  constructor(cb: ResizeObserverCallback) {
+    this.cb = cb
     MockResizeObserver.instances.push(this)
   }
 }
@@ -474,6 +483,7 @@ beforeEach(() => {
         takeover: terminalCalls.takeover.mockResolvedValue(takeoverResult('session-1')),
         close: terminalCalls.close.mockResolvedValue(true),
         notifyBell: terminalCalls.notifyBell.mockResolvedValue(true),
+        reorder: vi.fn(),
         create: vi.fn(),
         pruneTerminals: vi.fn(),
         onOutput: vi.fn(),
@@ -527,6 +537,7 @@ beforeEach(() => {
       pruneTerminals: vi.fn(async () => ({ pruned: 0, remaining: 0 })),
       listSessions: vi.fn(async () => []),
       getSessionSnapshot: vi.fn(async () => null),
+      reorder: vi.fn(async () => true),
       notifyBell: terminalCalls.notifyBell.mockResolvedValue(true),
       sendTestNotification: vi.fn(async () => true),
       setBadge: terminalCalls.setBadge,
@@ -578,29 +589,21 @@ describe('ManagedTerminalSession', () => {
 
     const term = xtermMocks.terminals[0]!
     const fitAddon = xtermMocks.fitAddons[0]!
-    term._core._charSizeService.measure.mockClear()
-    term._core._renderService.clear.mockClear()
     term.refresh.mockClear()
     fitAddon.fit.mockClear()
 
     mockFonts.resolveReady()
     await flushFontRefit()
 
-    expect(term._core._charSizeService.measure).toHaveBeenCalledTimes(1)
-    expect(term._core._renderService.clear).toHaveBeenCalledTimes(1)
     expect(fitAddon.fit).toHaveBeenCalledTimes(1)
     expect(term.refresh).toHaveBeenCalledWith(0, term.rows - 1)
 
-    term._core._charSizeService.measure.mockClear()
-    term._core._renderService.clear.mockClear()
     term.refresh.mockClear()
     fitAddon.fit.mockClear()
 
     mockFonts.emitLoadingDone()
     await flushFontRefit()
 
-    expect(term._core._charSizeService.measure).toHaveBeenCalledTimes(1)
-    expect(term._core._renderService.clear).toHaveBeenCalledTimes(1)
     expect(fitAddon.fit).toHaveBeenCalledTimes(1)
     expect(term.refresh).toHaveBeenCalledWith(0, term.rows - 1)
   })
@@ -654,18 +657,121 @@ describe('ManagedTerminalSession', () => {
       expect(term.customKeyEventHandler?.(optionArrow('ArrowRight'))).toBe(false)
       expect(term.customKeyEventHandler?.(optionArrow('ArrowUp'))).toBe(false)
       expect(term.customKeyEventHandler?.(optionArrow('ArrowDown'))).toBe(false)
-      await Promise.resolve()
+      await flushTerminalStart()
 
-      expect(terminalCalls.write).toHaveBeenNthCalledWith(1, { sessionId: 'session-1', data: '\x1bb' })
-      expect(terminalCalls.write).toHaveBeenNthCalledWith(2, { sessionId: 'session-1', data: '\x1bf' })
-      expect(terminalCalls.write).toHaveBeenNthCalledWith(3, { sessionId: 'session-1', data: '\x1b[A' })
-      expect(terminalCalls.write).toHaveBeenNthCalledWith(4, { sessionId: 'session-1', data: '\x1b[B' })
+      // Rapid option-arrow keys are batched into a single write via queueMicrotask.
+      expect(terminalCalls.write).toHaveBeenCalledTimes(1)
+      expect(terminalCalls.write).toHaveBeenCalledWith({ sessionId: 'session-1', data: '\x1bb\x1bf\x1b[A\x1b[B' })
 
       term.modes.applicationCursorKeysMode = true
       expect(term.customKeyEventHandler?.(optionArrow('ArrowLeft'))).toBe(true)
-      expect(terminalCalls.write).toHaveBeenCalledTimes(4)
+      expect(terminalCalls.write).toHaveBeenCalledTimes(1)
     } finally {
       Object.defineProperty(window.navigator, 'platform', { configurable: true, value: savedPlatform })
+    }
+  })
+
+  test('works around Safari Shift+symbol key bug by sending correct char directly', async () => {
+    const savedUserAgent = navigator.userAgent
+    Object.defineProperty(window.navigator, 'userAgent', {
+      configurable: true,
+      value: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15',
+    })
+    try {
+      const host = document.createElement('div')
+      document.body.appendChild(host)
+      const session = new ManagedTerminalSession(descriptor, vi.fn())
+      hydrateManagedSession(session)
+      session.attach(host)
+      await flushTerminalStart()
+      await flushUntil(() => session.snapshot().phase === 'open')
+
+      const term = xtermMocks.terminals[0]!
+      expect(term.customKeyEventHandler).toBeTypeOf('function')
+
+      // Safari reports unshifted '/' for Shift+Slash — workaround should send '?'.
+      const slashEvent = new KeyboardEvent('keydown', { key: '/', code: 'Slash', shiftKey: true, cancelable: true })
+      expect(term.customKeyEventHandler?.(slashEvent)).toBe(false)
+
+      // Safari reports empty key for Shift+Digit1 — workaround should send '!'.
+      const digit1Event = new KeyboardEvent('keydown', { key: '', code: 'Digit1', shiftKey: true, cancelable: true })
+      expect(term.customKeyEventHandler?.(digit1Event)).toBe(false)
+
+      await flushTerminalStart()
+
+      // Rapid Safari shift keys are batched into a single write via queueMicrotask.
+      expect(terminalCalls.write).toHaveBeenCalledTimes(1)
+      expect(terminalCalls.write).toHaveBeenCalledWith({ sessionId: 'session-1', data: '?!' })
+    } finally {
+      Object.defineProperty(window.navigator, 'userAgent', { configurable: true, value: savedUserAgent })
+    }
+  })
+
+  test('reuses remembered Safari layout for empty Shift+symbol events on multi-layout keys', async () => {
+    const savedUserAgent = navigator.userAgent
+    Object.defineProperty(window.navigator, 'userAgent', {
+      configurable: true,
+      value: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15',
+    })
+    try {
+      const host = document.createElement('div')
+      document.body.appendChild(host)
+      const session = new ManagedTerminalSession(descriptor, vi.fn())
+      hydrateManagedSession(session)
+      session.attach(host)
+      await flushTerminalStart()
+      await flushUntil(() => session.snapshot().phase === 'open')
+
+      const term = xtermMocks.terminals[0]!
+      expect(term.customKeyEventHandler).toBeTypeOf('function')
+
+      const learnLayoutEvent = new KeyboardEvent('keydown', {
+        key: '；',
+        code: 'Semicolon',
+        shiftKey: false,
+        cancelable: true,
+      })
+      expect(term.customKeyEventHandler?.(learnLayoutEvent)).toBe(true)
+
+      const brokenShiftEvent = new KeyboardEvent('keydown', {
+        key: '',
+        code: 'Semicolon',
+        shiftKey: true,
+        cancelable: true,
+      })
+      expect(term.customKeyEventHandler?.(brokenShiftEvent)).toBe(false)
+
+      await flushTerminalStart()
+
+      expect(terminalCalls.write).toHaveBeenCalledTimes(1)
+      expect(terminalCalls.write).toHaveBeenCalledWith({ sessionId: 'session-1', data: '：' })
+    } finally {
+      Object.defineProperty(window.navigator, 'userAgent', { configurable: true, value: savedUserAgent })
+    }
+  })
+
+  test('does not intercept Shift+symbol on Chrome', async () => {
+    const savedUserAgent = navigator.userAgent
+    Object.defineProperty(window.navigator, 'userAgent', {
+      configurable: true,
+      value: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+    })
+    try {
+      const host = document.createElement('div')
+      document.body.appendChild(host)
+      const session = new ManagedTerminalSession(descriptor, vi.fn())
+      hydrateManagedSession(session)
+      session.attach(host)
+      await flushTerminalStart()
+      await flushUntil(() => session.snapshot().phase === 'open')
+
+      const term = xtermMocks.terminals[0]!
+      const slashEvent = new KeyboardEvent('keydown', { key: '/', code: 'Slash', shiftKey: true, cancelable: true })
+      // Chrome is not Safari, so the workaround should not intercept — let xterm.js handle it.
+      expect(term.customKeyEventHandler?.(slashEvent)).toBe(true)
+      expect(terminalCalls.write).not.toHaveBeenCalled()
+    } finally {
+      Object.defineProperty(window.navigator, 'userAgent', { configurable: true, value: savedUserAgent })
     }
   })
 
@@ -777,10 +883,49 @@ describe('ManagedTerminalSession', () => {
     await flushUntil(() => session.snapshot().phase === 'open')
 
     xtermMocks.terminals[0]!.emitData('input')
-    await Promise.resolve()
+    await flushTerminalStart()
 
     expect(terminalCalls.write).toHaveBeenCalledWith({ sessionId: 'session-1', data: 'input' })
     expect(session.snapshot().phase).toBe('open')
+  })
+
+  test('batches rapid user input into a single ordered write', async () => {
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const session = new ManagedTerminalSession(descriptor, vi.fn())
+    hydrateManagedSession(session)
+    session.attach(host)
+    await flushTerminalStart()
+    await flushUntil(() => session.snapshot().phase === 'open')
+
+    const term = xtermMocks.terminals[0]!
+    term.emitData('c')
+    term.emitData('l')
+    term.emitData('e')
+    term.emitData('a')
+    term.emitData('r')
+    await flushTerminalStart()
+
+    expect(terminalCalls.write).toHaveBeenCalledTimes(1)
+    expect(terminalCalls.write).toHaveBeenCalledWith({ sessionId: 'session-1', data: 'clear' })
+  })
+
+  test('drops buffered input after dispose', async () => {
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const session = new ManagedTerminalSession(descriptor, vi.fn())
+    hydrateManagedSession(session)
+    session.attach(host)
+    await flushTerminalStart()
+    await flushUntil(() => session.snapshot().phase === 'open')
+
+    xtermMocks.terminals[0]!.emitData('x')
+    session.dispose()
+
+    await flushTerminalStart()
+
+    // The pending write buffer is cleared on dispose; nothing is sent.
+    expect(terminalCalls.write).not.toHaveBeenCalled()
   })
 
   test('continues after terminal resize failures', async () => {
@@ -833,7 +978,7 @@ describe('ManagedTerminalSession', () => {
       controllerStatus: 'connected', canTakeover: true })
   })
 
-  test('preloads hydrated snapshot before attaching a mirrored placeholder', async () => {
+  test('preloads hydrated snapshot before attaching as controller', async () => {
     terminalCalls.attach.mockResolvedValueOnce(attachResult('session-1', { replay: '', replaySeq: 0 }))
     const host = document.createElement('div')
     document.body.appendChild(host)
@@ -843,7 +988,7 @@ describe('ManagedTerminalSession', () => {
     session.hydrate({
       sessionId: 'session-remote',
       processName: 'node',
-      role: 'viewer',
+      role: 'controller',
       controllerStatus: 'connected',
       canonicalCols: 120,
       canonicalRows: 40,
@@ -856,7 +1001,7 @@ describe('ManagedTerminalSession', () => {
 
     const term = xtermMocks.terminals[0]!
     expect(term.reset).toHaveBeenCalled()
-    expect(term.write).toHaveBeenNthCalledWith(1, 'hydrated-screen')
+    expect(term.write).toHaveBeenNthCalledWith(1, 'hydrated-screen', expect.any(Function))
     expect(terminalCalls.attach).toHaveBeenCalled()
   })
 
@@ -988,6 +1133,19 @@ describe('ManagedTerminalSession', () => {
     await flushUntil(() => terminalCalls.takeover.mock.calls.length > 0)
 
     expect(terminalCalls.takeover).toHaveBeenCalledWith({ sessionId: 'session-1', cols: 101, rows: 31 })
+    // Before authoritative ownership message arrives, role is still viewer
+    expect(session.snapshot().attachment).toMatchObject({ role: 'viewer',
+      controllerStatus: 'connected', canTakeover: true })
+
+    // Simulate authoritative server ownership event
+    session.handleOwnership({
+      sessionId: 'session-1',
+      role: 'controller',
+      controllerStatus: 'connected',
+      canonicalCols: 101,
+      canonicalRows: 31,
+    })
+
     expect(session.snapshot().attachment).toMatchObject({ role: 'controller',
       controllerStatus: 'connected', canTakeover: false })
   })
@@ -1017,6 +1175,18 @@ describe('ManagedTerminalSession', () => {
 
     session.takeover()
     await flushUntil(() => terminalCalls.takeover.mock.calls.length > 0)
+
+    // Bridge response alone does not change ownership; only authoritative onOwnership does
+    expect(session.snapshot().attachment).toMatchObject({ role: 'viewer',
+      controllerStatus: 'connected', canTakeover: true })
+
+    session.handleOwnership({
+      sessionId: 'session-1',
+      role: 'unowned',
+      controllerStatus: 'none',
+      canonicalCols: 120,
+      canonicalRows: 40,
+    })
 
     expect(session.snapshot().attachment).toMatchObject({
       role: 'unowned',
@@ -1071,6 +1241,7 @@ describe('ManagedTerminalSession', () => {
 
     xtermMocks.terminals[0]!.emitData('input during replay')
     await flushUntil(() => session.snapshot().phase === 'open')
+    await flushTerminalStart()
 
     expect(terminalCalls.write).toHaveBeenCalledWith({ sessionId: 'session-1', data: 'input during replay' })
   })
@@ -1085,7 +1256,7 @@ describe('ManagedTerminalSession', () => {
     await flushUntil(() => xtermMocks.terminals[0]?.write.mock.calls.some((call: unknown[]) => call[0] === 'tail'))
 
     expect(xtermMocks.terminals[0]!.reset).toHaveBeenCalledTimes(1)
-    expect(xtermMocks.terminals[0]!.write).toHaveBeenCalledWith('tail')
+    expect(xtermMocks.terminals[0]!.write).toHaveBeenCalledWith('tail', expect.any(Function))
   })
 
   test('batches terminal output writes on animation frames', async () => {
@@ -1103,7 +1274,8 @@ describe('ManagedTerminalSession', () => {
     session.handleOutput({ sessionId: 'session-1', data: 'first', seq: 1, processName: 'zsh' })
     session.handleOutput({ sessionId: 'session-1', data: 'second', seq: 2, processName: 'zsh' })
 
-    expect(notify).toHaveBeenCalledTimes(2)
+    // Controller mode: outputSummary is not accumulated, so no notify
+    expect(notify).toHaveBeenCalledTimes(0)
     expect(xtermMocks.terminals[0]!.write).not.toHaveBeenCalled()
     await flushTerminalStart()
 

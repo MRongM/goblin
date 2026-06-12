@@ -35,7 +35,7 @@ import {
   pullRepositoryBranch,
   pushRepositoryBranch,
   removeRepositoryWorktree,
-} from '#/web/app-data-client.ts'
+} from '#/web/repo-client.ts'
 const BRANCH_NETWORK_OPERATION_KEY = 'branch-network-action'
 const BRANCH_ACTION_WAIT_TIMEOUT_MS = 30_000
 const BRANCH_ACTION_WAIT_TIMEOUT_MESSAGE = 'error.branch-action-wait-timeout'
@@ -164,6 +164,14 @@ function syncNetworkFetchResourceState(
     if (result.ok) finishResourceSuccess(r.resources.fetch)
     else finishResourceError(r.resources.fetch, result.message)
   })
+}
+
+function branchActionErrorFromResult(result: ExecResult): string | null {
+  return !result.ok && result.message !== 'cancelled' ? result.message : null
+}
+
+function branchActionErrorResult(message: string): ExecResult {
+  return { ok: false, message }
 }
 
 function shouldSuppressBranchActionResultMessage(result: ExecResult, options?: RunBranchActionOptions): boolean {
@@ -297,9 +305,6 @@ export function createBranchActions(set: ReposSet, get: ReposGet) {
         if (message === 'cancelled') return
         get().setLastResult(id, { ok: false, message }, token, { action: branchActionEventAction(action) })
       }
-      const errorFromResult = (result: ExecResult) =>
-        !result.ok && result.message !== 'cancelled' ? result.message : null
-      const errorResult = (message: string): ExecResult => ({ ok: false, message })
       return await runWithRepoInvalidationSource('branch', async (sourceToken) => {
         const runActionTask = async (signal: AbortSignal, ctx: { setPhase: (phase: 'queued' | 'running') => void }) => {
           try {
@@ -331,8 +336,8 @@ export function createBranchActions(set: ReposSet, get: ReposGet) {
             task: runActionTask,
             queuedTimeoutMs: options?.waitTimeoutMs ?? BRANCH_ACTION_WAIT_TIMEOUT_MS,
             queuedTimeoutMessage: BRANCH_ACTION_WAIT_TIMEOUT_MESSAGE,
-            errorFromResult,
-            errorResult,
+            errorFromResult: branchActionErrorFromResult,
+            errorResult: branchActionErrorResult,
             onResult: handleResult,
             onError: handleError,
           })
@@ -348,8 +353,8 @@ export function createBranchActions(set: ReposSet, get: ReposGet) {
           targets: [branchActionTarget(action)],
           busyResult: { ok: false, message: 'cancelled' },
           task: runActionTask,
-          errorFromResult,
-          errorResult,
+          errorFromResult: branchActionErrorFromResult,
+          errorResult: branchActionErrorResult,
           onResult: handleResult,
           onError: handleError,
         })

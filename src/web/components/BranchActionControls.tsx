@@ -1,10 +1,9 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import { AsyncButton } from '#/web/components/AsyncButton.tsx'
 import { BranchActionsDropdown } from '#/web/components/BranchActionsMenu.tsx'
 import { ScrollArea } from '#/web/components/ui/scroll-area.tsx'
-import { type BranchActionItem, type BranchActionItemGroups } from '#/web/hooks/useBranchActionItems.ts'
-import { setBranchActionShortcutHandler } from '#/web/keyboard/branch-action-shortcuts.ts'
+import { type BranchActionItem, type BranchActionItemGroups, visibleBranchActionItems } from '#/web/hooks/useBranchActionItems.ts'
+import { useOverflowCollapse } from '#/web/hooks/useOverflowCollapse.ts'
 import { cn } from '#/web/lib/cn.ts'
 type BranchActionControlsVariant = 'bar' | 'menu' | 'auto'
 
@@ -15,19 +14,7 @@ interface BranchActionControlsProps {
 
 export function BranchActionControls({ actions, variant = 'bar' }: BranchActionControlsProps) {
   const { patchItems, mainItems, destructiveItems } = actions
-  const visibleItems = [...patchItems, ...mainItems, ...destructiveItems].filter((item) => item.visible)
-  // Register the global shortcut once. The ref is reassigned on every render,
-  // including the latest item callbacks, so repo/branch changes don't stale the handler.
-  const visibleItemsRef = useRef(visibleItems)
-  visibleItemsRef.current = visibleItems
-
-  useEffect(() => {
-    return setBranchActionShortcutHandler((action) => {
-      const item = visibleItemsRef.current.find((item) => item.id === action)
-      if (!item || item.disabled) return
-      void item.onSelect()
-    })
-  }, [])
+  const visibleItems = visibleBranchActionItems(actions)
 
   if (variant === 'menu') {
     return <BranchActionsDropdown patchItems={patchItems} mainItems={mainItems} destructiveItems={destructiveItems} />
@@ -58,32 +45,8 @@ function BranchActionAuto({
   mainItems: BranchActionItem[]
   destructiveItems: BranchActionItem[]
 }) {
-  const containerRef = useRef<HTMLDivElement | null>(null)
-  const measureRef = useRef<HTMLDivElement | null>(null)
-  const [collapsed, setCollapsed] = useState(false)
   const layoutKey = visibleItems.map((item) => `${item.id}:${item.label}:${item.disabled}`).join('|')
-
-  useLayoutEffect(() => {
-    const update = () => {
-      const container = containerRef.current
-      const measure = measureRef.current
-      if (!container || !measure) return
-      const next = measure.scrollWidth > container.clientWidth + 1
-      setCollapsed((current) => (current === next ? current : next))
-    }
-    update()
-
-    const ResizeObserverCtor = globalThis.ResizeObserver
-    if (!ResizeObserverCtor) {
-      window.addEventListener('resize', update)
-      return () => window.removeEventListener('resize', update)
-    }
-
-    const observer = new ResizeObserverCtor(update)
-    if (containerRef.current) observer.observe(containerRef.current)
-    if (measureRef.current) observer.observe(measureRef.current)
-    return () => observer.disconnect()
-  }, [layoutKey])
+  const { containerRef, measureRef, collapsed } = useOverflowCollapse(layoutKey)
 
   return (
     <div ref={containerRef} className="relative flex min-w-0 flex-1 justify-end">
@@ -139,7 +102,7 @@ function BranchActionButton({ item, measure = false }: { item: BranchActionItem;
     >
       {({ busy }) => (
         <>
-          {busy ? <Loader2 size={16} className="animate-spin" /> : item.icon}
+          {busy ? <Loader2 className="size-4 animate-spin" /> : item.icon}
           {item.label}
         </>
       )}

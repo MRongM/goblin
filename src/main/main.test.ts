@@ -26,7 +26,6 @@ const mocks = vi.hoisted(() => {
     setSettingsGlobalShortcutState: vi.fn(async () => true),
     initializeMenuRuntimeState: vi.fn(),
     initTheme: vi.fn(() => Promise.resolve()),
-    getLangPref: vi.fn(async () => 'auto'),
     resolveLang: vi.fn(() => 'en'),
     setCurrentLang: vi.fn(),
     syncGlobalShortcuts: vi.fn(),
@@ -83,11 +82,15 @@ vi.mock('#/main/menu.ts', () => ({
 
 vi.mock('#/main/menu-state.ts', () => ({
   initializeMenuRuntimeState: mocks.initializeMenuRuntimeState,
+  applyMenuRuntimeState: vi.fn(),
+}))
+
+vi.mock('#/main/recent-repos.ts', () => ({
+  syncRecentRepos: vi.fn(),
 }))
 
 vi.mock('#/main/i18n/index.ts', () => ({
   assertDictionaryParity: mocks.assertDictionaryParity,
-  getLangPref: mocks.getLangPref,
   resolveLang: mocks.resolveLang,
   setCurrentLang: mocks.setCurrentLang,
 }))
@@ -184,7 +187,7 @@ describe('main process startup lifecycle', () => {
   })
 
   test('initializes the current language from the server-owned preference when available', async () => {
-    mocks.getLangPref.mockResolvedValueOnce('ja')
+    mocks.getSettingsSnapshot.mockResolvedValueOnce(defaultSettingsSnapshot({ lang: 'ja' }))
 
     await import('#/main/main.ts')
     mocks.resolveReady()
@@ -193,7 +196,6 @@ describe('main process startup lifecycle', () => {
       expect(mocks.buildAppMenu).toHaveBeenCalled()
     })
 
-    expect(mocks.getLangPref).toHaveBeenCalled()
     expect(mocks.resolveLang).toHaveBeenCalledWith('ja')
     expect(mocks.setCurrentLang).toHaveBeenCalledWith('en')
   })

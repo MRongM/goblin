@@ -1,10 +1,8 @@
 import type { NativeRpcHandlers } from '#/shared/rpc.ts'
 import { isReservedGlobalShortcut, parseGlobalShortcut } from '#/shared/accelerator.ts'
-import { DEFAULT_GLOBAL_SHORTCUT } from '#/shared/settings-defaults.ts'
-import { getSettingsPrefs, updateSettingsPrefs } from '#/main/settings-server-client.ts'
-import { broadcastNativeHostGlobalShortcutState } from '#/main/native-host-settings-effects.ts'
+import { getSettingsPrefs, setSettingsGlobalShortcutState, updateSettingsPrefs } from '#/main/settings-server-client.ts'
+import { applyNativeHostShellProjection } from '#/main/native-host-settings-effects.ts'
 import { isGlobalShortcutRegistered, replaceGlobalShortcut } from '#/main/shortcuts.ts'
-import { applyNativeHostRecentReposProjection } from '#/main/native-host-settings-session.ts'
 
 // Native-host settings RPC handlers: read/write server-owned settings, then
 // apply the corresponding Electron-only effects when needed.
@@ -16,11 +14,10 @@ async function getRuntimeServerSettingsPrefs() {
   return await getSettingsPrefs()
 }
 
-export function createNativeHostSettingsRpcHandlers(options: {
-  addRecentDocument: (path: string) => void
-}): Pick<NativeRpcHandlers, 'settings'> {
+export function createNativeHostSettingsRpcHandlers(): Pick<NativeRpcHandlers, 'settings'> {
   return {
     settings: {
+      applyShellProjection: async (input) => await applyNativeHostShellProjection(input),
       setGlobalShortcut: async ({ accelerator }) => {
         const parsed = parseGlobalShortcut(accelerator)
         const serverSettings = await getRuntimeServerSettingsPrefs()
@@ -32,11 +29,9 @@ export function createNativeHostSettingsRpcHandlers(options: {
         if (!registered && !currentGlobalShortcutDisabled) return globalShortcutPayload(currentGlobalShortcut)
         const saved = (await updateSettingsPrefs({ globalShortcut: parsed })).globalShortcut
         const payload = globalShortcutPayload(saved)
-        await broadcastNativeHostGlobalShortcutState(payload.accelerator, payload.registered)
+        await setSettingsGlobalShortcutState(payload.registered)
         return payload
       },
-      applyRecentReposProjection: async ({ recentRepos, addedRepo }) =>
-        applyNativeHostRecentReposProjection(recentRepos, { addedRepo, addRecentDocument: options.addRecentDocument }),
     },
   }
 }

@@ -1,27 +1,25 @@
 import { Hono } from 'hono'
-import { publishSettingsInvalidation } from '#/server/modules/invalidation-broker.ts'
 import { getServerExternalAppsSnapshot } from '#/server/modules/external-apps.ts'
 import { getServerGitHubCliState } from '#/server/modules/github-cli.ts'
-import { getServerI18nPayload } from '#/server/modules/i18n.ts'
-import { getSettingsSnapshot, setServerGlobalShortcutRegistered } from '#/server/modules/settings.ts'
+import { getServerI18nSnapshot } from '#/server/modules/i18n.ts'
+import { getSettingsSnapshot } from '#/server/modules/settings-snapshot.ts'
+import { getServerSettingsPrefs } from '#/server/modules/settings-source.ts'
+import type { ServerSettingsState } from '#/server/modules/settings-state.ts'
 import {
-  addServerRecentRepo,
-  clearServerRecentRepos,
-  getServerSettingsPrefs,
-  setServerFetchIntervalSec,
-  setServerSessionState,
-  updateServerSettingsPrefs,
-} from '#/server/modules/settings-source.ts'
-import { toSafeSessionRepoEntry } from '#/shared/input-validation.ts'
+  applyServerFetchIntervalWrite,
+  applyServerGlobalShortcutRegistrationWrite,
+  applyServerRecentRepoAddWrite,
+  applyServerRecentRepoClearWrite,
+  applyServerSessionWrite,
+  applyServerSettingsPrefsWrite,
+} from '#/server/modules/settings-write-paths.ts'
 import { getLanUrls, isLanAddress } from '#/shared/lan-addresses.ts'
 import type { LanInfo } from '#/shared/rpc.ts'
-import { repoSessionEntryId } from '#/shared/remote-repo.ts'
-import { settingsInvalidationScopesForPrefsPatch } from '#/shared/server-invalidation.ts'
 
-export function createSettingsRoutes() {
+export function createSettingsRoutes(settingsState: ServerSettingsState) {
   const app = new Hono()
-  app.get('/', async (c) => c.json(await getSettingsSnapshot()))
-  app.get('/i18n', async (c) => c.json(await getServerI18nPayload(c.req.header('accept-language'))))
+  app.get('/', async (c) => c.json(await getSettingsSnapshot(settingsState)))
+  app.get('/i18n', async (c) => c.json(await getServerI18nSnapshot(c.req.header('accept-language'))))
   app.get('/github-cli', async (c) => {
     const hosts = (c.req.queries('host') ?? []).filter((host): host is string => typeof host === 'string' && host.length > 0)
     return c.json(await getServerGitHubCliState(c.req.raw.signal, hosts))
@@ -44,45 +42,29 @@ export function createSettingsRoutes() {
   })
   app.post('/fetch-interval', async (c) => {
     const body = await c.req.json().catch(() => null)
-    const sec = typeof body?.sec === 'number' ? body.sec : 0
-    const next = await setServerFetchIntervalSec(sec)
-    publishSettingsInvalidation(['settings-snapshot'])
-    return c.json({ ok: true, fetchIntervalSec: next })
+    return c.json(await applyServerFetchIntervalWrite(body))
   })
   app.post('/prefs', async (c) => {
     const body = await c.req.json().catch(() => null)
-    const patch = (body?.settings ?? {}) as Record<string, unknown>
-    const settings = await updateServerSettingsPrefs(patch)
-    publishSettingsInvalidation(settingsInvalidationScopesForPrefsPatch(patch))
-    return c.json({ ok: true, settings })
+    return c.json(
+      await applyServerSettingsPrefsWrite(body, {
+        acceptLanguage: c.req.header('accept-language'),
+        signal: c.req.raw.signal,
+      }),
+    )
   })
   app.post('/global-shortcut-state', async (c) => {
     const body = await c.req.json().catch(() => null)
-    const registered = setServerGlobalShortcutRegistered(body?.registered === true)
-    publishSettingsInvalidation(['settings-snapshot'])
-    return c.json({ ok: true, registered })
+    return c.json(applyServerGlobalShortcutRegistrationWrite(body, settingsState))
   })
   app.post('/session', async (c) => {
     const body = await c.req.json().catch(() => null)
-    const session = await setServerSessionState(body?.session)
-    publishSettingsInvalidation(['session'])
-    return c.json({ ok: true, session })
+    return c.json(await applyServerSessionWrite(body))
   })
   app.post('/recent-repos/add', async (c) => {
     const body = await c.req.json().catch(() => null)
-    const requestedRepo = toSafeSessionRepoEntry(body?.repo)
-    const recentRepos = await addServerRecentRepo(body?.repo)
-    const addedRepo =
-      requestedRepo && recentRepos.length > 0 && repoSessionEntryId(recentRepos[0]) === repoSessionEntryId(requestedRepo)
-        ? recentRepos[0]
-        : null
-    publishSettingsInvalidation(['settings-snapshot'])
-    return c.json({ ok: true, recentRepos, addedRepo })
+    return c.json(await applyServerRecentRepoAddWrite(body))
   })
-  app.post('/recent-repos/clear', async (c) => {
-    await clearServerRecentRepos()
-    publishSettingsInvalidation(['settings-snapshot'])
-    return c.json({ ok: true })
-  })
+  app.post('/recent-repos/clear', async (c) => c.json(await applyServerRecentRepoClearWrite()))
   return app
 }

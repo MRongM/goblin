@@ -1,3 +1,4 @@
+import path from 'node:path'
 import { execa, ExecaError } from 'execa'
 import { FIELD_SEP } from '#/system/git/parsers.ts'
 import type { RemoteRepoTarget } from '#/shared/remote-repo.ts'
@@ -22,12 +23,13 @@ export type RemoteCommandKind =
   | { type: 'gitStatus'; path: string }
   | { type: 'gitLog'; path: string; branch: string; count?: number; skip?: number }
   | { type: 'gitFetchAll'; path: string }
+  | { type: 'gitFetchRemote'; path: string; remote: string }
   | { type: 'gitStatusAll'; path: string }
   | { type: 'gitDiffNoIndex'; path: string; filePath: string }
   | { type: 'gitCheckout'; path: string; branch: string }
   | { type: 'gitPullCurrent'; path: string }
   | { type: 'gitFetchBranch'; path: string; remote: string; remoteBranch: string; branch: string }
-  | { type: 'gitPush'; path: string; branch: string }
+  | { type: 'gitPush'; path: string; remote: string; branch: string; targetBranch: string; setUpstream: boolean }
   | { type: 'gitRemoteBranches'; path: string }
   | { type: 'gitWorktreeAdd'; path: string; input: CreateWorktreeInput }
   | { type: 'gitWorktreeRemove'; path: string; worktreePath: string }
@@ -186,6 +188,8 @@ function scriptForCommand(command: RemoteCommandKind): string {
       return `git -C ${shellQuote(command.path)} switch -- ${shellQuote(command.branch)}`
     case 'gitFetchAll':
       return `git -C ${shellQuote(command.path)} fetch --all --prune`
+    case 'gitFetchRemote':
+      return `git -C ${shellQuote(command.path)} fetch --prune -- ${shellQuote(command.remote)}`
     case 'gitPullCurrent':
       return `git -C ${shellQuote(command.path)} pull --ff-only`
     case 'gitFetchBranch':
@@ -193,7 +197,15 @@ function scriptForCommand(command: RemoteCommandKind): string {
         `${command.remoteBranch}:${command.branch}`,
       )}`
     case 'gitPush':
-      return `git -C ${shellQuote(command.path)} push -u origin ${shellQuote(command.branch)}`
+      return [
+        `git -C ${shellQuote(command.path)} push`,
+        command.setUpstream ? '-u' : '',
+        '--',
+        shellQuote(command.remote),
+        shellQuote(`${command.branch}:${command.targetBranch}`),
+      ]
+        .filter(Boolean)
+        .join(' ')
     case 'gitRemoteBranches':
       return `git -C ${shellQuote(command.path)} for-each-ref ${shellQuote('--format=%(refname:short)')} refs/remotes/`
     case 'gitWorktreeAdd':
@@ -220,6 +232,7 @@ function scriptForCommand(command: RemoteCommandKind): string {
 }
 
 function shellQuote(value: string): string {
+  if (value.includes('\0')) throw new Error(`Refusing to quote NUL-containing string for remote command: ${path.basename(value)}`)
   return `'${value.replace(/'/g, `'\\''`)}'`
 }
 

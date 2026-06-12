@@ -1,18 +1,21 @@
-import { type ReactNode, useState } from 'react'
+import { type ReactNode, type Ref, useCallback, useMemo, useRef, useState } from 'react'
 import { ChevronDown, Download, FolderOpen, Plus, Server } from 'lucide-react'
 import {
   DndContext,
   type DragEndEvent,
-  type Modifier,
+  KeyboardSensor,
   PointerSensor,
   closestCenter,
   useSensor,
   useSensors,
 } from '@dnd-kit/core'
-import { SortableContext, horizontalListSortingStrategy } from '@dnd-kit/sortable'
+import { SortableContext, horizontalListSortingStrategy, sortableKeyboardCoordinates } from '@dnd-kit/sortable'
 import { Button } from '#/web/components/ui/button.tsx'
 import { ScrollArea } from '#/web/components/ui/scroll-area.tsx'
 import { Tip } from '#/web/components/Tip.tsx'
+import { cn } from '#/web/lib/cn.ts'
+import { ToolbarTabStrip, ToolbarTabStripBody } from '#/web/components/tab-strip/ToolbarTabStrip.tsx'
+import { createRestrictToTabStripBounds } from '#/web/components/tab-strip/drag-bounds.ts'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -24,27 +27,8 @@ import {
 import { useIsSmallScreen } from '#/web/hooks/useIsSmallScreen.ts'
 import { RepoTab } from '#/web/components/repo-tabs/RepoTab.tsx'
 import { RepoTabTooltipLayer } from '#/web/components/repo-tabs/RepoTabTooltipLayer.tsx'
+import { useFocusRegistry, type FocusRegistry } from '#/web/components/tab-strip/useFocusRegistry.ts'
 import type { RepoTabStripLabels, RepoTabSummary } from '#/web/components/repo-tabs/types.ts'
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(Math.max(value, min), max)
-}
-
-const restrictToVisibleTabStrip: Modifier = ({
-  activeNodeRect,
-  containerNodeRect,
-  draggingNodeRect,
-  scrollableAncestorRects,
-  transform,
-  windowRect,
-}) => {
-  const horizontalTransform = { ...transform, y: 0 }
-  const draggableRect = draggingNodeRect ?? activeNodeRect
-  const bounds = scrollableAncestorRects[0] ?? containerNodeRect ?? windowRect
-  if (!draggableRect || !bounds) return horizontalTransform
-  const minX = bounds.left - draggableRect.left
-  const maxX = bounds.right - draggableRect.right
-  return { ...horizontalTransform, x: clamp(horizontalTransform.x, minX, maxX) }
-}
 
 function shouldShowInactiveSeparator({
   leftId,
@@ -60,6 +44,26 @@ function shouldShowInactiveSeparator({
   return !!rightId && leftId !== activeId && rightId !== activeId && leftId !== hoveredId && rightId !== hoveredId
 }
 
+function navigatedRepoTabId(
+  repos: RepoTabSummary[],
+  currentId: string,
+  direction: 'prev' | 'next' | 'first' | 'last',
+): string | null {
+  if (repos.length === 0) return null
+  const current = repos.findIndex((repo) => repo.id === currentId)
+  const index =
+    direction === 'first'
+      ? 0
+      : direction === 'last'
+        ? repos.length - 1
+        : current === -1
+          ? 0
+          : direction === 'next'
+            ? (current + 1) % repos.length
+            : (current - 1 + repos.length) % repos.length
+  return repos[index]?.id ?? null
+}
+
 interface RepoTabStripProps {
   repos: RepoTabSummary[]
   activeId: string | null
@@ -72,15 +76,29 @@ interface RepoTabStripProps {
   onClone: () => void
 }
 
+interface RepoTabsContentProps {
+  repos: RepoTabSummary[]
+  activeId: string | null
+  hoveredId: string | null
+  labels: RepoTabStripLabels
+  focusRegistry: FocusRegistry<string, HTMLButtonElement>
+  onHoverChange: (id: string | null) => void
+  onActivate: (id: string) => void
+  onClose: (id: string) => void
+  onKeyboardNavigate: (id: string, direction: 'prev' | 'next' | 'first' | 'last') => void
+}
+
 function RepoTabEdgeAction({
   children,
   showSeparator = false,
+  actionRef,
 }: {
   children: ReactNode
   showSeparator?: boolean
+  actionRef?: Ref<HTMLDivElement>
 }) {
   return (
-    <div className="relative flex h-8 shrink-0 items-center pl-1">
+    <div ref={actionRef} className="relative flex h-8 shrink-0 items-center pl-1">
       {showSeparator && (
         <span
           aria-hidden="true"
@@ -89,6 +107,139 @@ function RepoTabEdgeAction({
       )}
       {children}
     </div>
+  )
+}
+
+function OpenRepoMenuItems({
+  labels,
+  onOpenLocal,
+  onOpenRemote,
+  onClone,
+}: Pick<RepoTabStripProps, 'labels' | 'onOpenLocal' | 'onOpenRemote' | 'onClone'>) {
+  return (
+    <>
+      <DropdownMenuItem className="whitespace-nowrap" onSelect={onOpenLocal}>
+        <FolderOpen />
+        {labels.openLocal}
+        {labels.openLocalShortcut && <DropdownMenuShortcut>{labels.openLocalShortcut}</DropdownMenuShortcut>}
+      </DropdownMenuItem>
+      <DropdownMenuItem className="whitespace-nowrap" onSelect={onOpenRemote}>
+        <Server />
+        {labels.openRemote}
+        {labels.openRemoteShortcut && <DropdownMenuShortcut>{labels.openRemoteShortcut}</DropdownMenuShortcut>}
+      </DropdownMenuItem>
+      <DropdownMenuItem className="whitespace-nowrap" onSelect={onClone}>
+        <Download />
+        {labels.clone}
+        {labels.cloneShortcut && <DropdownMenuShortcut>{labels.cloneShortcut}</DropdownMenuShortcut>}
+      </DropdownMenuItem>
+    </>
+  )
+}
+
+function CompactRepoTabs({
+  repos,
+  activeId,
+  hoveredId,
+  labels,
+  onHoverChange,
+  onActivate,
+  onClose,
+  onKeyboardNavigate,
+  focusRegistry,
+  moreMenu,
+}: RepoTabsContentProps & { moreMenu: ReactNode }) {
+  const lastVisibleRepo = repos[repos.length - 1]
+  const showMoreSeparator = !!lastVisibleRepo && lastVisibleRepo.id !== activeId && lastVisibleRepo.id !== hoveredId
+
+  return (
+    <ToolbarTabStripBody>
+      <RepoTabTooltipLayer repos={repos} role="tablist">
+        {repos.map((repo, index) => (
+          <RepoTab
+            key={repo.id}
+            repo={repo}
+            isActive={repo.id === activeId}
+            index={index}
+            total={repos.length}
+            showSeparator={false}
+            focusRegistry={focusRegistry}
+            onHoverChange={onHoverChange}
+            onActivate={onActivate}
+            onClose={onClose}
+            onKeyboardNavigate={onKeyboardNavigate}
+            closeLabel={labels.closeWithName}
+            unavailableLabel={labels.unavailable}
+          />
+        ))}
+      </RepoTabTooltipLayer>
+      <RepoTabEdgeAction showSeparator={showMoreSeparator}>{moreMenu}</RepoTabEdgeAction>
+    </ToolbarTabStripBody>
+  )
+}
+
+function ScrollableRepoTabs({
+  repos,
+  activeId,
+  hoveredId,
+  labels,
+  onHoverChange,
+  onActivate,
+  onClose,
+  onKeyboardNavigate,
+  focusRegistry,
+  sensors,
+  onDragEnd,
+  restrictToVisibleTabStrip,
+  openMenu,
+}: RepoTabsContentProps & {
+  sensors: ReturnType<typeof useSensors>
+  onDragEnd: (event: DragEndEvent) => void
+  restrictToVisibleTabStrip: ReturnType<typeof createRestrictToTabStripBounds>
+  openMenu: ReactNode
+}) {
+  const ids = repos.map((repo) => repo.id)
+
+  return (
+    <ToolbarTabStripBody scroll>
+      <RepoTabTooltipLayer repos={repos} role="tablist">
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          modifiers={[restrictToVisibleTabStrip]}
+          onDragEnd={onDragEnd}
+        >
+          <SortableContext items={ids} strategy={horizontalListSortingStrategy}>
+            {repos.map((repo, index) => {
+              const next = repos[index + 1]
+              return (
+                <RepoTab
+                  key={repo.id}
+                  repo={repo}
+                  isActive={repo.id === activeId}
+                  index={index}
+                  total={repos.length}
+                  focusRegistry={focusRegistry}
+                  showSeparator={shouldShowInactiveSeparator({
+                    leftId: repo.id,
+                    rightId: next?.id,
+                    activeId,
+                    hoveredId,
+                  })}
+                  onHoverChange={onHoverChange}
+                  onActivate={onActivate}
+                  onClose={onClose}
+                  onKeyboardNavigate={onKeyboardNavigate}
+                  closeLabel={labels.closeWithName}
+                  unavailableLabel={labels.unavailable}
+                />
+              )
+            })}
+          </SortableContext>
+        </DndContext>
+      </RepoTabTooltipLayer>
+      {openMenu}
+    </ToolbarTabStripBody>
   )
 }
 
@@ -105,7 +256,29 @@ export function RepoTabStrip({
 }: RepoTabStripProps) {
   const isSmallScreen = useIsSmallScreen()
   const [hoveredId, setHoveredId] = useState<string | null>(null)
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }))
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  )
+  const focusRegistry = useFocusRegistry<string, HTMLButtonElement>()
+  const openMenuRef = useRef<HTMLDivElement>(null)
+  const restrictToVisibleTabStrip = useMemo(
+    () => createRestrictToTabStripBounds({ rightBoundaryRef: openMenuRef }),
+    [],
+  )
+
+  const handleClose = useCallback(
+    (id: string) => {
+      const isActive = id === activeId
+      const idx = repos.findIndex((r) => r.id === id)
+      const nextId = repos[idx + 1]?.id ?? repos[idx - 1]?.id ?? null
+      onClose(id)
+      if (isActive && nextId) {
+        focusRegistry.focus(nextId)
+      }
+    },
+    [repos, activeId, onClose, focusRegistry],
+  )
 
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event
@@ -113,34 +286,11 @@ export function RepoTabStrip({
     onReorder(String(active.id), String(over.id))
   }
 
-  const focusRepoTab = (id: string) => {
-    window.requestAnimationFrame(() => {
-      for (const el of document.querySelectorAll<HTMLElement>('[data-repo-tab-id]')) {
-        if (el.dataset.repoTabId === id) {
-          el.focus()
-          break
-        }
-      }
-    })
-  }
-
   const handleKeyboardNavigate = (id: string, direction: 'prev' | 'next' | 'first' | 'last') => {
-    if (repos.length === 0) return
-    const current = repos.findIndex((repo) => repo.id === id)
-    const index =
-      direction === 'first'
-        ? 0
-        : direction === 'last'
-          ? repos.length - 1
-          : current === -1
-            ? 0
-            : direction === 'next'
-              ? (current + 1) % repos.length
-              : (current - 1 + repos.length) % repos.length
-    const next = repos[index]
-    if (!next) return
-    onActivate(next.id)
-    focusRepoTab(next.id)
+    const nextId = navigatedRepoTabId(repos, id, direction)
+    if (!nextId) return
+    onActivate(nextId)
+    focusRegistry.focus(nextId)
   }
 
   const ids = repos.map((repo) => repo.id)
@@ -149,13 +299,10 @@ export function RepoTabStrip({
 
   const activeRepo = repos.find((r) => r.id === activeId)
   const visibleRepos = isSmallScreen ? (activeRepo ? [activeRepo] : repos.slice(0, 1)) : repos
-  const visibleIds = new Set(visibleRepos.map((r) => r.id))
-  const overflowRepos = isSmallScreen ? repos.filter((r) => !visibleIds.has(r.id)) : []
-  const lastVisibleRepo = visibleRepos[visibleRepos.length - 1]
-  const showMoreSeparator = !!lastVisibleRepo && lastVisibleRepo.id !== activeId && lastVisibleRepo.id !== hoveredId
+  const dropdownRepos = isSmallScreen ? repos : []
 
   const openMenu = (
-    <RepoTabEdgeAction showSeparator={showOpenSeparator}>
+    <RepoTabEdgeAction actionRef={openMenuRef} showSeparator={showOpenSeparator}>
       <DropdownMenu>
         <Tip label={labels.open}>
           <DropdownMenuTrigger asChild>
@@ -165,21 +312,7 @@ export function RepoTabStrip({
           </DropdownMenuTrigger>
         </Tip>
         <DropdownMenuContent side="bottom" align="start" className="w-max">
-          <DropdownMenuItem className="whitespace-nowrap" onSelect={onOpenLocal}>
-            <FolderOpen />
-            {labels.openLocal}
-            {labels.openLocalShortcut && <DropdownMenuShortcut>{labels.openLocalShortcut}</DropdownMenuShortcut>}
-          </DropdownMenuItem>
-          <DropdownMenuItem className="whitespace-nowrap" onSelect={onOpenRemote}>
-            <Server />
-            {labels.openRemote}
-            {labels.openRemoteShortcut && <DropdownMenuShortcut>{labels.openRemoteShortcut}</DropdownMenuShortcut>}
-          </DropdownMenuItem>
-          <DropdownMenuItem className="whitespace-nowrap" onSelect={onClone}>
-            <Download />
-            {labels.clone}
-            {labels.cloneShortcut && <DropdownMenuShortcut>{labels.cloneShortcut}</DropdownMenuShortcut>}
-          </DropdownMenuItem>
+          <OpenRepoMenuItems labels={labels} onOpenLocal={onOpenLocal} onOpenRemote={onOpenRemote} onClone={onClone} />
         </DropdownMenuContent>
       </DropdownMenu>
     </RepoTabEdgeAction>
@@ -187,109 +320,70 @@ export function RepoTabStrip({
 
   return (
     <nav className="flex h-full min-w-0 flex-1 items-center" aria-label={labels.repositories}>
-      <ScrollArea orientation="horizontal" className="h-full min-w-0 flex-1" viewportClassName="[&>div]:h-full">
-        <div className="flex h-full w-max min-w-full items-center gap-1">
-          {repos.length === 0 ? (
-            openMenu
-          ) : (
-            <>
-              {isSmallScreen ? (
-                <div className="flex h-full items-center gap-1">
-                  <RepoTabTooltipLayer repos={visibleRepos} className="flex h-full items-center gap-1" role="tablist">
-                    {visibleRepos.map((repo) => (
-                      <RepoTab
-                        key={repo.id}
-                        repo={repo}
-                        isActive={repo.id === activeId}
-                        showSeparator={false}
-                        onHoverChange={setHoveredId}
-                        onActivate={onActivate}
-                        onClose={onClose}
-                        onKeyboardNavigate={handleKeyboardNavigate}
-                        closeLabel={labels.close}
-                        unavailableLabel={labels.unavailable}
-                      />
-                    ))}
-                  </RepoTabTooltipLayer>
-                  <RepoTabEdgeAction showSeparator={showMoreSeparator}>
-                    <DropdownMenu>
-                      <Tip label={labels.more}>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon" className="size-8 shrink-0" aria-label={labels.more}>
-                            <ChevronDown />
-                          </Button>
-                        </DropdownMenuTrigger>
-                      </Tip>
-                      <DropdownMenuContent side="bottom" align="start" className="w-max">
-                        {overflowRepos.map((repo) => (
-                          <DropdownMenuItem
-                            key={repo.id}
-                            className="whitespace-nowrap"
-                            onSelect={() => onActivate(repo.id)}
-                          >
-                            <span className="truncate">{repo.name}</span>
-                          </DropdownMenuItem>
-                        ))}
-                        {overflowRepos.length > 0 && <DropdownMenuSeparator />}
-                        <DropdownMenuItem className="whitespace-nowrap" onSelect={onOpenLocal}>
-                          <FolderOpen />
-                          {labels.openLocal}
-                          {labels.openLocalShortcut && <DropdownMenuShortcut>{labels.openLocalShortcut}</DropdownMenuShortcut>}
+      {repos.length === 0 ? (
+        openMenu
+      ) : (
+        <ToolbarTabStrip
+          compact={isSmallScreen}
+          compactContent={
+            <CompactRepoTabs
+              repos={visibleRepos}
+              activeId={activeId}
+              hoveredId={hoveredId}
+              labels={labels}
+              focusRegistry={focusRegistry}
+              onHoverChange={setHoveredId}
+              onActivate={onActivate}
+              onClose={handleClose}
+              onKeyboardNavigate={handleKeyboardNavigate}
+              moreMenu={
+                <DropdownMenu>
+                  <Tip label={labels.more}>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="ghost" size="icon" className="size-8 shrink-0" aria-label={labels.more}>
+                        <ChevronDown />
+                      </Button>
+                    </DropdownMenuTrigger>
+                  </Tip>
+                  <DropdownMenuContent side="bottom" align="start" className="flex w-max flex-col !overflow-hidden">
+                    <ScrollArea className="max-h-[200px]" scrollbarMode="compact">
+                      {dropdownRepos.map((repo) => (
+                        <DropdownMenuItem
+                          key={repo.id}
+                          className={cn('whitespace-nowrap', repo.id === activeId && 'bg-selected text-selected-foreground')}
+                          onSelect={() => onActivate(repo.id)}
+                          aria-current={repo.id === activeId ? 'true' : undefined}
+                        >
+                          <span className="truncate">{repo.name}</span>
                         </DropdownMenuItem>
-                        <DropdownMenuItem className="whitespace-nowrap" onSelect={onOpenRemote}>
-                          <Server />
-                          {labels.openRemote}
-                          {labels.openRemoteShortcut && <DropdownMenuShortcut>{labels.openRemoteShortcut}</DropdownMenuShortcut>}
-                        </DropdownMenuItem>
-                        <DropdownMenuItem className="whitespace-nowrap" onSelect={onClone}>
-                          <Download />
-                          {labels.clone}
-                          {labels.cloneShortcut && <DropdownMenuShortcut>{labels.cloneShortcut}</DropdownMenuShortcut>}
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </RepoTabEdgeAction>
-                </div>
-              ) : (
-                <RepoTabTooltipLayer repos={repos} className="flex h-full items-center gap-1" role="tablist">
-                  <DndContext
-                    sensors={sensors}
-                    collisionDetection={closestCenter}
-                    modifiers={[restrictToVisibleTabStrip]}
-                    onDragEnd={handleDragEnd}
-                  >
-                    <SortableContext items={ids} strategy={horizontalListSortingStrategy}>
-                      {repos.map((repo, index) => {
-                        const next = repos[index + 1]
-                        return (
-                          <RepoTab
-                            key={repo.id}
-                            repo={repo}
-                            isActive={repo.id === activeId}
-                            showSeparator={shouldShowInactiveSeparator({
-                              leftId: repo.id,
-                              rightId: next?.id,
-                              activeId,
-                              hoveredId,
-                            })}
-                            onHoverChange={setHoveredId}
-                            onActivate={onActivate}
-                            onClose={onClose}
-                            onKeyboardNavigate={handleKeyboardNavigate}
-                            closeLabel={labels.close}
-                            unavailableLabel={labels.unavailable}
-                          />
-                        )
-                      })}
-                    </SortableContext>
-                  </DndContext>
-                </RepoTabTooltipLayer>
-              )}
-              {!isSmallScreen && openMenu}
-            </>
-          )}
-        </div>
-      </ScrollArea>
+                      ))}
+                    </ScrollArea>
+                    {dropdownRepos.length > 0 && <DropdownMenuSeparator />}
+                    <OpenRepoMenuItems labels={labels} onOpenLocal={onOpenLocal} onOpenRemote={onOpenRemote} onClone={onClone} />
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              }
+            />
+          }
+          scrollContent={
+            <ScrollableRepoTabs
+              repos={repos}
+              activeId={activeId}
+              hoveredId={hoveredId}
+              labels={labels}
+              focusRegistry={focusRegistry}
+              onHoverChange={setHoveredId}
+              onActivate={onActivate}
+              onClose={handleClose}
+              onKeyboardNavigate={handleKeyboardNavigate}
+              sensors={sensors}
+              onDragEnd={handleDragEnd}
+              restrictToVisibleTabStrip={restrictToVisibleTabStrip}
+              openMenu={openMenu}
+            />
+          }
+        />
+      )}
     </nav>
   )
 }

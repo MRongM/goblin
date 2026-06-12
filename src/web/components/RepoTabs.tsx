@@ -15,7 +15,8 @@ import { repoTabSummariesEqual } from '#/web/components/repo-tabs/summary-equali
 import { useMainWindowNavigation } from '#/web/main-window-navigation.tsx'
 import type { RepoTabSummary } from '#/web/components/repo-tabs/types.ts'
 import { openRepoFromDialog } from '#/web/lib/open-repo-dialog.ts'
-import { useRuntimeShortcutSettings } from '#/web/runtime-settings-hooks.ts'
+import { useRuntimeShortcutSettings } from '#/web/runtime-settings-shortcuts.ts'
+import { repoTabStoreActionsEqual, repoTabStoreActionsFromStore } from '#/web/stores/repos/selector-actions.ts'
 
 interface RepoTabsProps {
   currentRepoId: string | null
@@ -54,8 +55,11 @@ export function RepoTabs({ currentRepoId, onOpenRepoPathDialog, onOpenRemote, on
     repoTabSummariesEqual,
   )
   const navigation = useMainWindowNavigation()
-  const ensureWorkspaceOpen = useReposStore((s) => s.ensureWorkspaceOpen)
-  const reorderRepos = useReposStore((s) => s.reorderRepos)
+  const { ensureWorkspaceOpen, reorderRepos } = useStoreWithEqualityFn(
+    useReposStore,
+    repoTabStoreActionsFromStore,
+    repoTabStoreActionsEqual,
+  )
 
   async function handleOpenLocal() {
     await openRepoFromDialog({
@@ -72,7 +76,7 @@ export function RepoTabs({ currentRepoId, onOpenRepoPathDialog, onOpenRemote, on
       activeId={currentRepoId}
       labels={{
         repositories: t('repo-tabs.repos'),
-        close: t('repo-tabs.close'),
+        closeWithName: (name) => t('repo-tabs.close-named', { name }),
         more: t('repo-tabs.more'),
         dragToReorder: t('repo-tabs.drag-to-reorder'),
         open: t('topbar.open'),

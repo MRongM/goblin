@@ -2,36 +2,12 @@ import { LRUCache } from 'lru-cache'
 import * as v from 'valibot'
 import type { ReposSet } from '#/web/stores/repos/types.ts'
 import { selectedBranchForBranchSet } from '#/web/stores/repos/branch-view-mode.ts'
+import type { RestorableRepoSnapshot, RepoState } from '#/web/stores/repos/types.ts'
 import { finishResourceSuccess } from '#/web/stores/repos/resources.ts'
-import type { CachedRepoState, RepoState } from '#/web/stores/repos/types.ts'
-import { stripBranchWorktreeMetadata, worktreeStatesFromBranches } from '#/web/stores/repos/worktree-state.ts'
+import { stripBranchWorktreeMetadata } from '#/web/stores/repos/worktree-state.ts'
 const MAX_CACHE_AGE_MS = 14 * 24 * 60 * 60 * 1000
 const MAX_REPOS = 50
 const FiniteNumber = v.pipe(v.number(), v.finite())
-
-const PullRequestSchema = v.object({
-  number: FiniteNumber,
-  title: v.string(),
-  url: v.string(),
-  state: v.picklist(['open', 'merged', 'closed']),
-  isDraft: v.optional(v.boolean()),
-  createdAt: v.optional(v.string()),
-  author: v.optional(v.string()),
-  baseRefName: v.optional(v.string()),
-  headRefName: v.optional(v.string()),
-  headRepositoryOwner: v.optional(v.string()),
-  isCrossRepository: v.optional(v.boolean()),
-  checks: v.optional(
-    v.object({
-      total: FiniteNumber,
-      passing: FiniteNumber,
-      failing: FiniteNumber,
-      pending: FiniteNumber,
-    }),
-  ),
-  reviewDecision: v.optional(v.nullable(v.picklist(['APPROVED', 'CHANGES_REQUESTED', 'REVIEW_REQUIRED']))),
-  mergeable: v.optional(v.picklist(['MERGEABLE', 'CONFLICTING', 'UNKNOWN'])),
-})
 
 const BranchSchema = v.object({
   name: v.string(),
@@ -51,7 +27,6 @@ const BranchSchema = v.object({
     }),
   ),
   mergedToDefault: v.optional(v.boolean()),
-  pullRequest: v.optional(PullRequestSchema),
 })
 
 const StatusEntrySchema = v.object({
@@ -79,109 +54,113 @@ const WorktreeStateSchema = v.object({
   isLocked: v.optional(v.boolean()),
 })
 
-const CachedRepoSchema = v.object({
+const RestorableRepoSnapshotSchema = v.object({
   savedAt: FiniteNumber,
   name: v.string(),
   data: v.object({
     branches: v.array(BranchSchema),
     currentBranch: v.string(),
-    status: v.array(WorktreeStatusSchema),
-    statusLoaded: v.boolean(),
-    worktreesByPath: v.optional(v.record(v.string(), WorktreeStateSchema)),
   }),
   ui: v.object({
     selectedBranch: v.nullable(v.string()),
     branchViewMode: v.picklist(['all', 'worktrees', 'no-worktree']),
-    detailTab: v.picklist(['status', 'terminal']),
+    detailTab: v.picklist(['status', 'changes', 'terminal']),
     worktreePathOrder: v.optional(v.array(v.string()), []),
   }),
 })
 
-export function hydrateCachedRepo(repo: RepoState, cached: CachedRepoState | undefined): RepoState {
-  if (!cached || isExpired(cached.savedAt)) return repo
+function normalizeCachedDetailTab(tab: string): 'status' | 'changes' | 'terminal' {
+  return tab === 'terminal' || tab === 'changes' ? tab : 'status'
+}
+
+function cachedBranches(branches: RepoState['data']['branches']): RestorableRepoSnapshot['data']['branches'] {
+  return stripBranchWorktreeMetadata(branches).map(({ pullRequest: _pullRequest, ...branch }) => branch)
+}
+
+function restoreProjectionFromSnapshot(repo: RepoState, snapshot: RestorableRepoSnapshot): RepoState {
   const selectedBranch = selectedBranchForBranchSet({
-    branches: cached.data.branches,
-    currentBranch: cached.data.currentBranch,
-    selectedBranch: cached.ui.selectedBranch,
-    viewMode: cached.ui.branchViewMode,
+    branches: snapshot.data.branches,
+    currentBranch: snapshot.data.currentBranch,
+    selectedBranch: snapshot.ui.selectedBranch,
+    viewMode: snapshot.ui.branchViewMode,
   })
   const resources = {
     ...repo.resources,
     snapshot: { ...repo.resources.snapshot },
-    status: { ...repo.resources.status },
   }
-  if (cached.data.branches.length > 0) finishResourceSuccess(resources.snapshot, cached.savedAt)
-  if (cached.data.statusLoaded) finishResourceSuccess(resources.status, cached.savedAt)
-  const branches = stripBranchWorktreeMetadata(cached.data.branches)
+  if (snapshot.data.branches.length > 0) finishResourceSuccess(resources.snapshot, snapshot.savedAt)
+  const branches = cachedBranches(snapshot.data.branches)
   return {
     ...repo,
-    name: cached.name || repo.name,
+    name: snapshot.name || repo.name,
     data: {
       ...repo.data,
       branches,
-      currentBranch: cached.data.currentBranch,
-      status: cached.data.status,
-      statusLoaded: cached.data.statusLoaded,
-      worktreesByPath: cached.data.worktreesByPath,
+      currentBranch: snapshot.data.currentBranch,
     },
     resources,
     ui: {
       ...repo.ui,
       selectedBranch,
-      branchViewMode: cached.ui.branchViewMode,
-      detailTab: cached.ui.detailTab === 'terminal' ? 'terminal' : 'status',
-      worktreePathOrder: cached.ui.worktreePathOrder,
+      branchViewMode: snapshot.ui.branchViewMode,
+      detailTab: normalizeCachedDetailTab(snapshot.ui.detailTab),
+      worktreePathOrder: snapshot.ui.worktreePathOrder,
     },
-    cache: {
+    projection: {
       source: 'cache',
-      savedAt: cached.savedAt,
+      savedAt: snapshot.savedAt,
     },
   }
 }
 
-export function persistRepoCache(set: ReposSet, repo: RepoState | undefined, token: number): void {
+export function restoreRepoProjectionFromSnapshot(
+  repo: RepoState,
+  snapshot: RestorableRepoSnapshot | undefined,
+): RepoState {
+  if (!snapshot || isExpired(snapshot.savedAt)) return repo
+  return restoreProjectionFromSnapshot(repo, snapshot)
+}
+
+export function persistRestorableRepoSnapshot(set: ReposSet, repo: RepoState | undefined, token: number): void {
   if (!repo) return
   if (repo.instanceToken !== token) return
-  const entry = repoCacheEntry(repo)
+  const entry = restorableRepoSnapshotFromRepo(repo)
   if (!entry) return
   set((s) => {
     if (s.repos[repo.id]?.instanceToken !== token) return s
-    const repoCache = trimRepoCache({ ...s.repoCache, [repo.id]: entry })
-    return { repoCache }
+    const restorableRepoCache = trimRepoCache({ ...s.restorableRepoCache, [repo.id]: entry })
+    return { restorableRepoCache }
   })
 }
 
-export function normalizeRepoCache(value: unknown): Record<string, CachedRepoState> {
+export function normalizeRestorableRepoCache(value: unknown): Record<string, RestorableRepoSnapshot> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
   const entries = Object.entries(value as Record<string, unknown>)
-    .map(([id, raw]) => [id, normalizeRepoCacheEntry(raw)] as const)
-    .filter((entry): entry is readonly [string, CachedRepoState] => entry[1] !== null && !isExpired(entry[1].savedAt))
+    .map(([id, raw]) => [id, normalizeRestorableRepoSnapshotEntry(raw)] as const)
+    .filter((entry): entry is readonly [string, RestorableRepoSnapshot] => entry[1] !== null && !isExpired(entry[1].savedAt))
   return trimRepoCache(Object.fromEntries(entries))
 }
 
-function repoCacheEntry(repo: RepoState): CachedRepoState | null {
-  if (repo.data.branches.length === 0 && !repo.data.statusLoaded) return null
+function restorableRepoSnapshotFromRepo(repo: RepoState): RestorableRepoSnapshot | null {
+  if (repo.data.branches.length === 0) return null
   return {
     savedAt: Date.now(),
     name: repo.name,
     data: {
-      branches: stripBranchWorktreeMetadata(repo.data.branches),
+      branches: cachedBranches(repo.data.branches),
       currentBranch: repo.data.currentBranch,
-      status: repo.data.status,
-      statusLoaded: repo.data.statusLoaded,
-      worktreesByPath: worktreeStatesFromBranches(repo.data.branches, repo.data.worktreesByPath, repo.data.status),
     },
     ui: {
       selectedBranch: repo.ui.selectedBranch,
       branchViewMode: repo.ui.branchViewMode,
-      detailTab: repo.ui.detailTab === 'terminal' ? 'terminal' : 'status',
+      detailTab: normalizeCachedDetailTab(repo.ui.detailTab),
       worktreePathOrder: repo.ui.worktreePathOrder,
     },
   }
 }
 
-function trimRepoCache(cache: Record<string, CachedRepoState>): Record<string, CachedRepoState> {
-  const lru = new LRUCache<string, CachedRepoState>({ max: MAX_REPOS })
+function trimRepoCache(cache: Record<string, RestorableRepoSnapshot>): Record<string, RestorableRepoSnapshot> {
+  const lru = new LRUCache<string, RestorableRepoSnapshot>({ max: MAX_REPOS })
   for (const [id, entry] of Object.entries(cache).sort(([, a], [, b]) => a.savedAt - b.savedAt)) {
     if (!isExpired(entry.savedAt)) lru.set(id, entry)
   }
@@ -192,26 +171,19 @@ function isExpired(savedAt: number): boolean {
   return Date.now() - savedAt > MAX_CACHE_AGE_MS
 }
 
-function normalizeRepoCacheEntry(value: unknown): CachedRepoState | null {
-  const parsed = v.safeParse(CachedRepoSchema, value)
+function normalizeRestorableRepoSnapshotEntry(value: unknown): RestorableRepoSnapshot | null {
+  const parsed = v.safeParse(RestorableRepoSnapshotSchema, value)
   if (!parsed.success) return null
-  const cached = parsed.output
-  const worktreesByPath = worktreeStatesFromBranches(
-    cached.data.branches,
-    cached.data.worktreesByPath ?? {},
-    cached.data.status,
-  )
+  const snapshot = parsed.output
   return {
-    ...cached,
+    ...snapshot,
     data: {
-      ...cached.data,
-      branches: stripBranchWorktreeMetadata(cached.data.branches),
-      worktreesByPath,
+      ...snapshot.data,
+      branches: cachedBranches(snapshot.data.branches),
     },
     ui: {
-      ...cached.ui,
-      detailTab: cached.ui.detailTab === 'terminal' ? 'terminal' : 'status',
-      worktreePathOrder: cached.ui.worktreePathOrder,
+      ...snapshot.ui,
+      detailTab: normalizeCachedDetailTab(snapshot.ui.detailTab),
     },
   }
 }

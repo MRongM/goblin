@@ -37,7 +37,7 @@ export function emptyRepo(id: string, name: string): RepoState {
       detailTab: 'status',
       worktreePathOrder: [],
     },
-    cache: {
+    projection: {
       source: 'fresh',
       savedAt: null,
     },

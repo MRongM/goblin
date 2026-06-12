@@ -114,7 +114,7 @@ function createRepo(input: {
       detailTab: 'status',
       worktreePathOrder: [],
     },
-    cache: { source: 'fresh', savedAt: null },
+    projection: { source: 'fresh', savedAt: null },
     remote: {
       remotes: [],
       remoteDetails: [],

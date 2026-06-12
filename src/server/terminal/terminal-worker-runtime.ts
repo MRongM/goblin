@@ -6,13 +6,13 @@ import type {
   TerminalWorkerRequest,
   TerminalWorkerSuccessMessage,
 } from '#/server/terminal/terminal-worker-protocol.ts'
-import type { TerminalService } from '#/server/terminal/terminal-service.ts'
+import type { TerminalFacade } from '#/server/terminal/terminal-facade.ts'
 import { serverLogger } from '#/server/logger.ts'
 
 const terminalWorkerRuntimeLogger = serverLogger.child({ module: 'terminal-worker-runtime' })
 
 export interface TerminalWorkerRuntimeOptions {
-  service: TerminalService
+  service: TerminalFacade
   emit(message: TerminalWorkerMessage): void
   exit(code: number): void
 }
@@ -33,6 +33,12 @@ export class TerminalWorkerRuntime {
     }
     if (message.type === 'socket-unregister') {
       this.unregisterProxySocket(message.socketId, message.clientId, message.attachmentId)
+      return
+    }
+    if (message.type === 'socket-message') {
+      const socket = this.sockets.get(message.socketId)
+      if (!socket) return
+      this.options.service.handleRealtimeMessage(message.clientId, message.attachmentId, socket, message.payload)
       return
     }
     if (message.type === 'shutdown') {
@@ -90,6 +96,8 @@ export class TerminalWorkerRuntime {
         return await this.options.service.prune(message.clientId, message.input)
       case 'session-snapshot':
         return await this.options.service.getSessionSnapshot(message.clientId, message.input)
+      case 'reorder':
+        return await this.options.service.reorder(message.clientId, message.input)
     }
   }
 

@@ -5,7 +5,8 @@ import { initTheme } from '#/main/theme.ts'
 import { flushWindowState } from '#/main/window-state.ts'
 import { buildAppMenu } from '#/main/menu.ts'
 import { initializeMenuRuntimeState } from '#/main/menu-state.ts'
-import { assertDictionaryParity, getLangPref, resolveLang, setCurrentLang } from '#/main/i18n/index.ts'
+import { syncRecentRepos } from '#/main/recent-repos.ts'
+import { assertDictionaryParity, resolveLang, setCurrentLang } from '#/main/i18n/index.ts'
 import { wireRpcIpc } from '#/main/rpc.ts'
 import { wireShellBridgeIpc } from '#/main/shell-bridge.ts'
 import { wireTerminalIpc } from '#/main/terminal.ts'
@@ -89,11 +90,10 @@ async function finalizeMainProcessExit(): Promise<void> {
 async function initializeMainProcess(): Promise<void> {
   await app.whenReady()
   await startEmbeddedServerForMainProcess()
-  await initTheme()
   const settingsSnapshot = await getSettingsSnapshot()
+  await initTheme({ theme: settingsSnapshot.theme, colorTheme: settingsSnapshot.colorTheme })
   await initializeRuntimeState(settingsSnapshot)
   wireMainProcessIpc()
-  buildAppMenu()
   await syncInitialGlobalShortcutState(settingsSnapshot)
 }
 
@@ -113,15 +113,15 @@ async function initializeRuntimeState(settingsSnapshot: SettingsSnapshot): Promi
   // `t()` and would otherwise render in the default ('en') for the
   // first frame.
   assertDictionaryParity(!app.isPackaged)
-  const langPref = await getLangPref()
   initializeMenuRuntimeState({
-    recentRepos: settingsSnapshot.recentRepos,
     shortcutsDisabled: settingsSnapshot.shortcutsDisabled,
     swapCloseShortcuts: settingsSnapshot.swapCloseShortcuts,
-    langPref,
+    langPref: settingsSnapshot.lang,
     workspaceLayout: settingsSnapshot.session.workspaceLayout,
   })
-  setCurrentLang(resolveLang(langPref))
+  setCurrentLang(resolveLang(settingsSnapshot.lang))
+  syncRecentRepos(settingsSnapshot.recentRepos)
+  buildAppMenu()
 }
 
 function wireMainProcessIpc(): void {

@@ -18,7 +18,11 @@ import {
   terminalSearchDecorationsForCurrentDocument,
   terminalThemeForCurrentDocument,
 } from '#/web/components/terminal/terminal-theme.ts'
-import { isMacNavigatorPlatform, terminalInputForMacOptionArrow } from '#/web/components/terminal/terminal-keyboard.ts'
+import {
+  SafariShiftKeyResolver,
+  isMacNavigatorPlatform,
+  terminalInputForMacOptionArrow,
+} from '#/web/components/terminal/terminal-keyboard.ts'
 const DEFAULT_PARKING_WIDTH = 800
 const DEFAULT_PARKING_HEIGHT = 400
 const DEFAULT_TERMINAL_COLS = 80
@@ -43,9 +47,9 @@ export class TerminalSessionView {
   private disposeFontObserver: (() => void) | null = null
   private fitFlushTimer: number | null = null
   private fontFitTimer: number | null = null
-  private lastWidth = DEFAULT_PARKING_WIDTH
-  private lastHeight = DEFAULT_PARKING_HEIGHT
+  private pinToBottomFrame: number | null = null
   private host: HTMLElement | null = null
+  private readonly safariShiftKeyResolver = new SafariShiftKeyResolver()
 
   constructor(handlers: {
     onInput: (data: string) => void
@@ -62,7 +66,6 @@ export class TerminalSessionView {
     this.frame.appendChild(this.xtermHost)
     this.parkingElement = document.createElement('div')
     this.parkingElement.className = 'goblin-terminal-parking__item'
-    this.updateParkingSize()
     this.handlers = handlers
   }
 
@@ -77,7 +80,6 @@ export class TerminalSessionView {
 
   attach(host: HTMLElement): void {
     this.host = host
-    this.rememberHostSize(host)
     host.replaceChildren(this.frame)
     if (this.term) {
       this.installResizeObserver()
@@ -93,8 +95,6 @@ export class TerminalSessionView {
     if (this.host !== host) return
     this.host = null
     this.blurIfFocused()
-    this.rememberHostSize(host)
-    this.updateParkingSize()
     this.disconnectResizeObserver()
     this.cancelFitFlush()
     if (!this.parkingElement.parentElement) parkingRoot.appendChild(this.parkingElement)
@@ -134,7 +134,6 @@ export class TerminalSessionView {
       macOptionIsMeta: true,
       rescaleOverlappingGlyphs: true,
       scrollOnUserInput: true,
-      smoothScrollDuration: 125,
       theme,
     })
     const fitAddon = new FitAddon()
@@ -169,6 +168,7 @@ export class TerminalSessionView {
     if (!this.term) return
     if (this.term.cols === cols && this.term.rows === rows) return
     this.term.resize(cols, rows)
+    this.pinToBottomSoon()
   }
 
   serialize(): string {
@@ -180,7 +180,7 @@ export class TerminalSessionView {
   }
 
   scrollToBottom(): void {
-    this.term?.scrollToBottom()
+    scrollTerminalToBottom(this.term)
   }
 
   scrollLines(amount: number): void {
@@ -211,6 +211,7 @@ export class TerminalSessionView {
   fitNow(): void {
     if (!this.term || !this.fitAddon || !hasMeasurableBox(this.xtermHost)) return
     this.fitAddon.fit()
+    this.pinToBottomSoon()
   }
 
   destroyTerminal(): void {
@@ -222,6 +223,8 @@ export class TerminalSessionView {
     this.disposeFontObserver?.()
     this.disposeFontObserver = null
     this.cancelFontFit()
+    this.cancelPinToBottom()
+    this.safariShiftKeyResolver.reset()
     this.fitAddon = null
     this.searchAddon = null
     this.serializeAddon = null
@@ -233,18 +236,28 @@ export class TerminalSessionView {
     if (!this.frame.contains(this.xtermHost)) this.frame.appendChild(this.xtermHost)
   }
 
-  private installKeyboardHandlers(term: XTermTerminal, onMacOptionInput: (input: string) => void): void {
+  private installKeyboardHandlers(term: XTermTerminal, onInput: (input: string) => void): void {
     const isMac = isMacNavigatorPlatform(globalThis.navigator?.platform ?? '')
+    const safariShiftKeyResolver = this.safariShiftKeyResolver
     term.attachCustomKeyEventHandler((event) => {
-      const input = terminalInputForMacOptionArrow(event, {
+      const optionInput = terminalInputForMacOptionArrow(event, {
         isMac,
         applicationCursorKeysMode: term.modes.applicationCursorKeysMode,
       })
-      if (!input) return true
-      event.preventDefault()
-      event.stopPropagation()
-      onMacOptionInput(input)
-      return false
+      if (optionInput) {
+        event.preventDefault()
+        event.stopPropagation()
+        onInput(optionInput)
+        return false
+      }
+      const safariShiftInput = safariShiftKeyResolver.inputForEvent(event)
+      if (safariShiftInput) {
+        event.preventDefault()
+        event.stopPropagation()
+        onInput(safariShiftInput)
+        return false
+      }
+      return true
     })
   }
 
@@ -364,9 +377,9 @@ export class TerminalSessionView {
 
   private fitForFontLoad(term: XTermTerminal): void {
     if (this.term !== term || !this.fitAddon || !hasMeasurableBox(this.xtermHost)) return
-    remeasureTerminal(term)
     this.fitAddon.fit()
     term.refresh(0, Math.max(0, term.rows - 1))
+    this.pinToBottomSoon()
   }
 
   private cancelFitFlush(): void {
@@ -375,16 +388,23 @@ export class TerminalSessionView {
     this.fitFlushTimer = null
   }
 
-  private rememberHostSize(host: HTMLElement): void {
-    const rect = host.getBoundingClientRect()
-    if (rect.width > 0) this.lastWidth = rect.width
-    if (rect.height > 0) this.lastHeight = rect.height
+  private pinToBottomSoon(): void {
+    if (!this.term) return
+    // Product policy: after any local terminal resize/fit pass, always snap
+    // back to the live tail instead of preserving scroll position.
+    this.cancelPinToBottom()
+    this.pinToBottomFrame = requestAnimationFrame(() => {
+      this.pinToBottomFrame = null
+      scrollTerminalToBottom(this.term)
+    })
   }
 
-  private updateParkingSize(): void {
-    this.parkingElement.style.width = `${this.lastWidth}px`
-    this.parkingElement.style.height = `${this.lastHeight}px`
+  private cancelPinToBottom(): void {
+    if (this.pinToBottomFrame === null) return
+    cancelScheduledAnimationFrame(this.pinToBottomFrame)
+    this.pinToBottomFrame = null
   }
+
 }
 
 function terminalSearchOptions(incremental?: boolean): ISearchOptions {
@@ -405,13 +425,12 @@ function hasMeasurableBox(element: HTMLElement): boolean {
   return rect.width > 0 && rect.height > 0
 }
 
-function remeasureTerminal(term: XTermTerminal): void {
-  const internal = term as XTermTerminal & {
-    _core?: {
-      _charSizeService?: { measure?: () => void }
-      _renderService?: { clear?: () => void }
-    }
-  }
-  internal._core?._charSizeService?.measure?.()
-  internal._core?._renderService?.clear?.()
+function scrollTerminalToBottom(term: XTermTerminal | null): void {
+  if (!term) return
+  term.scrollToBottom()
+}
+
+function cancelScheduledAnimationFrame(frame: number): void {
+  if (typeof cancelAnimationFrame === 'function') cancelAnimationFrame(frame)
+  else clearTimeout(frame)
 }

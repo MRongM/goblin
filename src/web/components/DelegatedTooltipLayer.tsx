@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentPropsWithoutRef, type ReactNode } from 'react'
+import { Slot } from 'radix-ui'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentPropsWithoutRef, type ReactNode, type Ref } from 'react'
 import { createPortal } from 'react-dom'
 import { cn } from '#/web/lib/cn.ts'
 import { TOOLTIP_SURFACE_CLASS } from '#/web/components/ui/tooltip.tsx'
@@ -15,7 +16,7 @@ interface TooltipState<T> {
   rect: AnchorRect
 }
 
-type DelegatedTooltipPlacement = 'bottom-start' | 'left'
+type DelegatedTooltipPlacement = 'bottom-start' | 'left' | 'top-start'
 
 interface DelegatedTooltipLayerProps<T> extends ComponentPropsWithoutRef<'div'> {
   items: readonly T[]
@@ -30,6 +31,7 @@ interface DelegatedTooltipLayerProps<T> extends ComponentPropsWithoutRef<'div'> 
   margin?: number
   offset?: number
   tooltipClassName?: string
+  asChild?: boolean
 }
 
 export const DELEGATED_TOOLTIP_DEFAULTS = {
@@ -44,6 +46,7 @@ export const DELEGATED_TOOLTIP_TRANSITIONS = {
   fade: 'opacity 100ms ease-out',
   slideBottomStart: 'left 150ms ease-out, opacity 100ms ease-out',
   slideLeft: 'top 150ms ease-out, opacity 100ms ease-out',
+  slideTopStart: 'left 150ms ease-out, opacity 100ms ease-out',
 } as const
 
 export function DelegatedTooltipLayer<T>({
@@ -59,6 +62,7 @@ export function DelegatedTooltipLayer<T>({
   margin = DELEGATED_TOOLTIP_DEFAULTS.margin,
   offset = DELEGATED_TOOLTIP_DEFAULTS.offset,
   tooltipClassName,
+  asChild = false,
   children,
   ...props
 }: DelegatedTooltipLayerProps<T>) {
@@ -73,9 +77,15 @@ export function DelegatedTooltipLayer<T>({
 
   return (
     <>
-      <div ref={rootRef} {...props}>
-        {children}
-      </div>
+      {asChild ? (
+        <Slot.Root ref={rootRef as Ref<HTMLElement>} {...props}>
+          {children}
+        </Slot.Root>
+      ) : (
+        <div ref={rootRef as Ref<HTMLDivElement>} {...props}>
+          {children}
+        </div>
+      )}
       {tooltip && (
         <DelegatedTooltipPopup
           tooltip={tooltip}
@@ -99,11 +109,11 @@ function useDelegatedTooltipStateMachine<T>(input: {
   delayMs: number
   graceMs: number
 }): {
-  rootRef: React.RefObject<HTMLDivElement | null>
+  rootRef: React.RefObject<HTMLElement | null>
   tooltip: TooltipState<T> | null
 } {
   const { items, selector, attributeName, getItemId, delayMs, graceMs } = input
-  const rootRef = useRef<HTMLDivElement | null>(null)
+  const rootRef = useRef<HTMLElement | null>(null)
   const activeItemIdRef = useRef<string | null>(null)
   const showTimerRef = useRef<number | null>(null)
   const graceTimerRef = useRef<number | null>(null)
@@ -300,7 +310,11 @@ function DelegatedTooltipPopup<T>({
 
   const position = tooltipPosition(tooltip.rect, size, { placement, maxWidth, margin, offset })
   const transition =
-    placement === 'left' ? DELEGATED_TOOLTIP_TRANSITIONS.slideLeft : DELEGATED_TOOLTIP_TRANSITIONS.slideBottomStart
+    placement === 'left'
+      ? DELEGATED_TOOLTIP_TRANSITIONS.slideLeft
+      : placement === 'top-start'
+        ? DELEGATED_TOOLTIP_TRANSITIONS.slideTopStart
+        : DELEGATED_TOOLTIP_TRANSITIONS.slideBottomStart
 
   return createPortal(
     <div
@@ -398,6 +412,12 @@ function tooltipPosition(
         Math.max(margin, window.innerHeight - margin - size.height),
       ),
       transform: 'translateX(-100%)',
+    }
+  }
+  if (placement === 'top-start') {
+    return {
+      left: clamp(rect.left, margin, Math.max(margin, window.innerWidth - margin - size.width)),
+      top: clamp(rect.top - offset - size.height, margin, Math.max(margin, window.innerHeight - margin - size.height)),
     }
   }
   return {

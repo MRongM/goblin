@@ -57,6 +57,10 @@ export interface TerminalSnapshot {
   attachment?: TerminalAttachmentSnapshot | null
   search?: TerminalSearchResult | null
   progress?: TerminalProgressState | null
+  /** Viewer-mode output summary: stripped recent terminal output. */
+  outputSummary?: string | null
+  /** True while a takeover request has been sent but ownership has not yet been confirmed. */
+  takeoverPending?: boolean
 }
 
 export interface TerminalSearchResult {
@@ -85,6 +89,7 @@ export interface TerminalSessionSummary {
   index: number
   title: string
   fullTitle?: string
+  originalTitle?: string | null
   phase: TerminalPhase
   selected: boolean
   hasBell: boolean
@@ -103,7 +108,7 @@ export interface TerminalSessionContextValue {
   scrollToBottom: (key: string) => void
   scrollLines: (key: string, amount: number) => void
   clearBell: (key: string) => boolean
-  closeTerminalAndDismissDetailIfLast: (key: string, base: TerminalSessionBase) => TerminalSessionSummary[]
+  closeTerminalAndDismissDetailIfLast: (key: string, base: TerminalSessionBase) => void
   attach: (descriptor: TerminalDescriptor, host: HTMLElement) => void
   detach: (key: string, host: HTMLElement) => void
   restart: (key: string) => void
@@ -113,6 +118,8 @@ export interface TerminalSessionContextValue {
   clearSearch: (key: string) => void
   writeInput: (key: string, data: string) => void
   takeover: (key: string) => void
+  /** Reorder terminal sessions within a worktree. */
+  reorderSessions: (worktreeTerminalKey: string, orderedKeys: string[]) => Promise<boolean>
   /** Serializes xterm framebuffer state as VT sequences; not plain-text output for copy UI. */
   serialize: (key: string) => string
 }

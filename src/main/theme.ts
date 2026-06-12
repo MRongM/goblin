@@ -5,8 +5,7 @@
 // emits updates, but it is not the persistence source of truth.
 
 import { nativeTheme } from 'electron'
-import { getSettingsPrefs, updateSettingsPrefs } from '#/main/settings-server-client.ts'
-import { isColorTheme } from '#/shared/color-theme.ts'
+import { getSettingsPrefs } from '#/main/settings-server-client.ts'
 import { DEFAULT_COLOR_THEME } from '#/shared/settings-defaults.ts'
 import type { ResolvedTheme, ThemePref, ThemeState } from '#/shared/rpc.ts'
 import type { ColorTheme } from '#/shared/color-theme.ts'
@@ -41,14 +40,11 @@ function emit(): void {
   }
 }
 
-export async function initTheme(): Promise<void> {
+export async function initTheme(initial?: { theme: ThemePref; colorTheme: ColorTheme }): Promise<void> {
   if (inited) return
   inited = true
-  const serverSettings = await getSettingsPrefs()
-  currentPref = serverSettings.theme
-  currentColorTheme = serverSettings.colorTheme
-  applyToNativeTheme(currentPref)
-  currentResolved = resolveTheme(currentPref)
+  const serverSettings = initial ?? (await getSettingsPrefs())
+  applyThemeSettingsProjection({ theme: serverSettings.theme, colorTheme: serverSettings.colorTheme })
 
   // Fires both on OS appearance changes AND when we assign themeSource
   // ourselves. We only care about the former, only when pref === 'auto'.
@@ -66,29 +62,24 @@ export function getTheme(): ThemeState {
   return { pref: currentPref, resolved: currentResolved, colorTheme: currentColorTheme }
 }
 
-export async function setThemePref(pref: ThemePref): Promise<ThemeState> {
-  if (pref === currentPref) return getTheme()
+export function applyThemeSettingsProjection(input: { theme: ThemePref; colorTheme: ColorTheme }): ThemeState {
   transitionDepth++
   try {
-    const serverSettings = await updateSettingsPrefs({ theme: pref })
-    const nextPref = serverSettings.theme
-    currentPref = nextPref
+    const nextPref = input.theme
+    const nextColorTheme = input.colorTheme
     applyToNativeTheme(nextPref)
-    currentResolved = resolveTheme(nextPref)
+    const nextResolved = resolveTheme(nextPref)
+    if (currentPref === nextPref && currentResolved === nextResolved && currentColorTheme === nextColorTheme) {
+      return getTheme()
+    }
+    currentPref = nextPref
+    currentResolved = nextResolved
+    currentColorTheme = nextColorTheme
     emit()
     return getTheme()
   } finally {
     transitionDepth--
   }
-}
-
-export async function setColorTheme(colorTheme: ColorTheme): Promise<ThemeState> {
-  if (!isColorTheme(colorTheme)) return getTheme()
-  if (colorTheme === currentColorTheme) return getTheme()
-  const serverSettings = await updateSettingsPrefs({ colorTheme })
-  currentColorTheme = serverSettings.colorTheme
-  emit()
-  return getTheme()
 }
 
 export function subscribeTheme(listener: Listener): () => void {

@@ -1,9 +1,10 @@
-import { parseTerminalSessionKey, worktreeTerminalKey } from '#/web/components/terminal/terminal-session-utils.ts'
+import { parseTerminalSessionKey, worktreeTerminalKey } from '#/web/components/terminal/terminal-session-keys.ts'
 import type { RendererEffectIntent } from '#/shared/renderer-effect-intents.ts'
 import type { DetailTab, RepoState } from '#/web/stores/repos/types.ts'
 import type { RepoSessionEntry } from '#/shared/remote-repo.ts'
 import type { WorkspaceLayout } from '#/shared/workspace-layout.ts'
 import type { SettingsPage } from '#/shared/settings-pages.ts'
+import type { LangPref, ThemePref } from '#/shared/settings.ts'
 
 type WorkspaceRendererIntent = Extract<
   RendererEffectIntent,
@@ -15,6 +16,7 @@ type WorkspaceRendererIntent = Extract<
   | { type: 'cycle-repo-requested' }
   | { type: 'repo-refresh-requested' }
   | { type: 'show-detail-tab-requested' }
+  | { type: 'select-terminal-requested' }
   | { type: 'terminal-primary-action-requested' }
   | { type: 'toggle-detail-requested' }
 >
@@ -35,6 +37,9 @@ export type AppLevelIntentPlan =
   | { kind: 'set-workspace-layout'; layout: WorkspaceLayout }
   | { kind: 'reset-workspace-layout' }
   | { kind: 'open-settings'; page: SettingsPage }
+  | { kind: 'set-theme-pref'; pref: ThemePref }
+  | { kind: 'set-lang-pref'; pref: LangPref }
+  | { kind: 'clear-recent-repos' }
   | { kind: 'ensure-recent-repo-open'; entry: RepoSessionEntry }
 
 export type WorkspaceIntentPlan =
@@ -48,6 +53,7 @@ export type WorkspaceIntentPlan =
   | { kind: 'cycle-repo'; direction: 1 | -1 }
   | { kind: 'refresh-repo'; repoId: string; token: number }
   | { kind: 'show-detail-tab'; repoId: string; tab: DetailTab }
+  | { kind: 'select-terminal'; repoId: string; index: number }
   | { kind: 'terminal-primary-action'; repoId: string }
   | { kind: 'toggle-detail'; repoId: string }
 
@@ -100,6 +106,12 @@ export function createAppLevelIntentPlan(
       return { kind: 'reset-workspace-layout' }
     case 'open-settings-requested':
       return { kind: 'open-settings', page: event.page }
+    case 'theme-pref-set-requested':
+      return { kind: 'set-theme-pref', pref: event.pref }
+    case 'lang-pref-set-requested':
+      return { kind: 'set-lang-pref', pref: event.pref }
+    case 'clear-recent-repos-requested':
+      return context.overlayBlocked ? { kind: 'noop' } : { kind: 'clear-recent-repos' }
     case 'open-recent-repo-requested':
       return context.overlayBlocked ? { kind: 'noop' } : { kind: 'ensure-recent-repo-open', entry: event.entry }
   }
@@ -132,6 +144,9 @@ export function createWorkspaceIntentPlan(
     case 'show-detail-tab-requested':
       if (context.workspaceShortcutSuppressed || !context.currentRepoId) return { kind: 'noop' }
       return { kind: 'show-detail-tab', repoId: context.currentRepoId, tab: event.tab }
+    case 'select-terminal-requested':
+      if (context.workspaceShortcutSuppressed || !context.currentRepoId) return { kind: 'noop' }
+      return { kind: 'select-terminal', repoId: context.currentRepoId, index: event.index }
     case 'terminal-primary-action-requested':
       if (context.workspaceShortcutSuppressed || !context.currentRepoId) return { kind: 'noop' }
       return { kind: 'terminal-primary-action', repoId: context.currentRepoId }
@@ -160,6 +175,7 @@ function isWorkspaceRendererIntent(event: RendererEffectIntent): event is Worksp
     event.type === 'cycle-repo-requested' ||
     event.type === 'repo-refresh-requested' ||
     event.type === 'show-detail-tab-requested' ||
+    event.type === 'select-terminal-requested' ||
     event.type === 'terminal-primary-action-requested' ||
     event.type === 'toggle-detail-requested'
   )

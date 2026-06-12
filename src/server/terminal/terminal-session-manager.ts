@@ -67,9 +67,16 @@ interface TerminalSession<TOwner extends string | number> {
   disposables: Array<{ dispose: () => void }>
   render: TerminalRenderState
   processName: string
-  attachments: Map<string, TerminalAttachmentState>
+  attachmentId: string | null
+  attachment: TerminalAttachmentState | null
   controller: TerminalController | null
   allowImplicitAttachControl: boolean
+  /** Display order within the worktree for tab strip sorting. */
+  displayOrder: number
+  /** Input queue ensures ordered PTY writes even with multiple concurrent callers. */
+  inputQueue: string[]
+  /** True when a microtask flush has already been scheduled for this session. */
+  inputFlushScheduled: boolean
 }
 
 export interface TerminalEventSink<TOwner extends string | number> {
@@ -102,8 +109,6 @@ export class TerminalSessionManager<TOwner extends string | number> {
     if (existing) {
       if (input.attachmentId) {
         registerTerminalAttachment(existing, input.attachmentId, size.cols, size.rows, input.attachmentConnected)
-      } else {
-        this.resizeSessionPty(existing, size.cols, size.rows)
       }
       return this.attachResult(existing)
     }
@@ -123,15 +128,19 @@ export class TerminalSessionManager<TOwner extends string | number> {
       disposables: [],
       render: createEmptyTerminalRenderState(),
       processName: '',
-      attachments: new Map(),
+      attachmentId: null,
+      attachment: null,
       controller: null,
       allowImplicitAttachControl: true,
+      displayOrder: this.nextDisplayOrder(input.scope, parseWorktreePathFromKey(input.key) ?? input.key),
+      inputQueue: [],
+      inputFlushScheduled: false,
     }
     this.sessionsById.set(id, session)
     this.sessionIdByOwnerKey.set(ownerKey, id)
     if (input.attachmentId) {
       registerTerminalAttachment(session, input.attachmentId, size.cols, size.rows, input.attachmentConnected ?? true)
-      session.controller = session.attachments.get(input.attachmentId)?.connected
+      session.controller = session.attachment?.connected
         ? { attachmentId: input.attachmentId, status: 'connected' }
         : null
     }
@@ -148,13 +157,9 @@ export class TerminalSessionManager<TOwner extends string | number> {
     const session = this.ownedSession(ownerId, sessionId)
     if (!session?.pty) return false
     if (attachmentId && session.controller?.attachmentId !== attachmentId) return false
-    try {
-      session.pty.write(data)
-      return true
-    } catch (err) {
-      console.warn('[terminal] failed to write PTY', err)
-      return false
-    }
+    session.inputQueue.push(data)
+    this.scheduleInputFlush(session)
+    return true
   }
 
   attachSession(
@@ -173,8 +178,6 @@ export class TerminalSessionManager<TOwner extends string | number> {
     if (attachmentId) {
       registerTerminalAttachment(session, attachmentId, size.cols, size.rows, attachmentConnected)
       this.applyOwnershipEffect(session, attachTerminalAttachment(session, attachmentId))
-    } else {
-      this.resizeSessionPty(session, size.cols, size.rows)
     }
     return this.attachResult(session)
   }
@@ -192,10 +195,9 @@ export class TerminalSessionManager<TOwner extends string | number> {
     if (!size) return false
     const session = this.ownedSession(ownerId, sessionId)
     if (!session) return false
-    if (attachmentId) {
-      registerTerminalAttachment(session, attachmentId, size.cols, size.rows, attachmentConnected)
-      if (session.controller?.attachmentId !== attachmentId) return false
-    }
+    if (!attachmentId) return false
+    registerTerminalAttachment(session, attachmentId, size.cols, size.rows, attachmentConnected)
+    if (session.controller?.attachmentId !== attachmentId) return false
     return this.resizeSessionPty(session, size.cols, size.rows)
   }
 
@@ -315,10 +317,42 @@ export class TerminalSessionManager<TOwner extends string | number> {
           canonicalTitle: session.render.canonicalTitle,
           cols: session.cols,
           rows: session.rows,
+          displayOrder: session.displayOrder,
         })
       }
     }
+    sessions.sort((a, b) => a.displayOrder - b.displayOrder)
     return sessions
+  }
+
+  reorderSessions(scope: string, worktreePath: string, orderedKeys: string[]): boolean {
+    const worktreePrefix = `${scope}\0${worktreePath}\0`
+    const sessionsInWorktree = Array.from(this.sessionsById.values()).filter(
+      (s) => s.scope === scope && s.key.startsWith(worktreePrefix),
+    )
+    const keySet = new Set(sessionsInWorktree.map((s) => s.key))
+    const orderedKeySet = new Set(orderedKeys)
+    if (orderedKeys.length !== sessionsInWorktree.length) return false
+    if (orderedKeySet.size !== orderedKeys.length) return false
+    if (!orderedKeys.every((k) => keySet.has(k))) return false
+    const sessionByKey = new Map<string, TerminalSession<TOwner>>()
+    for (const s of sessionsInWorktree) sessionByKey.set(s.key, s)
+    for (let i = 0; i < orderedKeys.length; i++) {
+      const session = sessionByKey.get(orderedKeys[i])
+      if (session) session.displayOrder = i
+    }
+    return true
+  }
+
+  private nextDisplayOrder(scope: string, worktreePath: string): number {
+    const worktreePrefix = `${scope}\0${worktreePath}\0`
+    let max = -1
+    for (const session of this.sessionsById.values()) {
+      if (session.scope === scope && session.key.startsWith(worktreePrefix)) {
+        if (session.displayOrder > max) max = session.displayOrder
+      }
+    }
+    return max + 1
   }
 
   private ownedSession(ownerId: TOwner, sessionId: string): TerminalSession<TOwner> | undefined {
@@ -406,6 +440,8 @@ export class TerminalSessionManager<TOwner extends string | number> {
     session.rows = rows
     resetTerminalRenderState(session.render)
     session.processName = ''
+    session.inputQueue = []
+    session.inputFlushScheduled = false
   }
 
   private spawnSessionPty(session: TerminalSession<TOwner>): TerminalAttachResult {
@@ -473,13 +509,33 @@ export class TerminalSessionManager<TOwner extends string | number> {
       }
     }
     session.pty = null
+    session.inputQueue = []
+    session.inputFlushScheduled = false
     disposeTerminalRenderState(session.render)
+  }
+
+  private scheduleInputFlush(session: TerminalSession<TOwner>): void {
+    if (session.inputFlushScheduled || session.inputQueue.length === 0 || !session.pty) return
+    session.inputFlushScheduled = true
+    queueMicrotask(() => {
+      session.inputFlushScheduled = false
+      this.drainInputQueue(session)
+    })
+  }
+
+  private drainInputQueue(session: TerminalSession<TOwner>): void {
+    if (session.inputQueue.length === 0 || !session.pty) return
+    const batch = session.inputQueue.splice(0).join('')
+    try {
+      session.pty.write(batch)
+    } catch (err) {
+      console.warn('[terminal] failed to write PTY', err)
+    }
   }
 
   private isValidOwnerId(ownerId: TOwner): boolean {
     return (typeof ownerId === 'number' && Number.isSafeInteger(ownerId) && ownerId > 0) || (typeof ownerId === 'string' && ownerId.length > 0)
   }
-
 }
 
 export function isValidTerminalSessionId(value: unknown): value is string {
@@ -507,4 +563,9 @@ function createSessionId(): string {
 function terminalPruneKey(key: string): string {
   const parts = key.split('\0')
   return parts.length >= 2 ? `${parts[0]}\0${parts[1]}` : key
+}
+
+function parseWorktreePathFromKey(key: string): string | null {
+  const parts = key.split('\0')
+  return parts.length >= 3 ? parts[1]! : null
 }

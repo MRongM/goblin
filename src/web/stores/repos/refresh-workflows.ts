@@ -1,6 +1,11 @@
 import { appendRepoEvent, errorEvent, updateIfFresh } from '#/web/stores/repos/helpers.ts'
-import { persistRepoCache } from '#/web/stores/repos/persistence.ts'
+import { persistRestorableRepoSnapshot } from '#/web/stores/repos/persistence.ts'
 import { terminalBridge } from '#/web/terminal.ts'
+import {
+  PULL_REQUEST_UNKNOWN_RETRY_DELAY_MS,
+  PULL_REQUEST_UNKNOWN_RETRY_LIMIT,
+  pullRequestMergeStatusPending,
+} from '#/shared/pull-request-state.ts'
 import type { ReposGet, ReposSet } from '#/web/stores/repos/types.ts'
 
 function repoFresh(get: ReposGet, id: string, token: number): boolean {
@@ -13,10 +18,36 @@ function pullRequestRefreshFailed(get: ReposGet, id: string, token: number): boo
   return !!repo && repo.instanceToken === token && repo.resources.pullRequests.error !== null
 }
 
+function visibleDetailPullRequestPending(get: ReposGet, id: string, token: number): boolean {
+  const repo = get().repos[id]
+  if (!repo || repo.instanceToken !== token || repo.ui.detailTab !== 'status' || !repo.ui.selectedBranch) return false
+  const branch = repo.data.branches.find((entry) => entry.name === repo.ui.selectedBranch)
+  return pullRequestMergeStatusPending(branch?.pullRequest)
+}
+
 async function refreshVisibleDetailPullRequest(get: ReposGet, id: string, token: number): Promise<void> {
   const repo = get().repos[id]
   if (!repo || repo.instanceToken !== token || repo.ui.detailTab !== 'status' || !repo.ui.selectedBranch) return
   await get().refreshPullRequests(id, [repo.ui.selectedBranch], { token, mode: 'full' })
+}
+
+async function delay(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function retryVisibleDetailPullRequestUntilSettled(
+  get: ReposGet,
+  options: { id: string; token: number; isSnapshotCurrent: () => boolean },
+): Promise<void> {
+  for (let attempt = 0; attempt < PULL_REQUEST_UNKNOWN_RETRY_LIMIT; attempt += 1) {
+    if (!options.isSnapshotCurrent() || !repoFresh(get, options.id, options.token)) return
+    if (!visibleDetailPullRequestPending(get, options.id, options.token)) return
+    await delay(PULL_REQUEST_UNKNOWN_RETRY_DELAY_MS)
+    if (!options.isSnapshotCurrent() || !repoFresh(get, options.id, options.token)) return
+    if (!visibleDetailPullRequestPending(get, options.id, options.token)) return
+    await refreshVisibleDetailPullRequest(get, options.id, options.token)
+    if (pullRequestRefreshFailed(get, options.id, options.token)) return
+  }
 }
 
 async function refreshPullRequestSummaryAfterSnapshot(
@@ -31,7 +62,7 @@ async function refreshPullRequestSummaryAfterSnapshot(
   })
 }
 
-export function runSnapshotSuccessWorkflow(
+export async function runSnapshotSuccessWorkflow(
   set: ReposSet,
   get: ReposGet,
   options: {
@@ -42,9 +73,9 @@ export function runSnapshotSuccessWorkflow(
     isSnapshotCurrent: () => boolean
     skipLogBackfill?: boolean
   },
-): void {
+): Promise<void> {
   if (!options.isSnapshotCurrent()) return
-  persistRepoCache(set, get().repos[options.id], options.token)
+  persistRestorableRepoSnapshot(set, get().repos[options.id], options.token)
   void terminalBridge.pruneTerminals(options.id).catch((err) => {
     console.warn('[terminal] failed to prune repo sessions', err)
   })
@@ -70,6 +101,8 @@ async function runSnapshotVisibleDetailBackfill(
   void options.skipLogBackfill
   if (!options.isSnapshotCurrent() || !repoFresh(get, options.id, options.token)) return
   await refreshVisibleDetailPullRequest(get, options.id, options.token)
+  if (pullRequestRefreshFailed(get, options.id, options.token)) return
+  await retryVisibleDetailPullRequestUntilSettled(get, options)
 }
 
 export async function runCoreDataRefreshWorkflow(get: ReposGet, options: { id: string; token: number }): Promise<void> {

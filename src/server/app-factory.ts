@@ -11,15 +11,15 @@ import { createRemoteRoutes } from '#/server/routes/remote.ts'
 import { createRealtimeRoutes } from '#/server/routes/realtime.ts'
 import { createRepoRoutes } from '#/server/routes/repo.ts'
 import { createSettingsRoutes } from '#/server/routes/settings.ts'
-import { createTerminalRoutes } from '#/server/routes/terminal.ts'
 import type { ServerTerminalHost } from '#/server/terminal/terminal-host.ts'
 import { getServerSettingsPrefs } from '#/server/modules/settings-source.ts'
+import { createServerSettingsState } from '#/server/modules/settings-state.ts'
 import { createRendererBootstrapSnapshot, toInitialServerSnapshot } from '#/shared/bootstrap-builders.ts'
 import { createRendererRuntimeSnapshot } from '#/shared/bootstrap-builders.ts'
 import { WEB_RENDERER_CAPABILITIES } from '#/shared/bootstrap.ts'
-import { DICTS } from '#/shared/i18n/dictionaries.ts'
+import { resolveI18nSnapshot } from '#/shared/i18n/snapshot.ts'
 import { initialSettingsFromSnapshot } from '#/shared/settings-defaults.ts'
-import type { Lang, LangPref } from '#/shared/rpc.ts'
+import type { LangPref } from '#/shared/rpc.ts'
 import type { RendererBootstrapSnapshot } from '#/shared/bootstrap.ts'
 
 export interface ServerAppOptions {
@@ -35,15 +35,6 @@ function deriveServerClientId(secret: string): string {
   return `client_${createHash('sha256').update(secret).digest('hex').slice(0, 32)}`
 }
 
-function resolveRequestLang(pref: LangPref, acceptLanguageHeader: string | null): Lang {
-  if (pref === 'en' || pref === 'zh' || pref === 'ko' || pref === 'ja') return pref
-  const lower = (acceptLanguageHeader || '').toLowerCase()
-  if (lower.includes('zh')) return 'zh'
-  if (lower.includes('ko')) return 'ko'
-  if (lower.includes('ja')) return 'ja'
-  return 'en'
-}
-
 function buildWebBootstrap(
   requestUrl: string,
   internalSecret: string,
@@ -51,16 +42,11 @@ function buildWebBootstrap(
   langPref: LangPref,
   settings: Awaited<ReturnType<typeof getServerSettingsPrefs>>,
 ): RendererBootstrapSnapshot {
-  const lang = resolveRequestLang(langPref, acceptLanguageHeader)
   const origin = new URL(requestUrl).origin
   return createRendererBootstrapSnapshot({
     runtime: createRendererRuntimeSnapshot('web', WEB_RENDERER_CAPABILITIES),
     homeDir: os.homedir(),
-    i18n: {
-      lang,
-      pref: langPref,
-      dict: DICTS[lang],
-    },
+    i18n: resolveI18nSnapshot(langPref, acceptLanguageHeader),
     settings: initialSettingsFromSnapshot({
       ...settings,
       globalShortcutRegistered: false,
@@ -106,6 +92,7 @@ async function renderRendererIndexHtml(
 }
 
 export function createApp(options: ServerAppOptions): Hono {
+  const settingsState = createServerSettingsState()
   const app = new Hono()
   app.use(
     '/api/*',
@@ -119,11 +106,9 @@ export function createApp(options: ServerAppOptions): Hono {
   app.use('/api/settings/*', createInternalAuthMiddleware(options.internalSecret))
   app.use('/api/remote/*', createInternalAuthMiddleware(options.internalSecret))
   app.use('/api/repo/*', createInternalAuthMiddleware(options.internalSecret))
-  app.use('/api/terminal/*', createInternalAuthMiddleware(options.internalSecret))
-  app.route('/api/settings', createSettingsRoutes())
+  app.route('/api/settings', createSettingsRoutes(settingsState))
   app.route('/api/remote', createRemoteRoutes())
   app.route('/api/repo', createRepoRoutes())
-  app.route('/api/terminal', createTerminalRoutes(options.terminalHost))
   app.route('/ws', createRealtimeRoutes({ internalSecret: options.internalSecret, terminalHost: options.terminalHost }))
   app.get('/', async (c) => {
     try {

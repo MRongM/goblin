@@ -3,10 +3,14 @@ import { isShortcutBlockingLayerOpen } from '#/web/lib/layers.ts'
 import { isTerminalFocused } from '#/web/terminal-focus.ts'
 import { runRepoRefreshIntent } from '#/web/stores/repos/refresh-coordinator.ts'
 import { useReposStore } from '#/web/stores/repos/store.ts'
+import { useThemeStore } from '#/web/stores/theme.ts'
+import { useI18nStore } from '#/web/stores/i18n.ts'
+import { clearRecentRepoHistory } from '#/web/settings-write-paths.ts'
 import { openRepoFromDialog } from '#/web/lib/open-repo-dialog.ts'
 import { consumeExternalOpenPaths } from '#/web/app-shell-client.ts'
 import { openRepoPaths } from '#/web/lib/open-repo-paths.ts'
 import {
+  runSelectTerminalCommand,
   runShowDetailTabCommand,
   runTerminalPrimaryActionCommand,
   runToggleDetailCommand,
@@ -92,6 +96,15 @@ export async function handleAppLevelRendererIntent(
     case 'open-settings':
       deps.navigation.openSettings(plan.page)
       return true
+    case 'set-theme-pref':
+      await useThemeStore.getState().setPref(plan.pref)
+      return true
+    case 'set-lang-pref':
+      await useI18nStore.getState().setPref(plan.pref)
+      return true
+    case 'clear-recent-repos':
+      await clearRecentRepoHistory()
+      return true
     case 'ensure-recent-repo-open': {
       const result = await deps.ensureWorkspaceOpen(plan.entry)
       if (result.ok) deps.navigation.activateRepo(result.id)
@@ -158,6 +171,14 @@ export async function handleWorkspaceRendererIntent(
       runShowDetailTabCommand({
         repoId: plan.repoId,
         tab: plan.tab,
+        navigation: deps.navigation,
+        setDetailCollapsed: deps.setDetailCollapsed,
+      })
+      return true
+    case 'select-terminal':
+      runSelectTerminalCommand({
+        repoId: plan.repoId,
+        index: plan.index,
         navigation: deps.navigation,
         setDetailCollapsed: deps.setDetailCollapsed,
       })

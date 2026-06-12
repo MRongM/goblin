@@ -2,9 +2,12 @@ import { RotateCw } from 'lucide-react'
 import { Badge } from '#/web/components/ui/badge.tsx'
 import { Button } from '#/web/components/ui/button.tsx'
 import { SettingsGroup, SettingsList, SettingsRow } from '#/web/components/settings/SettingsPrimitives.tsx'
-import { useGitHubCliQuery, useRefreshGitHubCliMutation } from '#/web/settings-queries.ts'
+import { useAsyncPending } from '#/web/hooks/useAsyncPending.ts'
+import { useGitHubCliQuery } from '#/web/settings-queries.ts'
+import { refreshGitHubCliDetection } from '#/web/settings-write-paths.ts'
 import { useT } from '#/web/stores/i18n.ts'
 import { cn } from '#/web/lib/cn.ts'
+
 function hostLoginCommand(host: string): string {
   return host === 'github.com' ? 'gh auth login' : `gh auth login --hostname ${host}`
 }
@@ -12,13 +15,22 @@ function hostLoginCommand(host: string): string {
 export function GitHubSettings() {
   const t = useT()
   const { data } = useGitHubCliQuery()
+  const { isPending: refreshingGitHubCli, run } = useAsyncPending<'refresh'>()
   if (!data) return null
   const githubCliAvailable = data.available
   const githubCliVersion = data.version
   const githubCliHosts = data.hosts
-  const refreshGitHubCli = useRefreshGitHubCliMutation()
   const hostStates = Object.values(githubCliHosts).sort((a, b) => a.host.localeCompare(b.host))
-  const refreshingGitHubCli = refreshGitHubCli.isPending
+
+  async function refreshGitHubCli() {
+    await run('refresh', async () => {
+      try {
+        await refreshGitHubCliDetection()
+      } catch (err) {
+        console.warn('[settings] GitHub CLI refresh failed', err)
+      }
+    })
+  }
 
   return (
     <SettingsGroup label={t('settings.github.title')} hint={t('settings.github.body')}>
@@ -50,9 +62,7 @@ export function GitHubSettings() {
                 size="sm"
                 onClick={() => {
                   if (refreshingGitHubCli) return
-                  void refreshGitHubCli.mutateAsync().catch((err: unknown) => {
-                    console.warn('[settings] GitHub CLI refresh failed', err)
-                  })
+                  void refreshGitHubCli()
                 }}
                 disabled={refreshingGitHubCli}
               >

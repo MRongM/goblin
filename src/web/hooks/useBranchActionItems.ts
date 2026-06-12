@@ -9,7 +9,7 @@ import { useBranchActions, type BranchActionItemId } from '#/web/hooks/useBranch
 import { branchActionDisplayPhase, type BranchActionRepo } from '#/web/hooks/branch-action-state.ts'
 import { branchPullRequestBelongsToBranch } from '#/shared/git-types.ts'
 import type { BrowserRemoteProvider } from '#/web/types.ts'
-import { useRuntimeExternalAppSettings } from '#/web/runtime-settings-hooks.ts'
+import { useRuntimeExternalAppSettings } from '#/web/runtime-settings-external-apps.ts'
 export interface BranchActionItem {
   id: BranchActionItemId
   label: string
@@ -29,6 +29,14 @@ export interface BranchActionItemGroups {
   mainItems: BranchActionItem[]
   destructiveItems: BranchActionItem[]
   dialogs: ReactNode
+}
+
+export function visibleBranchActionItems({
+  patchItems,
+  mainItems,
+  destructiveItems,
+}: Pick<BranchActionItemGroups, 'patchItems' | 'mainItems' | 'destructiveItems'>): BranchActionItem[] {
+  return [...patchItems, ...mainItems, ...destructiveItems].filter((item) => item.visible)
 }
 
 export function branchBrowserRemoteProvider(

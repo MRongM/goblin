@@ -1,7 +1,7 @@
 import { arrayMove } from '@dnd-kit/sortable'
 import { normalizeWorktreePathOrder, selectedBranchForViewMode } from '#/web/stores/repos/branch-view-mode.ts'
 import { replaceRepo, replaceRepoState } from '#/web/stores/repos/helpers.ts'
-import { persistRepoCache } from '#/web/stores/repos/persistence.ts'
+import { persistRestorableRepoSnapshot } from '#/web/stores/repos/persistence.ts'
 import {
   DEFAULT_DETAIL_COLLAPSED,
   DEFAULT_DETAIL_PANE_SIZES,
@@ -32,7 +32,37 @@ function detailTabForSelection(repo: RepoState, tab: DetailTab, selectedBranch =
   return detailTabForWorktree(tab, branchHasWorktree(repo, selectedBranch))
 }
 
-export function createSelectionActions(set: ReposSet, get: ReposGet) {
+type RestorableWorkspaceSelectionActions = Pick<
+  ReposStore,
+  | 'setActive'
+  | 'reorderRepos'
+  | 'cycleActive'
+  | 'setDetailCollapsed'
+  | 'toggleDetailCollapsed'
+  | 'setDetailFocusMode'
+  | 'toggleDetailFocusMode'
+  | 'setWorkspaceLayout'
+  | 'applySessionLayoutState'
+  | 'applySessionSelectedTerminalState'
+  | 'setDetailPaneSize'
+  | 'setDetailPaneSizes'
+  | 'resetLayout'
+  | 'setSelectedTerminal'
+>
+
+type LocalWorkspaceSelectionActions = Pick<ReposStore, 'setBranchSearchQuery'>
+
+type RuntimeCoherentSelectionActions = Pick<
+  ReposStore,
+  'setBranchViewMode' | 'setDetailTab' | 'dismissExitedTerminalDetail' | 'selectBranch'
+>
+
+type RepoMutationSelectionActions = Pick<ReposStore, 'checkoutSelectedInRepo' | 'checkoutSelected'>
+
+function createRestorableWorkspaceSelectionActions(
+  set: ReposSet,
+  get: ReposGet,
+): RestorableWorkspaceSelectionActions {
   return {
     setActive(id: string) {
       set((s) => (s.repos[id] && s.activeId !== id ? { activeId: id } : s))
@@ -106,7 +136,7 @@ export function createSelectionActions(set: ReposSet, get: ReposGet) {
     },
 
     applySessionLayoutState(layoutState: Parameters<ReposStore['applySessionLayoutState']>[0]) {
-      // One-shot boot/session restore of persistable layout fields. Runtime
+      // One-shot boot/session restore of restorable layout fields. Runtime
       // layout edits still originate from the renderer and are persisted later
       // through useSessionPersistence.
       set((s) => {
@@ -201,7 +231,31 @@ export function createSelectionActions(set: ReposSet, get: ReposGet) {
         return { selectedTerminalByWorktree }
       })
     },
+  }
+}
 
+function createLocalWorkspaceSelectionActions(set: ReposSet): LocalWorkspaceSelectionActions {
+  return {
+    setBranchSearchQuery(id: string, query: string) {
+      set((s) => {
+        if (!s.repos[id]) return s
+        const hasQuery = query.trim().length > 0
+        const currentQuery = s.branchSearchQueries[id]
+        if (hasQuery ? currentQuery === query : currentQuery === undefined) return s
+        const branchSearchQueries = { ...s.branchSearchQueries }
+        if (hasQuery) branchSearchQueries[id] = query
+        else delete branchSearchQueries[id]
+        return { branchSearchQueries }
+      })
+    },
+  }
+}
+
+function createRuntimeCoherentSelectionActions(
+  set: ReposSet,
+  get: ReposGet,
+): RuntimeCoherentSelectionActions {
+  return {
     setBranchViewMode(id: string, viewMode: BranchViewMode) {
       let changed = false
       let selectedForPullRequest: string | null = null
@@ -221,7 +275,7 @@ export function createSelectionActions(set: ReposSet, get: ReposGet) {
         })
       })
       const repo = get().repos[id]
-      if (changed && token !== undefined && repo) persistRepoCache(set, repo, token)
+      if (changed && token !== undefined && repo) persistRestorableRepoSnapshot(set, repo, token)
       if (changed && token !== undefined && repo) {
         void runRepoRefreshIntent(get, {
           kind: 'visible-pull-request-changed',
@@ -271,6 +325,7 @@ export function createSelectionActions(set: ReposSet, get: ReposGet) {
       })
     },
 
+
     setDetailTab(id: string, tab: DetailTab) {
       let changed = false
       let token: number | undefined
@@ -286,7 +341,7 @@ export function createSelectionActions(set: ReposSet, get: ReposGet) {
         })
       })
       const repo = get().repos[id]
-      if (changed && token !== undefined && repo) persistRepoCache(set, repo, token)
+      if (changed && token !== undefined && repo) persistRestorableRepoSnapshot(set, repo, token)
       if (changed && token !== undefined && repo) {
         void runRepoRefreshIntent(get, {
           kind: 'visible-pull-request-changed',
@@ -323,7 +378,7 @@ export function createSelectionActions(set: ReposSet, get: ReposGet) {
         }
       })
       const repo = get().repos[id]
-      if (changed && token !== undefined && repo) persistRepoCache(set, repo, token)
+      if (changed && token !== undefined && repo) persistRestorableRepoSnapshot(set, repo, token)
       if (changed && token !== undefined && repo) {
         void runRepoRefreshIntent(get, {
           kind: 'visible-pull-request-changed',
@@ -350,7 +405,7 @@ export function createSelectionActions(set: ReposSet, get: ReposGet) {
         })
       })
       const repo = get().repos[id]
-      if (changed && token !== undefined && repo) persistRepoCache(set, repo, token)
+      if (changed && token !== undefined && repo) persistRestorableRepoSnapshot(set, repo, token)
       if (changed && token !== undefined && repo) {
         void runRepoRefreshIntent(get, {
           kind: 'visible-pull-request-changed',
@@ -360,7 +415,11 @@ export function createSelectionActions(set: ReposSet, get: ReposGet) {
         })
       }
     },
+  }
+}
 
+function createRepoMutationSelectionActions(set: ReposSet, get: ReposGet): RepoMutationSelectionActions {
+  return {
     async checkoutSelectedInRepo(id: string) {
       const state = get()
       const repo = state.repos[id]
@@ -379,5 +438,14 @@ export function createSelectionActions(set: ReposSet, get: ReposGet) {
       if (!id) return
       await get().checkoutSelectedInRepo(id)
     },
+  }
+}
+
+export function createSelectionActions(set: ReposSet, get: ReposGet) {
+  return {
+    ...createRestorableWorkspaceSelectionActions(set, get),
+    ...createLocalWorkspaceSelectionActions(set),
+    ...createRuntimeCoherentSelectionActions(set, get),
+    ...createRepoMutationSelectionActions(set, get),
   }
 }

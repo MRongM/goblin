@@ -11,6 +11,7 @@ import { BranchDetailToolbar } from '#/web/components/branch-detail/BranchDetail
 import { BranchDetailContent } from '#/web/components/branch-detail/BranchDetailContent.tsx'
 import { DEFAULT_WORKSPACE_LAYOUT } from '#/shared/workspace-layout.ts'
 import { useBranchActionItems } from '#/web/hooks/useBranchActionItems.ts'
+import { useBranchActionShortcutRegistry } from '#/web/hooks/useBranchActionShortcutRegistry.ts'
 interface Props {
   repoId: string
   layout?: RepoWorkspaceLayout
@@ -29,6 +30,7 @@ function branchDetailRepoEqual(a: BranchDetailRepo | undefined, b: BranchDetailR
       a.data.branches === b.data.branches &&
       a.data.currentBranch === b.data.currentBranch &&
       a.data.status === b.data.status &&
+      a.data.statusLoaded === b.data.statusLoaded &&
       a.data.worktreesByPath === b.data.worktreesByPath &&
       a.ui.selectedBranch === b.ui.selectedBranch &&
       a.ui.detailTab === b.ui.detailTab &&
@@ -63,6 +65,7 @@ export function BranchDetail({
               branches: repo.data.branches,
               currentBranch: repo.data.currentBranch,
               status: repo.data.status,
+              statusLoaded: repo.data.statusLoaded,
               worktreesByPath: repo.data.worktreesByPath,
             },
             ui: {
@@ -94,10 +97,12 @@ export function BranchDetail({
   const detail = getSelectedBranchDetailPresentation(repo)
   const contentId = `${detailId}-content`
 
+  const focusMode = layout === 'top-bottom' && detailFocusMode
+
   return (
     <section className="flex min-h-0 flex-1 flex-col bg-background">
-      {detail.branch ? (
-        <BranchDetailWithActions
+      {detail.branch && !focusMode ? (
+        <BranchShortcutHandler
           key={`${repo.id}:${detail.branch.name}`}
           repo={repo}
           detail={detail}
@@ -134,7 +139,7 @@ export function BranchDetail({
   )
 }
 
-interface BranchDetailWithActionsProps {
+interface BranchShortcutHandlerProps {
   repo: BranchDetailRepo
   detail: SelectedBranchDetailPresentation
   branch: NonNullable<SelectedBranchDetailPresentation['branch']>
@@ -145,7 +150,7 @@ interface BranchDetailWithActionsProps {
   layout: RepoWorkspaceLayout
 }
 
-function BranchDetailWithActions({
+function BranchShortcutHandler({
   repo,
   detail,
   branch,
@@ -154,8 +159,9 @@ function BranchDetailWithActions({
   collapsed,
   detailFocusMode,
   layout,
-}: BranchDetailWithActionsProps) {
+}: BranchShortcutHandlerProps) {
   const actions = useBranchActionItems(repo, branch)
+  useBranchActionShortcutRegistry(actions)
 
   return (
     <>
@@ -167,7 +173,6 @@ function BranchDetailWithActions({
         collapsed={collapsed}
         detailFocusMode={detailFocusMode}
         layout={layout}
-        branchActions={actions}
       />
       {actions.dialogs}
       {!collapsed && (

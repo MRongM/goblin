@@ -6,9 +6,23 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { useRendererEffectIntentRouter } from '#/web/hooks/useRendererEffectIntentRouter.ts'
 import type { MainWindowNavigationActions } from '#/web/main-window-navigation.tsx'
 import { setRendererBridgeForTests } from '#/web/renderer-bridge.ts'
-import { worktreeTerminalKey } from '#/web/components/terminal/terminal-session-utils.ts'
+import { worktreeTerminalKey } from '#/web/components/terminal/terminal-session-keys.ts'
 import { useReposStore } from '#/web/stores/repos/store.ts'
+import { useThemeStore } from '#/web/stores/theme.ts'
+import { useI18nStore } from '#/web/stores/i18n.ts'
 import { createBranchSnapshot, resetReposStore, seedRepoState } from '#/web/stores/repos/test-utils.ts'
+
+const appDataClientMocks = vi.hoisted(() => ({
+  clearRecentRepoHistory: vi.fn(async () => {}),
+}))
+
+vi.mock('#/web/settings-write-paths.ts', async () => {
+  const actual = await vi.importActual<typeof import('#/web/settings-write-paths.ts')>('#/web/settings-write-paths.ts')
+  return {
+    ...actual,
+    clearRecentRepoHistory: appDataClientMocks.clearRecentRepoHistory,
+  }
+})
 
 let container: HTMLDivElement | null = null
 let root: Root | null = null
@@ -33,6 +47,7 @@ beforeEach(() => {
   activateRepoSpy.mockClear()
   closeRepoSpy.mockClear()
   showRepoBranchDetailTabSpy.mockClear()
+  appDataClientMocks.clearRecentRepoHistory.mockClear()
   consumeExternalOpenPathsSpy.mockReset()
   consumeExternalOpenPathsSpy.mockResolvedValue([])
   overlayOpen = false
@@ -346,6 +361,45 @@ describe('useRendererEffectIntentRouter', () => {
     expect(useReposStore.getState().ensureWorkspaceOpen).toHaveBeenCalledWith('/tmp/repo-a')
     expect(useReposStore.getState().ensureWorkspaceOpen).toHaveBeenCalledWith('/tmp/repo-b')
     expect(activateRepoSpy).toHaveBeenCalledWith('/tmp/repo-a')
+  })
+
+  test('theme menu intents update theme through the renderer store', async () => {
+    const setPref = vi.fn(async () => {})
+    useThemeStore.setState((state) => ({ ...state, setPref }))
+
+    await renderHookHost()
+
+    await act(async () => {
+      for (const listener of intentListeners) listener({ type: 'theme-pref-set-requested', pref: 'dark' })
+      await Promise.resolve()
+    })
+
+    expect(setPref).toHaveBeenCalledWith('dark')
+  })
+
+  test('language menu intents update i18n through the renderer store', async () => {
+    const setPref = vi.fn(async () => {})
+    useI18nStore.setState((state) => ({ ...state, setPref }))
+
+    await renderHookHost()
+
+    await act(async () => {
+      for (const listener of intentListeners) listener({ type: 'lang-pref-set-requested', pref: 'ko' })
+      await Promise.resolve()
+    })
+
+    expect(setPref).toHaveBeenCalledWith('ko')
+  })
+
+  test('clear recent intent clears server-backed recents through the renderer client', async () => {
+    await renderHookHost()
+
+    await act(async () => {
+      for (const listener of intentListeners) listener({ type: 'clear-recent-repos-requested' })
+      await Promise.resolve()
+    })
+
+    expect(appDataClientMocks.clearRecentRepoHistory).toHaveBeenCalledTimes(1)
   })
 })
 

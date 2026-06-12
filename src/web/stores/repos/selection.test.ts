@@ -77,7 +77,7 @@ describe('setBranchViewMode', () => {
     const repo = useReposStore.getState().repos[REPO_ID]
     expect(repo?.ui.branchViewMode).toBe('worktrees')
     expect(repo?.ui.selectedBranch).toBe('main')
-    expect(useReposStore.getState().repoCache[REPO_ID]?.ui).toMatchObject({
+    expect(useReposStore.getState().restorableRepoCache[REPO_ID]?.ui).toMatchObject({
       branchViewMode: 'worktrees',
       selectedBranch: 'main',
     })
@@ -99,7 +99,7 @@ describe('setBranchViewMode', () => {
     const repo = useReposStore.getState().repos[REPO_ID]
     expect(repo?.ui.branchViewMode).toBe('worktrees')
     expect(repo?.ui.selectedBranch).toBeNull()
-    expect(useReposStore.getState().repoCache[REPO_ID]?.ui.selectedBranch).toBeNull()
+    expect(useReposStore.getState().restorableRepoCache[REPO_ID]?.ui.selectedBranch).toBeNull()
   })
 
   test('passes the current repo token to follow-up refreshes', () => {
@@ -153,7 +153,7 @@ describe('setBranchViewMode', () => {
     const repo = useReposStore.getState().repos[REPO_ID]
     expect(repo?.ui.selectedBranch).toBe('feature/plain')
     expect(repo?.ui.detailTab).toBe('status')
-    expect(useReposStore.getState().repoCache[REPO_ID]?.ui.detailTab).toBe('status')
+    expect(useReposStore.getState().restorableRepoCache[REPO_ID]?.ui.detailTab).toBe('status')
   })
 })
 
@@ -211,7 +211,7 @@ describe('selectBranch', () => {
     resolve()
     await Promise.resolve()
     expect(calls).toEqual([{ branches: ['main'], mode: 'full' }])
-    expect(useReposStore.getState().repoCache[REPO_ID]?.ui.selectedBranch).toBe('main')
+    expect(useReposStore.getState().restorableRepoCache[REPO_ID]?.ui.selectedBranch).toBe('main')
   })
 
   test('passes the current repo token to selected branch refreshes', () => {
@@ -270,7 +270,7 @@ describe('selectBranch', () => {
     const repo = useReposStore.getState().repos[REPO_ID]
     expect(repo?.ui.selectedBranch).toBe('feature/plain')
     expect(repo?.ui.detailTab).toBe('status')
-    expect(useReposStore.getState().repoCache[REPO_ID]?.ui.detailTab).toBe('status')
+    expect(useReposStore.getState().restorableRepoCache[REPO_ID]?.ui.detailTab).toBe('status')
   })
 })
 
@@ -280,7 +280,7 @@ describe('setDetailTab', () => {
 
     useReposStore.getState().setDetailTab(REPO_ID, 'terminal')
 
-    expect(useReposStore.getState().repoCache[REPO_ID]?.ui.detailTab).toBe('terminal')
+    expect(useReposStore.getState().restorableRepoCache[REPO_ID]?.ui.detailTab).toBe('terminal')
   })
 
   test('does not refresh when reselecting the current tab', () => {
@@ -290,14 +290,14 @@ describe('setDetailTab', () => {
     expect(useReposStore.getState().repos[REPO_ID]).toBe(before)
   })
 
-  test('normalizes removed detail tabs back to status', async () => {
+  test('persists the changes tab immediately', async () => {
     seedRepo({ selectedBranch: 'main', detailTab: 'status' })
 
-    useReposStore.getState().setDetailTab(REPO_ID, 'changes' as DetailTab)
+    useReposStore.getState().setDetailTab(REPO_ID, 'changes')
     await flushAsyncWork()
 
-    expect(useReposStore.getState().repos[REPO_ID]?.ui.detailTab).toBe('status')
-    expect(useReposStore.getState().repoCache[REPO_ID]?.ui.detailTab ?? 'status').toBe('status')
+    expect(useReposStore.getState().repos[REPO_ID]?.ui.detailTab).toBe('changes')
+    expect(useReposStore.getState().restorableRepoCache[REPO_ID]?.ui.detailTab).toBe('changes')
   })
 
   test('passes the current repo token to detail tab refreshes', () => {
@@ -354,7 +354,7 @@ describe('setDetailTab', () => {
 
     useReposStore.getState().setDetailTab(REPO_ID, 'terminal')
 
-    expect(useReposStore.getState().repoCache[REPO_ID]?.ui.detailTab).toBe('terminal')
+    expect(useReposStore.getState().restorableRepoCache[REPO_ID]?.ui.detailTab).toBe('terminal')
   })
 
   test('dismissing the active exited terminal detail falls back to status and collapses the pane', async () => {
@@ -372,7 +372,7 @@ describe('setDetailTab', () => {
 
     expect(useReposStore.getState().repos[REPO_ID]?.ui.detailTab).toBe('status')
     expect(useReposStore.getState().detailCollapsed).toBe(true)
-    expect(useReposStore.getState().repoCache[REPO_ID]?.ui.detailTab).toBe('status')
+    expect(useReposStore.getState().restorableRepoCache[REPO_ID]?.ui.detailTab).toBe('status')
     await flushAsyncWork()
     expect(refreshedBranches).toEqual(['feature/worktree'])
   })
@@ -600,13 +600,13 @@ describe('setBranchSearchQuery', () => {
         worktreePathOrder: repo.ui.worktreePathOrder,
       },
     }
-    useReposStore.setState({ repoCache: { [REPO_ID]: cached } })
+    useReposStore.setState({ restorableRepoCache: { [REPO_ID]: cached } })
 
     useReposStore.getState().setBranchSearchQuery(REPO_ID, 'worktree')
 
     expect(useReposStore.getState().branchSearchQueries[REPO_ID]).toBe('worktree')
     expect(useReposStore.getState().repos[REPO_ID]?.ui.selectedBranch).toBe('feature/plain')
-    expect(useReposStore.getState().repoCache[REPO_ID]).toBe(cached)
+    expect(useReposStore.getState().restorableRepoCache[REPO_ID]).toBe(cached)
   })
 
   test('removes runtime search when the query is cleared or the repo is closed', () => {

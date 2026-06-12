@@ -5,11 +5,14 @@ import {
   resetGitHubCooldownStateForTests,
 } from '#/system/github/cooldown.ts'
 import { isSafeBranchName } from '#/shared/refnames.ts'
+import {
+  PULL_REQUEST_CACHE_TTL_MS,
+  pullRequestCacheTtlMs,
+  pullRequestCollectionCacheTtlMs,
+} from '#/shared/pull-request-state.ts'
 import type { GitHubRepoRef, GraphqlRequestError } from '#/system/github/graphql.ts'
 import type { PullRequestFetchMode, PullRequestInfo } from '#/shared/git-types.ts'
 import { canQueryGitHubHost } from '#/system/github-cli.ts'
-
-const PR_CACHE_TTL_MS = 30_000
 
 interface PrCacheEntry {
   expiresAt: number
@@ -234,7 +237,11 @@ function cacheBranchPullRequest(
   mode: PullRequestFetchMode,
   pr: PullRequestInfo | null,
 ): void {
-  branchPrCache.set(branchCacheKey(cwd, repo, branch, mode), { expiresAt: Date.now() + PR_CACHE_TTL_MS, mode, pr })
+  branchPrCache.set(branchCacheKey(cwd, repo, branch, mode), {
+    expiresAt: Date.now() + pullRequestCacheTtlMs(mode, pr),
+    mode,
+    pr,
+  })
 }
 
 const PULL_REQUESTS_QUERY = `
@@ -399,7 +406,7 @@ async function queryPullRequests(
 function logGraphqlError(error: GraphqlRequestError): void {
   const key = `${error.host}:${error.operationName}:${error.code}:${error.status ?? 'unknown'}`
   const lastLoggedAt = loggedGraphqlErrors.get(key) ?? 0
-  if (Date.now() - lastLoggedAt < PR_CACHE_TTL_MS) return
+  if (Date.now() - lastLoggedAt < PULL_REQUEST_CACHE_TTL_MS) return
   loggedGraphqlErrors.set(key, Date.now())
   try {
     console.warn('[pull-requests]', formatGraphqlError(error))
@@ -443,31 +450,40 @@ function mapPullRequestsByBranch(prs: PullRequestInfo[]): Map<string, PullReques
   return byBranch
 }
 
+// gh api graphql --hostname doesn't need to run from a git repo — it uses
+// the globally-configured gh auth. Use a stable directory for gh commands
+// and keep the scopeId (local path or remote ID) for cache isolation only.
+const ghWorkingDirectory = process.cwd()
+
 async function fetchRepositoryPullRequestMap(
-  cwd: string,
+  scopeId: string,
   repo: GitHubRepoRef,
   mode: PullRequestFetchMode,
   signal?: AbortSignal,
 ): Promise<Map<string, PullRequestInfo> | null> {
   if (signal?.aborted) return null
-  const prs = await queryRepositoryPullRequests(cwd, repo, mode, signal)
+  const prs = await queryRepositoryPullRequests(ghWorkingDirectory, repo, mode, signal)
   if (!prs) return null
   const byBranch = mapPullRequestsByBranch(prs)
-  prCache.set(repoCacheKey(cwd, repo), { expiresAt: Date.now() + PR_CACHE_TTL_MS, mode, prs: byBranch })
+  prCache.set(repoCacheKey(scopeId, repo), {
+    expiresAt: Date.now() + pullRequestCollectionCacheTtlMs(mode, byBranch.values()),
+    mode,
+    prs: byBranch,
+  })
   return byBranch
 }
 
 async function fetchSingleBranchPullRequestMap(
-  cwd: string,
+  scopeId: string,
   repo: GitHubRepoRef,
   branch: string,
   mode: PullRequestFetchMode,
   signal?: AbortSignal,
 ): Promise<Map<string, PullRequestInfo> | null> {
-  const prs = await queryPullRequests(cwd, repo, { headBranch: branch, limit: 20, mode, signal })
+  const prs = await queryPullRequests(ghWorkingDirectory, repo, { headBranch: branch, limit: 20, mode, signal })
   if (!prs) return null
   const byBranch = mapPullRequestsByBranch(prs)
-  cacheBranchPullRequest(cwd, repo, branch, mode, byBranch.get(branch) ?? null)
+  cacheBranchPullRequest(scopeId, repo, branch, mode, byBranch.get(branch) ?? null)
   return byBranch
 }
 
@@ -519,7 +535,7 @@ export async function getBranchPullRequestsForRepoRef(
       const key = repoCacheKey(scopeId, repo)
       const current = prCache.get(key)
       if (!current || !cacheFresh(current.expiresAt) || current.prs === null) {
-        prCache.set(key, { expiresAt: Date.now() + PR_CACHE_TTL_MS, mode, prs: null })
+        prCache.set(key, { expiresAt: Date.now() + PULL_REQUEST_CACHE_TTL_MS, mode, prs: null })
       }
     }
     throw err instanceof Error ? err : new Error(String(err))
