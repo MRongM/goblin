@@ -11,17 +11,21 @@ import {
   abortCloneOperation,
   abortRepositoryOperation,
   checkoutRepositoryBranch,
+  checkoutWorktreeBranch,
   cloneRepository,
+  commitRepositoryChanges,
   createRepositoryWorktree,
   deleteRepositoryBranch,
   fetchRepository,
   getRepositoryRemoteBranches,
+  mergeRepositoryBranch,
   openRepositoryEditor,
   openRepositoryRemote,
   openRepositoryTerminal,
   pullRepositoryBranch,
   pushRepositoryBranch,
   removeRepositoryWorktree,
+  resetRepositoryHard,
 } from '#/server/modules/repo-write-paths.ts'
 import { getServerFetchIntervalSec } from '#/server/modules/settings-source.ts'
 
@@ -179,6 +183,61 @@ export function createRepoRoutes() {
     const body = await c.req.json().catch(() => null)
     const cwd = typeof body?.cwd === 'string' ? body.cwd : ''
     return c.json(await jsonOr(async () => abortRepositoryOperation(cwd), false, 'abort'))
+  })
+  app.post('/checkout-in-worktree', async (c) => {
+    const body = await c.req.json().catch(() => null)
+    const repoId = typeof body?.repoId === 'string' ? body.repoId : ''
+    const worktreePath = typeof body?.worktreePath === 'string' ? body.worktreePath : ''
+    const branch = typeof body?.branch === 'string' ? body.branch : ''
+    const sourceToken = typeof body?.sourceToken === 'string' ? body.sourceToken : undefined
+    return c.json(
+      await jsonOr(
+        () => checkoutWorktreeBranch(repoId, worktreePath, branch, c.req.raw.signal, sourceToken),
+        { ok: false, message: 'error.failed-read-repo' },
+        'checkout-in-worktree',
+      ),
+    )
+  })
+  app.post('/commit', async (c) => {
+    const body = await c.req.json().catch(() => null)
+    const repoId = typeof body?.repoId === 'string' ? body.repoId : ''
+    const worktreePath = typeof body?.worktreePath === 'string' ? body.worktreePath : ''
+    const message = typeof body?.message === 'string' ? body.message : ''
+    const sourceToken = typeof body?.sourceToken === 'string' ? body.sourceToken : undefined
+    return c.json(
+      await jsonOr(
+        () => commitRepositoryChanges(repoId, worktreePath, message, c.req.raw.signal, sourceToken),
+        { ok: false, message: 'error.failed-read-repo' },
+        'commit',
+      ),
+    )
+  })
+  app.post('/merge', async (c) => {
+    const body = await c.req.json().catch(() => null)
+    const repoId = typeof body?.repoId === 'string' ? body.repoId : ''
+    const worktreePath = typeof body?.worktreePath === 'string' ? body.worktreePath : ''
+    const branch = typeof body?.branch === 'string' ? body.branch : ''
+    const sourceToken = typeof body?.sourceToken === 'string' ? body.sourceToken : undefined
+    return c.json(
+      await jsonOr(
+        () => mergeRepositoryBranch(repoId, worktreePath, branch, c.req.raw.signal, sourceToken),
+        { ok: false, message: 'error.failed-read-repo' },
+        'merge',
+      ),
+    )
+  })
+  app.post('/reset-hard', async (c) => {
+    const body = await c.req.json().catch(() => null)
+    const repoId = typeof body?.repoId === 'string' ? body.repoId : ''
+    const worktreePath = typeof body?.worktreePath === 'string' ? body.worktreePath : ''
+    const sourceToken = typeof body?.sourceToken === 'string' ? body.sourceToken : undefined
+    return c.json(
+      await jsonOr(
+        () => resetRepositoryHard(repoId, worktreePath, c.req.raw.signal, sourceToken),
+        { ok: false, message: 'error.failed-read-repo' },
+        'reset-hard',
+      ),
+    )
   })
   return app
 }

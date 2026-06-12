@@ -151,3 +151,34 @@ export async function setBackgroundSyncRepos(repoIds: string[]): Promise<void> {
 export async function getRepositoryRemoteBranches(cwd: string, signal?: AbortSignal): Promise<string[]> {
   return await postServerJson('/api/repo/remote-branches', { cwd }, { signal })
 }
+
+export async function checkoutBranchInWorktree(
+  repoId: string,
+  worktreePath: string,
+  branch: string,
+): Promise<ExecResult> {
+  return postServerJson('/api/repo/checkout-in-worktree', { repoId, worktreePath, branch })
+}
+
+export async function commitRepositoryChanges(
+  repoId: string,
+  worktreePath: string,
+  message: string,
+): Promise<ExecResult> {
+  return postServerJson('/api/repo/commit', { repoId, worktreePath, message })
+}
+
+export async function mergeRepositoryBranch(
+  repoId: string,
+  worktreePath: string,
+  branch: string,
+): Promise<ExecResult> {
+  return postServerJson('/api/repo/merge', { repoId, worktreePath, branch })
+}
+
+export async function resetRepositoryHard(
+  repoId: string,
+  worktreePath: string,
+): Promise<ExecResult> {
+  return postServerJson('/api/repo/reset-hard', { repoId, worktreePath })
+}

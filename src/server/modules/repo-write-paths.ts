@@ -3,6 +3,10 @@ import { publishRepoQueryInvalidation } from '#/server/modules/invalidation-brok
 import { resolveRepoBackend, runWithRepoBackend } from '#/server/modules/repo-backend.ts'
 import { getServerSettingsPrefs } from '#/server/modules/settings-source.ts'
 import { cloneRepository as cloneGitRepository } from '#/system/git/clone.ts'
+import { checkoutBranch } from '#/system/git/branches.ts'
+import { commitAllChanges } from '#/system/git/commit.ts'
+import { mergeBranch } from '#/system/git/merge.ts'
+import { resetHardToPreviousCommit } from '#/system/git/reset.ts'
 import { openInPreferredEditor } from '#/system/editors.ts'
 import { openInPreferredTerminal } from '#/system/terminals.ts'
 import { type ExecResult } from '#/shared/git-types.ts'
@@ -324,4 +328,55 @@ export async function openRepositoryEditor(path: string): Promise<ExecResult> {
 export function abortRepositoryOperation(cwd: string): boolean {
   if (!isValidRepoLocator(cwd)) return false
   return abortServerNetworkOp(cwd)
+}
+
+export async function checkoutWorktreeBranch(
+  repoId: string,
+  worktreePath: string,
+  branch: string,
+  signal?: AbortSignal,
+  sourceToken?: string,
+): Promise<ExecResult> {
+  if (!isValidCwd(worktreePath)) return { ok: false, message: 'error.invalid-arguments' }
+  const result = await checkoutBranch(worktreePath, branch, signal)
+  if (result.ok) publishRepoSnapshotInvalidation(repoId, sourceToken)
+  return result
+}
+
+export async function commitRepositoryChanges(
+  repoId: string,
+  worktreePath: string,
+  message: string,
+  signal?: AbortSignal,
+  sourceToken?: string,
+): Promise<ExecResult> {
+  if (!isValidCwd(worktreePath)) return { ok: false, message: 'error.invalid-arguments' }
+  const result = await commitAllChanges(worktreePath, message, signal)
+  if (result.ok) publishRepoSnapshotInvalidation(repoId, sourceToken)
+  return result
+}
+
+export async function mergeRepositoryBranch(
+  repoId: string,
+  worktreePath: string,
+  branch: string,
+  signal?: AbortSignal,
+  sourceToken?: string,
+): Promise<ExecResult> {
+  if (!isValidCwd(worktreePath)) return { ok: false, message: 'error.invalid-arguments' }
+  const result = await mergeBranch(worktreePath, branch, signal)
+  if (result.ok) publishRepoSnapshotInvalidation(repoId, sourceToken)
+  return result
+}
+
+export async function resetRepositoryHard(
+  repoId: string,
+  worktreePath: string,
+  signal?: AbortSignal,
+  sourceToken?: string,
+): Promise<ExecResult> {
+  if (!isValidCwd(worktreePath)) return { ok: false, message: 'error.invalid-arguments' }
+  const result = await resetHardToPreviousCommit(worktreePath, signal)
+  if (result.ok) publishRepoSnapshotInvalidation(repoId, sourceToken)
+  return result
 }
