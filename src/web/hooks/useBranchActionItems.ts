@@ -1,5 +1,5 @@
 import { ArrowDown, ArrowUp, ClipboardCopy, ExternalLink, GitBranch, GitPullRequest, Trash2 } from 'lucide-react'
-import { createElement, type ReactNode } from 'react'
+import { createElement, Fragment, type ReactNode } from 'react'
 import { GitHubOutlineIcon } from '#/web/components/GitHubOutlineIcon.tsx'
 import { GitLabLogoIcon } from '#/web/components/GitLabLogoIcon.tsx'
 import type { RepoBranchState } from '#/web/stores/repos/types.ts'
@@ -10,6 +10,7 @@ import { branchActionDisplayPhase, type BranchActionRepo } from '#/web/hooks/bra
 import { branchPullRequestBelongsToBranch } from '#/shared/git-types.ts'
 import type { BrowserRemoteProvider } from '#/web/types.ts'
 import { useRuntimeExternalAppSettings } from '#/web/runtime-settings-external-apps.ts'
+import { useBranchWriteActions } from '#/web/hooks/useBranchWriteActions.tsx'
 export interface BranchActionItem {
   id: BranchActionItemId
   label: string
@@ -64,6 +65,7 @@ export function useBranchActionItems(repo: BranchActionRepo, branch: RepoBranchS
   const { terminalApp, resolvedTerminalApp, terminalAvailable, editorApp, resolvedEditorApp, editorAvailable } =
     useRuntimeExternalAppSettings()
   const { blocked, busyAction, capabilities, actions, dialogs } = useBranchActions(repo, branch)
+  const writeActions = useBranchWriteActions(repo, branch)
   const disabled = blocked
   const busy = (id: BranchActionItemId) => busyAction === id
   const phase = branchActionDisplayPhase(repo, branch.name)
@@ -212,5 +214,5 @@ export function useBranchActionItems(repo: BranchActionRepo, branch: RepoBranchS
       : []),
   ]
 
-  return { patchItems, mainItems, destructiveItems, dialogs }
+  return { patchItems, mainItems: [...mainItems, ...writeActions.mainItems], destructiveItems: [...destructiveItems, ...writeActions.destructiveItems], dialogs: createElement(Fragment, null, dialogs, writeActions.dialogs) }
 }
