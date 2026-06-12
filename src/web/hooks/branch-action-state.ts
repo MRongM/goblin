@@ -11,6 +11,10 @@ export type BranchActionItemId =
   | 'editor'
   | 'deleteBranch'
   | 'removeWorktree'
+  | 'checkoutTo'
+  | 'merge'
+  | 'commit'
+  | 'resetHard'
 
 export interface BranchActionRepo {
   id: RepoState['id']
