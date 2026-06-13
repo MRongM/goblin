@@ -13,7 +13,7 @@ const mocks = vi.hoisted(() => ({
   useBranchActions: vi.fn(),
 }))
 
-vi.mock('#/web/runtime-settings-hooks.ts', () => ({
+vi.mock('#/web/runtime-settings-external-apps.ts', () => ({
   useRuntimeExternalAppSettings: mocks.useRuntimeExternalAppSettings,
 }))
 vi.mock('#/web/stores/i18n.ts', () => ({
@@ -105,6 +105,8 @@ describe('useBranchActionItems', () => {
 
     expect(itemIds).toContain('terminal')
     expect(itemIds).toContain('editor')
+    expect(itemIds).toContain('createBranch')
+    expect(itemIds).toContain('trackRemoteBranch')
   })
 })
 

@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest'
 import {
   deriveLocalBranchFromRemoteRef,
+  isRemoteTrackingRef,
   normalizeCreateWorktreeInput,
   parseRemoteTrackingRefs,
 } from '#/shared/worktree-create.ts'
@@ -57,5 +58,18 @@ describe('worktree create helpers', () => {
     expect(deriveLocalBranchFromRemoteRef('origin/feature/a')).toBe('feature/a')
     expect(deriveLocalBranchFromRemoteRef('upstream/release/v1')).toBe('release/v1')
     expect(deriveLocalBranchFromRemoteRef('origin/HEAD')).toBeNull()
+  })
+
+  describe('isRemoteTrackingRef', () => {
+    test.each([['origin/main'], ['origin/feature/test'], ['upstream/release/1.0']])('accepts %s', (ref) => {
+      expect(isRemoteTrackingRef(ref)).toBe(true)
+    })
+
+    test.each([['main'], ['origin/HEAD'], ['origin/'], ['/feature/test'], ['origin/-bad'], ['bad remote/feature']])(
+      'rejects %s',
+      (ref) => {
+        expect(isRemoteTrackingRef(ref)).toBe(false)
+      },
+    )
   })
 })

@@ -13,6 +13,7 @@ import {
   checkoutRepositoryBranch,
   checkoutWorktreeBranch,
   cloneRepository,
+  createRepositoryBranch,
   commitRepositoryChanges,
   createRepositoryWorktree,
   deleteRepositoryBranch,
@@ -26,6 +27,7 @@ import {
   pushRepositoryBranch,
   removeRepositoryWorktree,
   resetRepositoryHard,
+  trackRepositoryRemoteBranch,
 } from '#/server/modules/repo-write-paths.ts'
 import { getServerFetchIntervalSec } from '#/server/modules/settings-source.ts'
 
@@ -123,6 +125,22 @@ export function createRepoRoutes() {
     const input = { worktreePath, mode: body?.mode } as Parameters<typeof createRepositoryWorktree>[1]
     const sourceToken = typeof body?.sourceToken === 'string' ? body.sourceToken : undefined
     return c.json(await jsonOr(() => createRepositoryWorktree(cwd, input, c.req.raw.signal, sourceToken), { ok: false, message: 'error.failed-read-repo' }, 'create-worktree'))
+  })
+  app.post('/create-branch', async (c) => {
+    const body = await c.req.json().catch(() => null)
+    const cwd = typeof body?.cwd === 'string' ? body.cwd : ''
+    const branch = typeof body?.branch === 'string' ? body.branch : ''
+    const baseBranch = typeof body?.baseBranch === 'string' ? body.baseBranch : ''
+    const sourceToken = typeof body?.sourceToken === 'string' ? body.sourceToken : undefined
+    return c.json(await jsonOr(() => createRepositoryBranch(cwd, branch, baseBranch, c.req.raw.signal, sourceToken), { ok: false, message: 'error.failed-read-repo' }, 'create-branch'))
+  })
+  app.post('/track-remote-branch', async (c) => {
+    const body = await c.req.json().catch(() => null)
+    const cwd = typeof body?.cwd === 'string' ? body.cwd : ''
+    const localBranch = typeof body?.localBranch === 'string' ? body.localBranch : ''
+    const remoteRef = typeof body?.remoteRef === 'string' ? body.remoteRef : ''
+    const sourceToken = typeof body?.sourceToken === 'string' ? body.sourceToken : undefined
+    return c.json(await jsonOr(() => trackRepositoryRemoteBranch(cwd, localBranch, remoteRef, c.req.raw.signal, sourceToken), { ok: false, message: 'error.failed-read-repo' }, 'track-remote-branch'))
   })
   app.post('/delete-branch', async (c) => {
     const body = await c.req.json().catch(() => null)

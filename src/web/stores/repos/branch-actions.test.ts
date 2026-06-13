@@ -514,6 +514,48 @@ describe('runBranchAction', () => {
   })
 
   test.each([
+    [
+      'createBranch',
+      { kind: 'createBranch', branch: 'feature/new', baseBranch: 'feature/a' },
+      'repo.createBranch',
+      { cwd: REPO_ID, branch: 'feature/new', baseBranch: 'feature/a' },
+      { kind: 'createBranch', branch: 'feature/new' },
+    ],
+    [
+      'trackRemoteBranch',
+      { kind: 'trackRemoteBranch', localBranch: 'feature/remote', remoteRef: 'origin/feature/remote' },
+      'repo.trackRemoteBranch',
+      { cwd: REPO_ID, localBranch: 'feature/remote', remoteRef: 'origin/feature/remote' },
+      { kind: 'trackRemoteBranch', branch: 'feature/remote' },
+    ],
+  ] satisfies Array<[string, RepoBranchAction, string, Record<string, string>, Record<string, string>]>)(
+    'runs %s through the branch action pipeline',
+    async (_label, action, rpcPath, expectedPayload, expectedEventAction) => {
+      let payload: unknown
+      installGoblinTestBridge({
+        [rpcPath]: (input) => {
+          payload = input
+          return { ok: true, message: 'ok' }
+        },
+        'repo.snapshot': async () => ({ branches: [createBranchSnapshot('feature/a')], current: 'feature/a' }),
+        'repo.status': async () => [],
+        'repo.pullRequests': async () => [],
+      })
+
+      const result = await useReposStore.getState().runBranchAction(REPO_ID, action)
+
+      expect(result).toEqual({ ok: true, message: 'ok' })
+      expect(payload).toMatchObject(expectedPayload)
+      expect(payload).toMatchObject({ sourceToken: expect.any(String) })
+      expect(useReposStore.getState().repos[REPO_ID]?.events.at(-1)).toMatchObject({
+        kind: 'result',
+        result: { ok: true, message: 'ok' },
+        action: expectedEventAction,
+      })
+    },
+  )
+
+  test.each([
     ['checkout', { kind: 'checkout', branch: 'feature/a' }, 'repo.checkout'],
     [
       'createWorktree',

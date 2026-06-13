@@ -2,6 +2,8 @@ import path from 'node:path'
 import { checkGitAvailable } from '#/system/git/helper.ts'
 import {
   checkoutBranch,
+  createBranch as createLocalBranch,
+  createTrackingBranch as createLocalTrackingBranch,
   deleteBranch,
   deleteUpstreamBranch,
   getBranches,
@@ -26,6 +28,8 @@ import { resolveRemoteTarget as resolveSshRemoteTarget } from '#/system/ssh/conf
 import { testRemoteRepository } from '#/system/ssh/diagnostics.ts'
 import {
   checkoutRemoteBranch,
+  createRemoteBranch,
+  createRemoteTrackingBranch,
   createRemoteWorktree,
   deleteRemoteBranch,
   fetchRemoteRepository,
@@ -49,6 +53,7 @@ import {
   type RepoSnapshot,
 } from '#/shared/rpc.ts'
 import type { CreateWorktreeInput } from '#/shared/worktree-create.ts'
+import type { CreateBranchInput } from '#/shared/branch-create.ts'
 
 type ProbeAvailability = { ok: true } | { ok: false; message: string }
 
@@ -68,6 +73,7 @@ export interface RepoBackend {
   pull(branch: string, worktreePath?: string, signal?: AbortSignal): Promise<ExecResult>
   push(branch: string, signal?: AbortSignal): Promise<ExecResult>
   createWorktree(input: CreateWorktreeInput, signal?: AbortSignal): Promise<ExecResult>
+  createBranch(input: CreateBranchInput, signal?: AbortSignal): Promise<ExecResult>
   deleteBranch(
     branch: string,
     options?: { force?: boolean; alsoDeleteUpstream?: boolean },
@@ -255,6 +261,11 @@ function createLocalRepoBackend(repoId: string): RepoBackend {
       if (!isValidCwd(repoId)) return { ok: false, message: 'error.invalid-arguments' }
       return await createWorktree(repoId, input, signal)
     },
+    async createBranch(input, signal) {
+      if (!isValidCwd(repoId)) return { ok: false, message: 'error.invalid-arguments' }
+      if (input.kind === 'local') return await createLocalBranch(repoId, input.branch, input.baseBranch, signal)
+      return await createLocalTrackingBranch(repoId, input.localBranch, input.remoteRef, signal)
+    },
     async deleteBranch(branch, options, signal) {
       if (!isValidCwd(repoId)) return { ok: false, message: 'error.invalid-arguments' }
       const validation = await validateBranchDeletion(branch, { force: options?.force }, signal)
@@ -351,6 +362,16 @@ async function createRemoteRepoBackend(repoId: string): Promise<RepoBackend> {
     },
     async createWorktree(input, signal) {
       return await createRemoteWorktree(target, { ...input, signal })
+    },
+    async createBranch(input, signal) {
+      if (input.kind === 'local') {
+        return await createRemoteBranch(target, { branch: input.branch, baseBranch: input.baseBranch, signal })
+      }
+      return await createRemoteTrackingBranch(target, {
+        localBranch: input.localBranch,
+        remoteRef: input.remoteRef,
+        signal,
+      })
     },
     async deleteBranch(branch, options, signal) {
       return await deleteRemoteBranch(target, { branch, force: options?.force, signal })

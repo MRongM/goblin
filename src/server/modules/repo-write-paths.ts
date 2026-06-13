@@ -1,3 +1,4 @@
+import path from 'node:path'
 import { runServerCancellable, abortServerNetworkOp } from '#/server/common/network-ops.ts'
 import { publishRepoQueryInvalidation } from '#/server/modules/invalidation-broker.ts'
 import { resolveRepoBackend, runWithRepoBackend } from '#/server/modules/repo-backend.ts'
@@ -10,12 +11,12 @@ import { resetHardToPreviousCommit } from '#/system/git/reset.ts'
 import { openInPreferredEditor } from '#/system/editors.ts'
 import { openInPreferredTerminal } from '#/system/terminals.ts'
 import { type ExecResult } from '#/shared/git-types.ts'
-import { type NetworkOpKind } from '#/shared/rpc.ts'
+import { isRemoteRepoId, type CloneRepoResult, type NetworkOpKind, type ProbeResult } from '#/shared/rpc.ts'
 import { checkGitAvailable } from '#/system/git/helper.ts'
 import { isValidCwd, isValidRepoLocator } from '#/shared/input-validation.ts'
-import { type CloneRepoResult, type ProbeResult } from '#/shared/rpc.ts'
 import { constants as fsConstants, promises as fs } from 'node:fs'
 import { normalizeCreateWorktreeInput, type CreateWorktreeInput } from '#/shared/worktree-create.ts'
+import { normalizeCreateBranchInput } from '#/shared/branch-create.ts'
 
 type ProbeAvailability = { ok: true } | { ok: false; message: string }
 
@@ -267,12 +268,43 @@ export async function createRepositoryWorktree(
   if (!isValidRepoLocator(cwd)) return { ok: false, message: 'error.invalid-arguments' }
   const normalized = normalizeCreateWorktreeInput(input)
   if (!normalized) return { ok: false, message: 'error.invalid-arguments' }
+  if (!isRemoteRepoId(cwd) && !path.isAbsolute(normalized.worktreePath)) return { ok: false, message: 'error.invalid-path' }
   return await runWithRepoBackend(cwd, async (backend) => {
     return await publishSnapshotInvalidationAfterMutation(
       cwd,
       await backend.createWorktree(normalized, signal),
       sourceToken,
     )
+  })
+}
+
+export async function createRepositoryBranch(
+  cwd: string,
+  branch: string,
+  baseBranch: string,
+  signal?: AbortSignal,
+  sourceToken?: string,
+): Promise<ExecResult> {
+  if (!isValidRepoLocator(cwd)) return { ok: false, message: 'error.invalid-arguments' }
+  const normalized = normalizeCreateBranchInput({ kind: 'local', branch, baseBranch })
+  if (!normalized) return { ok: false, message: 'error.invalid-arguments' }
+  return await runWithRepoBackend(cwd, async (backend) => {
+    return await publishSnapshotInvalidationAfterMutation(cwd, await backend.createBranch(normalized, signal), sourceToken)
+  })
+}
+
+export async function trackRepositoryRemoteBranch(
+  cwd: string,
+  localBranch: string,
+  remoteRef: string,
+  signal?: AbortSignal,
+  sourceToken?: string,
+): Promise<ExecResult> {
+  if (!isValidRepoLocator(cwd)) return { ok: false, message: 'error.invalid-arguments' }
+  const normalized = normalizeCreateBranchInput({ kind: 'trackRemote', localBranch, remoteRef })
+  if (!normalized) return { ok: false, message: 'error.invalid-arguments' }
+  return await runWithRepoBackend(cwd, async (backend) => {
+    return await publishSnapshotInvalidationAfterMutation(cwd, await backend.createBranch(normalized, signal), sourceToken)
   })
 }
 

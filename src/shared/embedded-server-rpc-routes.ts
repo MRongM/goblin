@@ -8,6 +8,8 @@ export const EMBEDDED_SERVER_RPC_ROUTES = {
   'repo.remoteBranches': { route: '/api/repo/remote-branches', method: 'POST' },
   'repo.patch': { route: '/api/repo/patch', method: 'POST' },
   'repo.checkout': { route: '/api/repo/checkout', method: 'POST' },
+  'repo.createBranch': { route: '/api/repo/create-branch', method: 'POST' },
+  'repo.trackRemoteBranch': { route: '/api/repo/track-remote-branch', method: 'POST' },
   'repo.deleteBranch': { route: '/api/repo/delete-branch', method: 'POST' },
   'repo.removeWorktree': { route: '/api/repo/remove-worktree', method: 'POST' },
   'repo.createWorktree': { route: '/api/repo/create-worktree', method: 'POST' },

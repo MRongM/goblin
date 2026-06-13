@@ -1,6 +1,7 @@
 import { git, gitResultWithOptions, NETWORK_TIMEOUT_MS } from '#/system/git/helper.ts'
 import { FIELD_SEP, parseBranches, parseLog } from '#/system/git/parsers.ts'
 import { isSafeBranchName } from '#/shared/refnames.ts'
+import { isRemoteTrackingRef } from '#/shared/worktree-create.ts'
 import type { BranchSnapshotInfo, ExecResult, LogEntry, WorktreeInfo } from '#/shared/git-types.ts'
 
 export async function isGitRepo(cwd: string): Promise<boolean> {
@@ -152,6 +153,28 @@ export async function getLog(
 export async function checkoutBranch(cwd: string, name: string, signal?: AbortSignal): Promise<ExecResult> {
   if (!isSafeBranchName(name)) return { ok: false, message: 'error.invalid-arguments' }
   return gitResultWithOptions(cwd, { signal }, 'switch', '--', name)
+}
+
+export async function createBranch(
+  cwd: string,
+  name: string,
+  baseBranch: string,
+  signal?: AbortSignal,
+): Promise<ExecResult> {
+  if (!isSafeBranchName(name) || !isSafeBranchName(baseBranch)) return { ok: false, message: 'error.invalid-arguments' }
+  return gitResultWithOptions(cwd, { signal }, 'branch', '--', name, baseBranch)
+}
+
+export async function createTrackingBranch(
+  cwd: string,
+  localBranch: string,
+  remoteRef: string,
+  signal?: AbortSignal,
+): Promise<ExecResult> {
+  if (!isSafeBranchName(localBranch) || !isRemoteTrackingRef(remoteRef)) {
+    return { ok: false, message: 'error.invalid-arguments' }
+  }
+  return gitResultWithOptions(cwd, { signal }, 'branch', '--track', localBranch, remoteRef)
 }
 
 export async function deleteBranch(

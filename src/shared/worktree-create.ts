@@ -74,7 +74,7 @@ function stringField(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
 }
 
-function isRemoteTrackingRef(ref: string): boolean {
+export function isRemoteTrackingRef(ref: string): boolean {
   const slash = ref.indexOf('/')
   if (slash <= 0) return false
   if (ref.endsWith('/HEAD')) return false

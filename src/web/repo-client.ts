@@ -93,6 +93,26 @@ export async function createRepositoryWorktree(
   )
 }
 
+export async function createRepositoryBranch(
+  cwd: string,
+  branch: string,
+  baseBranch: string,
+  signal?: AbortSignal,
+  sourceToken?: string,
+): Promise<ExecResult> {
+  return await postServerJson('/api/repo/create-branch', { cwd, branch, baseBranch, sourceToken }, { signal })
+}
+
+export async function trackRepositoryRemoteBranch(
+  cwd: string,
+  localBranch: string,
+  remoteRef: string,
+  signal?: AbortSignal,
+  sourceToken?: string,
+): Promise<ExecResult> {
+  return await postServerJson('/api/repo/track-remote-branch', { cwd, localBranch, remoteRef, sourceToken }, { signal })
+}
+
 export async function deleteRepositoryBranch(
   cwd: string,
   branch: string,

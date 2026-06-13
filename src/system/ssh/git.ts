@@ -21,7 +21,7 @@ import {
 import { type BranchSnapshotInfo, type ExecResult, type GitRemoteInfo, type LogEntry, type RepoRemoteInfo, type WorktreeInfo, type WorktreeStatus } from '#/shared/git-types.ts'
 import { validateBranchDeletionPolicy, validateRemovableWorktreeState } from '#/shared/repo-action-policy.ts'
 import type { RemoteRepoTarget } from '#/shared/remote-repo.ts'
-import { parseRemoteTrackingRefs, type CreateWorktreeInput } from '#/shared/worktree-create.ts'
+import { isRemoteTrackingRef, parseRemoteTrackingRefs, type CreateWorktreeInput } from '#/shared/worktree-create.ts'
 import { isSafeBranchName } from '#/shared/refnames.ts'
 
 type RemoteGitRunner = (
@@ -271,6 +271,43 @@ export async function createRemoteWorktree(
       type: 'gitWorktreeAdd',
       path: target.remotePath,
       input: { worktreePath: input.worktreePath, mode: input.mode },
+    },
+    target,
+    { signal: input.signal, timeoutMs: REMOTE_BRANCH_OP_TIMEOUT_MS },
+  )
+  return remoteExecResult(result)
+}
+
+export async function createRemoteBranch(
+  target: RemoteRepoTarget,
+  input: { branch: string; baseBranch: string; signal?: AbortSignal; run?: RemoteGitRunner },
+): Promise<ExecResult> {
+  if (!isSafeBranchName(input.branch) || !isSafeBranchName(input.baseBranch)) {
+    return { ok: false, message: 'error.invalid-arguments' }
+  }
+  const run: RemoteGitRunner = input.run ?? ((command, t, runOptions) => runRemoteCommand(t, command, runOptions))
+  const result = await run(
+    { type: 'gitBranchCreate', path: target.remotePath, branch: input.branch, baseBranch: input.baseBranch },
+    target,
+    { signal: input.signal, timeoutMs: REMOTE_BRANCH_OP_TIMEOUT_MS },
+  )
+  return remoteExecResult(result)
+}
+
+export async function createRemoteTrackingBranch(
+  target: RemoteRepoTarget,
+  input: { localBranch: string; remoteRef: string; signal?: AbortSignal; run?: RemoteGitRunner },
+): Promise<ExecResult> {
+  if (!isSafeBranchName(input.localBranch) || !isRemoteTrackingRef(input.remoteRef)) {
+    return { ok: false, message: 'error.invalid-arguments' }
+  }
+  const run: RemoteGitRunner = input.run ?? ((command, t, runOptions) => runRemoteCommand(t, command, runOptions))
+  const result = await run(
+    {
+      type: 'gitBranchTrackRemote',
+      path: target.remotePath,
+      localBranch: input.localBranch,
+      remoteRef: input.remoteRef,
     },
     target,
     { signal: input.signal, timeoutMs: REMOTE_BRANCH_OP_TIMEOUT_MS },

@@ -45,4 +45,24 @@ describe('remote command scripts', () => {
       }).script,
     ).toContain("worktree add --detach -- '/srv/repo-detached' 'origin/feature/a'")
   })
+
+  test('renders branch create commands', () => {
+    expect(
+      buildRemoteCommandInvocation(TARGET, {
+        type: 'gitBranchCreate',
+        path: '/srv/repo',
+        branch: 'feature/new',
+        baseBranch: 'main',
+      }).script,
+    ).toContain("git -C '/srv/repo' branch -- 'feature/new' 'main'")
+
+    expect(
+      buildRemoteCommandInvocation(TARGET, {
+        type: 'gitBranchTrackRemote',
+        path: '/srv/repo',
+        localBranch: 'feature/remote',
+        remoteRef: 'origin/feature/remote',
+      }).script,
+    ).toContain("git -C '/srv/repo' branch --track 'feature/remote' 'origin/feature/remote'")
+  })
 })

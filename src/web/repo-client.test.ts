@@ -141,6 +141,58 @@ describe('repo-client', () => {
     )
   })
 
+  test('posts branch creation requests through embedded server routes', async () => {
+    installWebBootstrap(webBootstrap({ initialServer: { url: 'http://127.0.0.1:32100/', secret: 'secret' } }))
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ ok: true, message: 'ok' }),
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { createRepositoryBranch, trackRepositoryRemoteBranch } = await import('#/web/repo-client.ts')
+    await expect(
+      createRepositoryBranch('/tmp/repo', 'feature/new', 'main', undefined, 'repo_branch_test'),
+    ).resolves.toEqual({ ok: true, message: 'ok' })
+    await expect(
+      trackRepositoryRemoteBranch(
+        '/tmp/repo',
+        'feature/remote',
+        'origin/feature/remote',
+        undefined,
+        'repo_branch_test',
+      ),
+    ).resolves.toEqual({ ok: true, message: 'ok' })
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      'http://127.0.0.1:32100/api/repo/create-branch',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({ 'x-goblin-internal-secret': 'secret' }),
+        body: JSON.stringify({
+          cwd: '/tmp/repo',
+          branch: 'feature/new',
+          baseBranch: 'main',
+          sourceToken: 'repo_branch_test',
+        }),
+      }),
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      'http://127.0.0.1:32100/api/repo/track-remote-branch',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({ 'x-goblin-internal-secret': 'secret' }),
+        body: JSON.stringify({
+          cwd: '/tmp/repo',
+          localBranch: 'feature/remote',
+          remoteRef: 'origin/feature/remote',
+          sourceToken: 'repo_branch_test',
+        }),
+      }),
+    )
+  })
+
   test('opens terminal and editor through embedded server routes even when a native shell exists', async () => {
     const openTerminal = vi.fn(async () => ({ ok: true, message: 'native-terminal' }))
     const openEditor = vi.fn(async () => ({ ok: true, message: 'native-editor' }))

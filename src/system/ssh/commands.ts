@@ -33,6 +33,8 @@ export type RemoteCommandKind =
   | { type: 'gitRemoteBranches'; path: string }
   | { type: 'gitWorktreeAdd'; path: string; input: CreateWorktreeInput }
   | { type: 'gitWorktreeRemove'; path: string; worktreePath: string }
+  | { type: 'gitBranchCreate'; path: string; branch: string; baseBranch: string }
+  | { type: 'gitBranchTrackRemote'; path: string; localBranch: string; remoteRef: string }
   | { type: 'gitBranchDelete'; path: string; branch: string; force?: boolean }
   | { type: 'gitUpstream'; path: string; branch: string }
   | { type: 'gitIsAncestor'; path: string; ancestor: string; descendant: string }
@@ -212,6 +214,10 @@ function scriptForCommand(command: RemoteCommandKind): string {
       return `git -C ${shellQuote(command.path)} worktree add ${remoteWorktreeAddArgs(command.input)}`
     case 'gitWorktreeRemove':
       return `git -C ${shellQuote(command.path)} worktree remove -- ${shellQuote(command.worktreePath)}`
+    case 'gitBranchCreate':
+      return `git -C ${shellQuote(command.path)} branch -- ${shellQuote(command.branch)} ${shellQuote(command.baseBranch)}`
+    case 'gitBranchTrackRemote':
+      return `git -C ${shellQuote(command.path)} branch --track ${shellQuote(command.localBranch)} ${shellQuote(command.remoteRef)}`
     case 'gitBranchDelete':
       return `git -C ${shellQuote(command.path)} branch ${command.force ? '-D' : '-d'} -- ${shellQuote(
         command.branch,

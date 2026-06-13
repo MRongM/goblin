@@ -30,11 +30,13 @@ import {
 } from '#/web/stores/repos/invalidation-sources.ts'
 import {
   checkoutRepositoryBranch,
+  createRepositoryBranch,
   createRepositoryWorktree,
   deleteRepositoryBranch,
   pullRepositoryBranch,
   pushRepositoryBranch,
   removeRepositoryWorktree,
+  trackRepositoryRemoteBranch,
 } from '#/web/repo-client.ts'
 const BRANCH_NETWORK_OPERATION_KEY = 'branch-network-action'
 const BRANCH_ACTION_WAIT_TIMEOUT_MS = 30_000
@@ -43,6 +45,8 @@ const BRANCH_ACTION_REASON_BY_KIND: Record<RepoBranchActionKind, RepoBranchActio
   checkout: 'branch:checkout',
   pull: 'branch:pull',
   push: 'branch:push',
+  createBranch: 'branch:createBranch',
+  trackRemoteBranch: 'branch:trackRemoteBranch',
   createWorktree: 'branch:createWorktree',
   deleteBranch: 'branch:deleteBranch',
   removeWorktree: 'branch:removeWorktree',
@@ -85,6 +89,10 @@ function branchActionOperationTarget(action: RepoBranchAction): string | null {
     case 'deleteBranch':
     case 'removeWorktree':
       return action.branch
+    case 'createBranch':
+      return action.branch
+    case 'trackRemoteBranch':
+      return action.localBranch
     case 'createWorktree':
       return createWorktreeEventBranch(action.input)
   }
@@ -99,6 +107,10 @@ function branchActionEventAction(action: RepoBranchAction): RepoEventAction {
     case 'push':
     case 'deleteBranch':
       return { kind: action.kind, branch: action.branch }
+    case 'createBranch':
+      return { kind: action.kind, branch: action.branch }
+    case 'trackRemoteBranch':
+      return { kind: action.kind, branch: action.localBranch }
     case 'createWorktree':
       return { kind: action.kind, branch: createWorktreeEventBranch(action.input), worktreePath: action.input.worktreePath }
     case 'removeWorktree':
@@ -222,6 +234,10 @@ function runBranchActionRpc(
       return pullRepositoryBranch(repoId, action.branch, action.worktreePath, signal, sourceToken)
     case 'push':
       return pushRepositoryBranch(repoId, action.branch, signal, sourceToken)
+    case 'createBranch':
+      return createRepositoryBranch(repoId, action.branch, action.baseBranch, signal, sourceToken)
+    case 'trackRemoteBranch':
+      return trackRepositoryRemoteBranch(repoId, action.localBranch, action.remoteRef, signal, sourceToken)
     case 'createWorktree':
       return createRepositoryWorktree(repoId, action.input, signal, sourceToken)
     case 'deleteBranch':

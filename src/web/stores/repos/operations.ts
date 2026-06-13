@@ -12,6 +12,8 @@ export type RepoBranchActionReason =
   | 'branch:checkout'
   | 'branch:pull'
   | 'branch:push'
+  | 'branch:createBranch'
+  | 'branch:trackRemoteBranch'
   | 'branch:createWorktree'
   | 'branch:deleteBranch'
   | 'branch:removeWorktree'

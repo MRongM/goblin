@@ -5,6 +5,8 @@ import type { PullRequestEntry, RepoSnapshot } from '#/shared/rpc.ts'
 const mocks = vi.hoisted(() => ({
   checkGitAvailable: vi.fn(),
   checkoutBranch: vi.fn(),
+  createBranch: vi.fn(),
+  createTrackingBranch: vi.fn(),
   createWorktree: vi.fn(),
   deleteBranch: vi.fn(),
   deleteUpstreamBranch: vi.fn(),
@@ -31,10 +33,14 @@ const mocks = vi.hoisted(() => ({
   runServerCancellable: vi.fn(),
   setBackgroundSyncRepos: vi.fn(),
   publishRepoQueryInvalidation: vi.fn(),
+  createRemoteBranch: vi.fn(),
+  createRemoteTrackingBranch: vi.fn(),
 }))
 
 vi.mock('#/system/git/branches.ts', () => ({
   checkoutBranch: mocks.checkoutBranch,
+  createBranch: mocks.createBranch,
+  createTrackingBranch: mocks.createTrackingBranch,
   deleteBranch: mocks.deleteBranch,
   deleteUpstreamBranch: mocks.deleteUpstreamBranch,
   getBranches: mocks.getBranches,
@@ -98,6 +104,8 @@ vi.mock('#/system/ssh/diagnostics.ts', () => ({
 }))
 
 vi.mock('#/system/ssh/git.ts', () => ({
+  createRemoteBranch: mocks.createRemoteBranch,
+  createRemoteTrackingBranch: mocks.createRemoteTrackingBranch,
   createRemoteWorktree: vi.fn(),
   fetchRemoteRepository: vi.fn(),
   getRemoteTrackingBranches: vi.fn(),
@@ -133,6 +141,10 @@ beforeEach(() => {
   mocks.fsMkdir.mockResolvedValue(undefined)
   mocks.isGitRepo.mockResolvedValue(true)
   mocks.checkoutBranch.mockResolvedValue({ ok: true, message: 'ok' })
+  mocks.createBranch.mockResolvedValue({ ok: true, message: 'ok' })
+  mocks.createTrackingBranch.mockResolvedValue({ ok: true, message: 'ok' })
+  mocks.createRemoteBranch.mockResolvedValue({ ok: true, message: 'ok' })
+  mocks.createRemoteTrackingBranch.mockResolvedValue({ ok: true, message: 'ok' })
   mocks.pullBranch.mockResolvedValue({ ok: true, message: 'ok' })
   mocks.pushBranch.mockResolvedValue({ ok: true, message: 'ok' })
   mocks.createWorktree.mockResolvedValue({ ok: true, message: 'ok' })
@@ -331,6 +343,67 @@ describe('probeRepository path errors', () => {
 })
 
 describe('repo mutation invalidation publishing', () => {
+  test('createRepositoryBranch delegates to backend and publishes source-token invalidation', async () => {
+    const { createRepositoryBranch } = await import('#/server/modules/repo-write-paths.ts')
+
+    const result = await createRepositoryBranch('/tmp/repo', 'feature/new', 'main', undefined, 'repo_branch_test')
+
+    expect(result).toEqual({ ok: true, message: 'ok' })
+    expect(mocks.createBranch).toHaveBeenCalledWith('/tmp/repo', 'feature/new', 'main', undefined)
+    expect(mocks.publishRepoQueryInvalidation).toHaveBeenCalledWith({
+      repoId: '/tmp/repo',
+      query: 'repo-snapshot',
+      sourceToken: 'repo_branch_test',
+    })
+  })
+
+  test('trackRepositoryRemoteBranch delegates to backend and publishes source-token invalidation', async () => {
+    const { trackRepositoryRemoteBranch } = await import('#/server/modules/repo-write-paths.ts')
+
+    const result = await trackRepositoryRemoteBranch(
+      '/tmp/repo',
+      'feature/remote',
+      'origin/feature/remote',
+      undefined,
+      'repo_branch_test',
+    )
+
+    expect(result).toEqual({ ok: true, message: 'ok' })
+    expect(mocks.createTrackingBranch).toHaveBeenCalledWith(
+      '/tmp/repo',
+      'feature/remote',
+      'origin/feature/remote',
+      undefined,
+    )
+    expect(mocks.publishRepoQueryInvalidation).toHaveBeenCalledWith({
+      repoId: '/tmp/repo',
+      query: 'repo-snapshot',
+      sourceToken: 'repo_branch_test',
+    })
+  })
+
+  test.each([
+    [
+      'createRepositoryBranch',
+      () => mocks.createBranch.mockResolvedValueOnce({ ok: false, message: 'fatal: branch exists' }),
+      async (repo: typeof import('#/server/modules/repo-write-paths.ts')) =>
+        repo.createRepositoryBranch('/tmp/repo', 'feature/new', 'main'),
+    ],
+    [
+      'trackRepositoryRemoteBranch',
+      () => mocks.createTrackingBranch.mockResolvedValueOnce({ ok: false, message: 'fatal: branch exists' }),
+      async (repo: typeof import('#/server/modules/repo-write-paths.ts')) =>
+        repo.trackRepositoryRemoteBranch('/tmp/repo', 'feature/remote', 'origin/feature/remote'),
+    ],
+  ])('%s does not publish snapshot invalidation after failure', async (_name, setup, run) => {
+    setup()
+    const repo = await import('#/server/modules/repo-write-paths.ts')
+
+    await run(repo)
+
+    expect(mocks.publishRepoQueryInvalidation).not.toHaveBeenCalled()
+  })
+
   test('createRepositoryWorktree passes object-shaped input to the backend and publishes source-token invalidation', async () => {
     const { createRepositoryWorktree } = await import('#/server/modules/repo-write-paths.ts')
 

@@ -5,7 +5,16 @@ import {
 } from '#/web/stores/repos/branch-action-scheduler.ts'
 import type { RepoBranchActionKind } from '#/web/stores/repos/branch-action-types.ts'
 import type { RepoOperationPhase } from '#/web/stores/repos/operations.ts'
-const ACTIONS: RepoBranchActionKind[] = ['checkout', 'pull', 'push', 'createWorktree', 'deleteBranch', 'removeWorktree']
+const ACTIONS: RepoBranchActionKind[] = [
+  'checkout',
+  'pull',
+  'push',
+  'createBranch',
+  'trackRemoteBranch',
+  'createWorktree',
+  'deleteBranch',
+  'removeWorktree',
+]
 
 function decision(input: {
   actionKind: RepoBranchActionKind
