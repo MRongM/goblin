@@ -122,8 +122,8 @@ export function parseLog(output: string): LogEntry[] {
  * quotes / unicode without manual unescaping.
  *
  * Rename and copy entries occupy TWO records: the new path first,
- * then the original path. We surface the new path (matching what
- * non-z `git status` shows the user) and discard the original.
+ * then the original path. We surface both so UI features can show
+ * virtual old-path nodes when needed.
  */
 export function parseStatus(output: string): StatusEntry[] {
   if (!output) return []
@@ -135,8 +135,9 @@ export function parseStatus(output: string): StatusEntry[] {
     const x = line[0] ?? ' '
     const y = line[1] ?? ' '
     const path = line.slice(3)
+    const originalPath = x === 'R' || x === 'C' ? records[i + 1] : undefined
     if (x === 'R' || x === 'C') i++
-    entries.push({ x, y, path })
+    entries.push(originalPath ? { x, y, path, originalPath } : { x, y, path })
   }
   return entries
 }

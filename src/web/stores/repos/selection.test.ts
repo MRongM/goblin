@@ -290,14 +290,14 @@ describe('setDetailTab', () => {
     expect(useReposStore.getState().repos[REPO_ID]).toBe(before)
   })
 
-  test('persists the changes tab immediately', async () => {
+  test('normalizes the moved changes tab to status immediately', async () => {
     seedRepo({ selectedBranch: 'main', detailTab: 'status' })
 
     useReposStore.getState().setDetailTab(REPO_ID, 'changes')
     await flushAsyncWork()
 
-    expect(useReposStore.getState().repos[REPO_ID]?.ui.detailTab).toBe('changes')
-    expect(useReposStore.getState().restorableRepoCache[REPO_ID]?.ui.detailTab).toBe('changes')
+    expect(useReposStore.getState().repos[REPO_ID]?.ui.detailTab).toBe('status')
+    expect(useReposStore.getState().restorableRepoCache[REPO_ID]?.ui.detailTab).toBeUndefined()
   })
 
   test('passes the current repo token to detail tab refreshes', () => {
@@ -549,6 +549,18 @@ describe('setDetailPaneSize', () => {
     expect(useReposStore.getState().detailPaneSizes).toEqual({
       'top-bottom': DEFAULT_DETAIL_PANE_SIZES['top-bottom'],
       'left-right': 90,
+    })
+  })
+})
+
+describe('setFileTreePaneSize', () => {
+  test('stores file tree pane sizes per workspace layout', () => {
+    useReposStore.getState().setFileTreePaneSize('top-bottom', 44.4)
+    useReposStore.getState().setFileTreePaneSize('left-right', 35.2)
+
+    expect(useReposStore.getState().fileTreePaneSizes).toEqual({
+      'top-bottom': 44.4,
+      'left-right': 35.2,
     })
   })
 })

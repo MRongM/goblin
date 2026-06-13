@@ -123,6 +123,8 @@ const FOCUS_BRANCH_ACTIONS_REPO_EQUAL = (a: BranchActionRepo | undefined, b: Bra
     a.data.status === b.data.status &&
     a.data.worktreesByPath === b.data.worktreesByPath &&
     a.operations.branchAction === b.operations.branchAction &&
+    a.operations.fetch === b.operations.fetch &&
+    a.operations.manualRefresh === b.operations.manualRefresh &&
     a.remote.hasRemotes === b.remote.hasRemotes &&
     a.remote.hasBrowserRemote === b.remote.hasBrowserRemote &&
     a.remote.hasGitHubRemote === b.remote.hasGitHubRemote &&
@@ -146,6 +148,8 @@ function FocusBranchActions({ repoId, branch }: { repoId: string; branch: RepoBr
         },
         operations: {
           branchAction: repoState.operations.branchAction,
+          fetch: repoState.operations.fetch,
+          manualRefresh: repoState.operations.manualRefresh,
         },
         remote: {
           hasRemotes: repoState.remote.hasRemotes,

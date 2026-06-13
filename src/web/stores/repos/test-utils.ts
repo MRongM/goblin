@@ -19,6 +19,7 @@ import type { DetailTab, RepoBranchState, RepoState } from '#/web/stores/repos/t
 import {
   DEFAULT_DETAIL_COLLAPSED,
   DEFAULT_DETAIL_PANE_SIZES,
+  DEFAULT_FILE_TREE_PANE_SIZES,
   DEFAULT_WORKSPACE_LAYOUT,
 } from '#/shared/workspace-layout.ts'
 export type RpcTestHandler = (input: any) => unknown
@@ -109,6 +110,7 @@ export function resetReposStore(): void {
     detailFocusMode: false,
     workspaceLayout: DEFAULT_WORKSPACE_LAYOUT,
     detailPaneSizes: DEFAULT_DETAIL_PANE_SIZES,
+    fileTreePaneSizes: DEFAULT_FILE_TREE_PANE_SIZES,
     selectedTerminalByWorktree: {},
   })
 }
@@ -528,6 +530,7 @@ export function seedRepoState(options: {
     detailFocusMode: false,
     workspaceLayout: DEFAULT_WORKSPACE_LAYOUT,
     detailPaneSizes: DEFAULT_DETAIL_PANE_SIZES,
+    fileTreePaneSizes: DEFAULT_FILE_TREE_PANE_SIZES,
   })
   return repo
 }

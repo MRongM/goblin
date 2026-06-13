@@ -7,7 +7,7 @@
 @import './theme/theme.css';
 
 @font-face {
-  font-family: 'Goblin Mono';
+  font-family: 'Maple Mono NF CN';
   src: url('./assets/fonts/MapleMono-NF-CN-Regular.woff2') format('woff2');
   font-style: normal;
   font-weight: 400;
@@ -15,7 +15,7 @@
 }
 
 @font-face {
-  font-family: 'Goblin Mono';
+  font-family: 'Maple Mono NF CN';
   src: url('./assets/fonts/MapleMono-NF-CN-Italic.woff2') format('woff2');
   font-style: italic;
   font-weight: 400;
@@ -23,7 +23,7 @@
 }
 
 @font-face {
-  font-family: 'Goblin Mono';
+  font-family: 'Maple Mono NF CN';
   src: url('./assets/fonts/MapleMono-NF-CN-Bold.woff2') format('woff2');
   font-style: normal;
   font-weight: 700;
@@ -31,7 +31,7 @@
 }
 
 @font-face {
-  font-family: 'Goblin Mono';
+  font-family: 'Maple Mono NF CN';
   src: url('./assets/fonts/MapleMono-NF-CN-BoldItalic.woff2') format('woff2');
   font-style: italic;
   font-weight: 700;

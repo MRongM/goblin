@@ -1,4 +1,5 @@
 import { Loader2, MoreHorizontal } from 'lucide-react'
+import { Fragment } from 'react'
 import type { RepoBranchState } from '#/web/stores/repos/types.ts'
 import { useT } from '#/web/stores/i18n.ts'
 import { Button } from '#/web/components/ui/button.tsx'
@@ -25,13 +26,14 @@ interface Props {
 }
 
 export function BranchActionsMenu({ repo, branch, open, onOpenChange }: Props) {
-  const { patchItems, mainItems, destructiveItems, dialogs } = useBranchActionItems(repo, branch)
+  const { patchItems, mainItems, externalItems, destructiveItems, dialogs } = useBranchActionItems(repo, branch)
 
   return (
     <>
       <BranchActionsDropdown
         patchItems={patchItems}
         mainItems={mainItems}
+        externalItems={externalItems}
         destructiveItems={destructiveItems}
         open={open}
         onOpenChange={onOpenChange}
@@ -45,10 +47,11 @@ export function BranchActionsMenu({ repo, branch, open, onOpenChange }: Props) {
 export function BranchActionsDropdown({
   patchItems,
   mainItems,
+  externalItems,
   destructiveItems,
   open,
   onOpenChange,
-}: Pick<BranchActionItemGroups, 'patchItems' | 'mainItems' | 'destructiveItems'> & {
+}: Pick<BranchActionItemGroups, 'patchItems' | 'mainItems' | 'externalItems' | 'destructiveItems'> & {
   open?: boolean
   onOpenChange?: (open: boolean) => void
 }) {
@@ -56,8 +59,12 @@ export function BranchActionsDropdown({
   const { pending: pendingAction, run } = useAsyncPending<BranchActionItem['id']>()
   const visiblePatchItems = patchItems.filter((item) => item.visible)
   const visibleMainItems = mainItems.filter((item) => item.visible)
+  const visibleExternalItems = externalItems.filter((item) => item.visible)
   const visibleDestructiveItems = destructiveItems.filter((item) => item.visible)
-  const visibleItems = [...visiblePatchItems, ...visibleMainItems, ...visibleDestructiveItems]
+  const itemGroups = [visiblePatchItems, visibleMainItems, visibleExternalItems, visibleDestructiveItems].filter(
+    (items) => items.length > 0,
+  )
+  const visibleItems = itemGroups.flat()
   const busyAction = pendingAction ?? visibleItems.find((item) => item.busy)?.id ?? null
 
   function runItem(item: BranchActionItem) {
@@ -82,25 +89,14 @@ export function BranchActionsDropdown({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
-        {visiblePatchItems.length > 0 && (
-          <>
-            {visiblePatchItems.map((item) => (
+        {itemGroups.map((items, groupIndex) => (
+          <Fragment key={groupIndex}>
+            {groupIndex > 0 && <DropdownMenuSeparator />}
+            {items.map((item) => (
               <BranchActionMenuItem key={item.id} item={item} busy={busyAction} onSelect={() => runItem(item)} />
             ))}
-            <DropdownMenuSeparator />
-          </>
-        )}
-        {visibleMainItems.map((item) => (
-          <BranchActionMenuItem key={item.id} item={item} busy={busyAction} onSelect={() => runItem(item)} />
+          </Fragment>
         ))}
-        {visibleDestructiveItems.length > 0 && (
-          <>
-            <DropdownMenuSeparator />
-            {visibleDestructiveItems.map((item) => (
-              <BranchActionMenuItem key={item.id} item={item} busy={busyAction} onSelect={() => runItem(item)} />
-            ))}
-          </>
-        )}
       </DropdownMenuContent>
     </DropdownMenu>
   )

@@ -70,6 +70,8 @@ function branchListRepoEqual(a: BranchListRepo | undefined, b: BranchListRepo | 
       a.ui.branchViewMode === b.ui.branchViewMode &&
       a.ui.worktreePathOrder === b.ui.worktreePathOrder &&
       a.operations.branchAction === b.operations.branchAction &&
+      a.operations.fetch === b.operations.fetch &&
+      a.operations.manualRefresh === b.operations.manualRefresh &&
       a.remote.target === b.remote.target &&
       a.remote.hasRemotes === b.remote.hasRemotes &&
       a.remote.hasBrowserRemote === b.remote.hasBrowserRemote &&
@@ -127,6 +129,8 @@ export function BranchList({ repoId, showActions = true }: Props) {
             },
             operations: {
               branchAction: repo.operations.branchAction,
+              fetch: repo.operations.fetch,
+              manualRefresh: repo.operations.manualRefresh,
             },
             remote: {
               target: repo.remote.target,

@@ -18,6 +18,7 @@
 import { Trans } from 'react-i18next'
 import { Toaster } from '#/web/components/ui/sonner.tsx'
 import { Topbar } from '#/web/components/Topbar.tsx'
+import { TopbarRepoControls } from '#/web/components/topbar/TopbarRepoControls.tsx'
 import { ErrorBoundary } from '#/web/components/ErrorBoundary.tsx'
 import { RepoTabs } from '#/web/components/RepoTabs.tsx'
 import { RepoCloneDialog } from '#/web/components/RepoCloneDialog.tsx'
@@ -217,7 +218,10 @@ function MainWindowViewportContent({
   }
   return (
     <>
-      <Topbar onOpenSettings={() => openSettings()}>
+      <Topbar
+        onOpenSettings={() => openSettings()}
+        actions={visibleRepoId ? <TopbarRepoControls repoId={visibleRepoId} /> : null}
+      >
         <RepoTabs
           currentRepoId={visibleRepoId}
           onOpenRepoPathDialog={overlays.openRepoPathDialog}
@@ -231,7 +235,6 @@ function MainWindowViewportContent({
             <RepoView repoId={visibleRepoId} />
           ) : !sessionReady ? (
             <RepoWorkspaceSkeleton
-              showRepoToolbar
               layout={workspaceLayout}
               detailCollapsed={detailCollapsed}
               detailFocusMode={detailFocusMode}

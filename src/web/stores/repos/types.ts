@@ -146,6 +146,7 @@ export interface RestorableWorkspaceState {
   detailFocusMode: boolean
   workspaceLayout: RepoWorkspaceLayout
   detailPaneSizes: WorkspaceDetailPaneSizes
+  fileTreePaneSizes: WorkspaceDetailPaneSizes
   /** Per worktree terminal selection restored from SessionState.selectedTerminalByWorktree. */
   selectedTerminalByWorktree: Record<string, string>
 }
@@ -179,11 +180,15 @@ export interface RestorableWorkspaceActions {
   toggleDetailFocusMode: () => void
   setWorkspaceLayout: (layout: RepoWorkspaceLayout) => void
   applySessionLayoutState: (
-    layout: Pick<SessionState, 'workspaceLayout' | 'detailCollapsed' | 'detailFocusMode' | 'detailPaneSizes'>,
+    layout: Pick<
+      SessionState,
+      'workspaceLayout' | 'detailCollapsed' | 'detailFocusMode' | 'detailPaneSizes' | 'fileTreePaneSizes'
+    >,
   ) => void
   applySessionSelectedTerminalState: (selectedTerminalByWorktree: Record<string, string>) => void
   setDetailPaneSize: (layout: RepoWorkspaceLayout, size: number) => void
   setDetailPaneSizes: (sizes: WorkspaceDetailPaneSizes) => void
+  setFileTreePaneSize: (layout: RepoWorkspaceLayout, size: number) => void
   resetLayout: () => void
   setSelectedTerminal: (worktreeTerminalKey: string, key: string | null) => void
   reorderWorktrees: (id: string, fromPath: string, toPath: string) => void

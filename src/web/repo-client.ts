@@ -1,5 +1,6 @@
 import { openExternalUrl } from '#/web/app-shell-client.ts'
 import { postServerJson } from '#/web/lib/server-fetch.ts'
+import type { RepoFileTransferRequest, RepoFileTransferResult, RepoFileTreeResult } from '#/shared/file-tree.ts'
 import type { CloneRepoResult, PullRequestEntry, RepoSnapshot } from '#/shared/rpc.ts'
 import type { ExecResult, PullRequestFetchMode, WorktreeStatus } from '#/shared/git-types.ts'
 import type { ProbeResult } from '#/shared/rpc.ts'
@@ -124,6 +125,36 @@ export async function removeRepositoryWorktree(
 
 export async function getRepositoryPatch(cwd: string, worktreePath: string, signal?: AbortSignal): Promise<ExecResult> {
   return await postServerJson('/api/repo/patch', { cwd, worktreePath }, { signal })
+}
+
+export async function getRepositoryFileTree(
+  repoId: string,
+  worktreePath: string,
+  dirPath: string,
+  signal?: AbortSignal,
+): Promise<RepoFileTreeResult> {
+  return await postServerJson('/api/repo/file-tree', { repoId, worktreePath, dirPath }, { signal })
+}
+
+export async function renameRepositoryFileTreeEntry(
+  repoId: string,
+  worktreePath: string,
+  oldPath: string,
+  newName: string,
+): Promise<ExecResult> {
+  return await postServerJson('/api/repo/file-tree/rename', { repoId, worktreePath, oldPath, newName })
+}
+
+export async function deleteRepositoryFileTreeEntries(
+  repoId: string,
+  worktreePath: string,
+  paths: string[],
+): Promise<ExecResult> {
+  return await postServerJson('/api/repo/file-tree/delete', { repoId, worktreePath, paths })
+}
+
+export async function transferRepositoryFiles(input: RepoFileTransferRequest): Promise<RepoFileTransferResult> {
+  return await postServerJson('/api/repo/file-transfer', input)
 }
 
 export async function openRepositoryRemote(cwd: string, branch?: string): Promise<ExecResult> {

@@ -22,6 +22,7 @@ describe('restorable-workspace-state', () => {
           detailFocusMode: true,
           workspaceLayout: 'left-right',
           detailPaneSizes: { 'top-bottom': 45, 'left-right': 55 },
+          fileTreePaneSizes: { 'top-bottom': 44, 'left-right': 36 },
           selectedTerminalByWorktree: {
             '/tmp/repo\0/tmp/worktree': '/tmp/repo\0/tmp/worktree\0terminal-2',
           },
@@ -34,6 +35,7 @@ describe('restorable-workspace-state', () => {
       detailFocusMode: true,
       workspaceLayout: 'left-right',
       detailPaneSizes: { 'top-bottom': 45, 'left-right': 55 },
+      fileTreePaneSizes: { 'top-bottom': 44, 'left-right': 36 },
       selectedTerminalByWorktree: {
         '/tmp/repo\0/tmp/worktree': '/tmp/repo\0/tmp/worktree\0terminal-2',
       },
@@ -49,6 +51,7 @@ describe('restorable-workspace-state', () => {
         detailFocusMode: false,
         workspaceLayout: 'top-bottom',
         detailPaneSizes: { 'top-bottom': 60, 'left-right': 40 },
+        fileTreePaneSizes: { 'top-bottom': 42, 'left-right': 38 },
         selectedTerminalByWorktree: {
           '/tmp/repo\0/tmp/worktree': '/tmp/repo\0/tmp/worktree\0terminal-1',
         },
@@ -59,6 +62,7 @@ describe('restorable-workspace-state', () => {
       detailFocusMode: false,
       workspaceLayout: 'top-bottom',
       detailPaneSizes: { 'top-bottom': 60, 'left-right': 40 },
+      fileTreePaneSizes: { 'top-bottom': 42, 'left-right': 38 },
       selectedTerminalByWorktree: {
         '/tmp/repo\0/tmp/worktree': '/tmp/repo\0/tmp/worktree\0terminal-1',
       },

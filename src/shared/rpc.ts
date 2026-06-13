@@ -87,6 +87,7 @@ export interface SessionState {
   detailFocusMode: boolean
   workspaceLayout: WorkspaceLayout
   detailPaneSizes: WorkspaceDetailPaneSizes
+  fileTreePaneSizes?: WorkspaceDetailPaneSizes
   selectedTerminalByWorktree?: Record<string, string>
 }
 

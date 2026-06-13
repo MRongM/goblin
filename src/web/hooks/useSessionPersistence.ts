@@ -12,6 +12,7 @@ export function useSessionPersistence() {
   const detailFocusMode = useReposStore((s) => s.detailFocusMode)
   const workspaceLayout = useReposStore((s) => s.workspaceLayout)
   const detailPaneSizes = useReposStore((s) => s.detailPaneSizes)
+  const fileTreePaneSizes = useReposStore((s) => s.fileTreePaneSizes)
   const selectedTerminalByWorktree = useReposStore((s) => s.selectedTerminalByWorktree)
   const sessionReady = useReposStore((s) => s.sessionReady)
   const repos = useReposStore((s) => s.repos)
@@ -32,6 +33,7 @@ export function useSessionPersistence() {
         detailFocusMode,
         workspaceLayout,
         detailPaneSizes,
+        fileTreePaneSizes,
         selectedTerminalByWorktree,
       }),
     })
@@ -68,6 +70,7 @@ export function useSessionPersistence() {
     detailFocusMode,
     workspaceLayout,
     detailPaneSizes,
+    fileTreePaneSizes,
     selectedTerminalByWorktree,
     repos,
   ])

@@ -2,8 +2,7 @@
 // foreground colour at a regular weight, sitting in the macOS
 // title bar like a native window title.
 //
-// Uses the project's `--font-sans` stack (system UI face, e.g. SF Pro
-// on macOS) at weight 500.
+// Uses the project's `--font-sans` stack at weight 500.
 
 import { cn } from '#/web/lib/cn.ts'
 

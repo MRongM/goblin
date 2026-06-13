@@ -148,8 +148,26 @@ describe('parseStatus', () => {
     const out = 'R  new/path.ts\0old/path.ts\0 M other.ts\0'
     const result = parseStatus(out)
     expect(result).toHaveLength(2)
-    expect(result[0]).toEqual({ x: 'R', y: ' ', path: 'new/path.ts' })
+    expect(result[0]).toEqual({ x: 'R', y: ' ', path: 'new/path.ts', originalPath: 'old/path.ts' })
     expect(result[1]).toEqual({ x: ' ', y: 'M', path: 'other.ts' })
+  })
+
+  test('preserves original path for rename pairs', () => {
+    const out = 'R  src/new.ts\0src/old.ts\0'
+    expect(parseStatus(out)).toEqual([{ x: 'R', y: ' ', path: 'src/new.ts', originalPath: 'src/old.ts' }])
+  })
+
+  test('preserves original path for copy pairs', () => {
+    const out = 'C  src/copied.ts\0src/source.ts\0'
+    expect(parseStatus(out)).toEqual([{ x: 'C', y: ' ', path: 'src/copied.ts', originalPath: 'src/source.ts' }])
+  })
+
+  test('keeps parsing entries after rename original record', () => {
+    const out = 'R  new/path.ts\0old/path.ts\0 M other.ts\0'
+    expect(parseStatus(out)).toEqual([
+      { x: 'R', y: ' ', path: 'new/path.ts', originalPath: 'old/path.ts' },
+      { x: ' ', y: 'M', path: 'other.ts' },
+    ])
   })
 
   test('handles unicode and special characters in paths', () => {

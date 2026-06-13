@@ -7,6 +7,7 @@ interface Props {
   status: WorktreeStatus[]
   emptyTitleKey?: string
   emptyBodyKey?: string
+  onPathClick?: (path: string) => void
 }
 
 function isUnmergedStatus(entry: StatusEntry): boolean {
@@ -37,6 +38,7 @@ export function StatusList({
   status,
   emptyTitleKey = 'status.clean-title',
   emptyBodyKey = 'status.clean-body',
+  onPathClick,
 }: Props) {
   const t = useT()
   const totalEntries = status.reduce((n, w) => n + w.entries.length, 0)
@@ -56,7 +58,18 @@ export function StatusList({
               className="grid grid-cols-[2ch_minmax(0,1fr)] items-center gap-3 px-1.5"
             >
               <StatusCode entry={entry} />
-              <FilePathText path={entry.path} />
+              {onPathClick ? (
+                <button
+                  type="button"
+                  aria-label={entry.path}
+                  onClick={() => onPathClick(entry.path)}
+                  className="min-w-0 truncate text-left text-foreground hover:text-brand-text"
+                >
+                  <FilePathText path={entry.path} />
+                </button>
+              ) : (
+                <FilePathText path={entry.path} />
+              )}
             </li>
           ))}
         </ul>

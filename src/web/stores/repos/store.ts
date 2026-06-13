@@ -24,6 +24,7 @@ import { normalizeRestorableRepoCache } from '#/web/stores/repos/persistence.ts'
 import {
   DEFAULT_DETAIL_COLLAPSED,
   DEFAULT_DETAIL_PANE_SIZES,
+  DEFAULT_FILE_TREE_PANE_SIZES,
   DEFAULT_WORKSPACE_LAYOUT,
 } from '#/shared/workspace-layout.ts'
 import type { RestorableRepoSnapshot, ReposStore } from '#/web/stores/repos/types.ts'
@@ -108,6 +109,7 @@ export const useReposStore = create<ReposStore>()(
       detailFocusMode: false,
       workspaceLayout: DEFAULT_WORKSPACE_LAYOUT,
       detailPaneSizes: DEFAULT_DETAIL_PANE_SIZES,
+      fileTreePaneSizes: DEFAULT_FILE_TREE_PANE_SIZES,
       selectedTerminalByWorktree: {},
 
       // Local renderer-only state.

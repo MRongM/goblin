@@ -6,9 +6,11 @@ export type BranchActionItemId =
   | 'checkout'
   | 'pull'
   | 'push'
+  | 'sync'
   | 'remote'
   | 'terminal'
   | 'editor'
+  | 'createWorktree'
   | 'deleteBranch'
   | 'removeWorktree'
   | 'checkoutTo'
@@ -20,7 +22,7 @@ export interface BranchActionRepo {
   id: RepoState['id']
   instanceToken: RepoState['instanceToken']
   data: Pick<RepoState['data'], 'currentBranch' | 'status' | 'worktreesByPath'>
-  operations: Pick<RepoState['operations'], 'branchAction'>
+  operations: Pick<RepoState['operations'], 'branchAction' | 'fetch' | 'manualRefresh'>
   remote: Pick<
     RepoState['remote'],
     'hasRemotes' | 'hasBrowserRemote' | 'hasGitHubRemote' | 'target' | 'browserRemoteProvider' | 'remoteProviders'

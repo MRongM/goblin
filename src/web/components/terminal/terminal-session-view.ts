@@ -29,7 +29,7 @@ const DEFAULT_TERMINAL_COLS = 80
 const DEFAULT_TERMINAL_ROWS = 24
 const RESIZE_DEBOUNCE_MS = 80
 const FONT_REMEASURE_DEBOUNCE_MS = 80
-const TERMINAL_FONT_FAMILY = "'Goblin Mono', monospace"
+const TERMINAL_FONT_FAMILY = "'Maple Mono NF CN', monospace"
 
 export class TerminalSessionView {
   private readonly frame: HTMLDivElement

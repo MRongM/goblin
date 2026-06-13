@@ -8,6 +8,7 @@ export const DEFAULT_WORKSPACE_LAYOUT: WorkspaceLayout = 'top-bottom'
 export const DEFAULT_DETAIL_COLLAPSED = true
 export const DEFAULT_DETAIL_FOCUS_MODE = false
 export const DEFAULT_DETAIL_PANE_SIZES: WorkspaceDetailPaneSizes = { 'top-bottom': 61.8, 'left-right': 61.8 }
+export const DEFAULT_FILE_TREE_PANE_SIZES: WorkspaceDetailPaneSizes = { 'top-bottom': 38.2, 'left-right': 38.2 }
 
 const MIN_DETAIL_PANE_SIZE = 10
 const MAX_DETAIL_PANE_SIZE = 90
@@ -36,17 +37,33 @@ export function effectiveDetailCollapsed(layout: WorkspaceLayout, detailCollapse
   return workspaceLayoutAllowsDetailCollapse(layout) && detailCollapsed
 }
 
-export function normalizeDetailPaneSize(layout: WorkspaceLayout, value: unknown): number {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return DEFAULT_DETAIL_PANE_SIZES[layout]
+function normalizePaneSize(layout: WorkspaceLayout, value: unknown, defaults: WorkspaceDetailPaneSizes): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return defaults[layout]
   return Math.max(MIN_DETAIL_PANE_SIZE, Math.min(MAX_DETAIL_PANE_SIZE, Math.round(value * 10) / 10))
 }
 
-export function normalizeDetailPaneSizes(value: unknown): WorkspaceDetailPaneSizes {
+function normalizePaneSizes(value: unknown, defaults: WorkspaceDetailPaneSizes): WorkspaceDetailPaneSizes {
   const sizes = value && typeof value === 'object' ? (value as Partial<Record<WorkspaceLayout, unknown>>) : {}
   return {
-    'top-bottom': normalizeDetailPaneSize('top-bottom', sizes['top-bottom']),
-    'left-right': normalizeDetailPaneSize('left-right', sizes['left-right']),
+    'top-bottom': normalizePaneSize('top-bottom', sizes['top-bottom'], defaults),
+    'left-right': normalizePaneSize('left-right', sizes['left-right'], defaults),
   }
+}
+
+export function normalizeDetailPaneSize(layout: WorkspaceLayout, value: unknown): number {
+  return normalizePaneSize(layout, value, DEFAULT_DETAIL_PANE_SIZES)
+}
+
+export function normalizeFileTreePaneSize(layout: WorkspaceLayout, value: unknown): number {
+  return normalizePaneSize(layout, value, DEFAULT_FILE_TREE_PANE_SIZES)
+}
+
+export function normalizeDetailPaneSizes(value: unknown): WorkspaceDetailPaneSizes {
+  return normalizePaneSizes(value, DEFAULT_DETAIL_PANE_SIZES)
+}
+
+export function normalizeFileTreePaneSizes(value: unknown): WorkspaceDetailPaneSizes {
+  return normalizePaneSizes(value, DEFAULT_FILE_TREE_PANE_SIZES)
 }
 
 export function normalizeWorkspaceSessionLayoutState(value: {
@@ -54,11 +71,13 @@ export function normalizeWorkspaceSessionLayoutState(value: {
   detailCollapsed?: unknown
   detailFocusMode?: unknown
   detailPaneSizes?: unknown
+  fileTreePaneSizes?: unknown
 }): {
   workspaceLayout: WorkspaceLayout
   detailCollapsed: boolean
   detailFocusMode: boolean
   detailPaneSizes: WorkspaceDetailPaneSizes
+  fileTreePaneSizes: WorkspaceDetailPaneSizes
 } {
   const workspaceLayout = normalizeWorkspaceLayout(value.workspaceLayout)
   const detailCollapsed = effectiveDetailCollapsed(
@@ -74,5 +93,6 @@ export function normalizeWorkspaceSessionLayoutState(value: {
     detailCollapsed,
     detailFocusMode,
     detailPaneSizes: normalizeDetailPaneSizes(value.detailPaneSizes),
+    fileTreePaneSizes: normalizeFileTreePaneSizes(value.fileTreePaneSizes),
   }
 }

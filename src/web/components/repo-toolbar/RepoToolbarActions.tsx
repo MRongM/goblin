@@ -22,13 +22,15 @@ import { useIsCompactUi } from '#/web/hooks/useResponsiveUiMode.tsx'
 
 interface Props {
   repoId: string
+  compact?: boolean
 }
 
-export function RepoToolbarActions({ repoId }: Props) {
-  const compact = useIsCompactUi()
+export function RepoToolbarActions({ repoId, compact: compactOverride }: Props) {
+  const responsiveCompact = useIsCompactUi()
+  const compact = compactOverride ?? responsiveCompact
   return (
     <div className="flex items-center gap-1">
-      <RepoActivityControl repoId={repoId} />
+      <RepoActivityControl repoId={repoId} compact={compact} />
       <CreateWorktreeAction repoId={repoId} compact={compact} />
     </div>
   )

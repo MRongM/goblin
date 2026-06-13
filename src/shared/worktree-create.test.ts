@@ -38,6 +38,12 @@ describe('worktree create helpers', () => {
     expect(normalizeCreateWorktreeInput({ worktreePath: '', mode: { kind: 'existingBranch', branch: 'main' } })).toBeNull()
     expect(
       normalizeCreateWorktreeInput({
+        worktreePath: 'relative/path',
+        mode: { kind: 'existingBranch', branch: 'main' },
+      }),
+    ).toBeNull()
+    expect(
+      normalizeCreateWorktreeInput({
         worktreePath: '/tmp/repo',
         mode: { kind: 'trackRemoteBranch', remoteRef: 'origin/feature/a', localBranch: 'bad branch' },
       }),

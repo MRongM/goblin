@@ -41,6 +41,7 @@ describe('useBranchActionShortcutRegistry', () => {
           onSelect: onPull,
         },
       ],
+      externalItems: [],
       destructiveItems: [],
       dialogs: null,
     })
@@ -76,6 +77,7 @@ describe('useBranchActionShortcutRegistry', () => {
           onSelect: disabledPush,
         },
       ],
+      externalItems: [],
       destructiveItems: [],
       dialogs: null,
     })
@@ -148,6 +150,7 @@ function actionsWith(onPull: () => void): BranchActionItemGroups {
         onSelect: onPull,
       },
     ],
+    externalItems: [],
     destructiveItems: [],
     dialogs: null,
   }

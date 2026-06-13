@@ -22,7 +22,6 @@ interface RowCountProps {
 }
 
 interface WorkspaceSkeletonProps {
-  showRepoToolbar?: boolean
   layout?: RepoWorkspaceLayout
   detailCollapsed?: boolean
   detailFocusMode?: boolean
@@ -43,11 +42,9 @@ export function StatusListSkeleton({ rows = 6 }: RowCountProps) {
 }
 
 export function RepoWorkspaceSkeleton({
-  showRepoToolbar = false,
   layout = DEFAULT_WORKSPACE_LAYOUT,
   detailCollapsed = false,
   detailFocusMode = false,
-  compact = false,
 }: WorkspaceSkeletonProps) {
   const behavior = repoWorkspaceBehavior(layout, detailCollapsed, detailFocusMode)
   const detailPane = (
@@ -76,12 +73,7 @@ export function RepoWorkspaceSkeleton({
       />
     )
 
-  return (
-    <section className="flex min-w-0 flex-1 flex-col">
-      {showRepoToolbar && <RepoToolbarSkeleton focusMode={behavior.mode === 'focus'} compact={compact} />}
-      {workspaceBody}
-    </section>
-  )
+  return <section className="flex min-w-0 flex-1 flex-col">{workspaceBody}</section>
 }
 
 export function BranchDetailSkeleton({
@@ -118,89 +110,6 @@ export function BranchDetailSkeleton({
         </div>
       )}
     </section>
-  )
-}
-
-function RepoToolbarSkeleton({ focusMode = false, compact = false }: { focusMode?: boolean; compact?: boolean }) {
-  return (
-    <Toolbar variant="repo" className="justify-between gap-3">
-      <div className="flex min-w-0 flex-1 items-center gap-2">
-        {focusMode ? (
-          <>
-            <ToolbarPagerSkeleton />
-            <div aria-hidden="true" className="mx-1 h-4 border-l border-separator/70" />
-            <Skeleton className="h-4 w-4 rounded-full" />
-            <Skeleton className="h-4 w-40" />
-            <div data-testid="repo-toolbar-skeleton-focus-actions">
-              <Skeleton className="h-7 w-7" />
-            </div>
-          </>
-        ) : compact ? (
-          <ToolbarPagerSkeleton />
-        ) : (
-          <>
-            <ToolbarSegmentedControlSkeleton items={3} dataTestId="repo-toolbar-skeleton-branch-view" />
-            <ToolbarSearchSkeleton dataTestId="repo-toolbar-skeleton-branch-search" />
-          </>
-        )}
-      </div>
-      <div className="flex shrink-0 items-center gap-2">
-        <RepoToolbarActionsSkeleton compact={compact} />
-        {!compact && <ToolbarSegmentedControlSkeleton items={2} dataTestId="repo-toolbar-skeleton-layout-control" />}
-      </div>
-    </Toolbar>
-  )
-}
-
-function RepoToolbarActionsSkeleton({ compact }: { compact: boolean }) {
-  return (
-    <div className="flex items-center gap-1">
-      <div data-testid="repo-toolbar-skeleton-activity">
-        <Skeleton className={cn('h-7', compact ? 'w-7' : 'w-16')} />
-      </div>
-      <div data-testid="repo-toolbar-skeleton-create-worktree">
-        <Skeleton className={cn('h-7', compact ? 'w-7' : 'w-24')} />
-      </div>
-    </div>
-  )
-}
-
-function ToolbarPagerSkeleton() {
-  return (
-    <div className="flex items-center gap-1" data-testid="repo-toolbar-skeleton-pager">
-      <Skeleton className="h-4 w-10" />
-      <Skeleton className="h-7 w-7" />
-      <Skeleton className="h-7 w-7" />
-    </div>
-  )
-}
-
-function ToolbarSearchSkeleton({ dataTestId }: { dataTestId?: string }) {
-  return (
-    <div
-      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-input bg-control shadow-xs"
-      data-testid={dataTestId}
-    >
-      <Skeleton className="h-4 w-4 rounded-full" />
-    </div>
-  )
-}
-
-function ToolbarSegmentedControlSkeleton({
-  items,
-  dataTestId,
-}: {
-  items: number
-  dataTestId?: string
-}) {
-  return (
-    <div className="flex shrink-0 rounded-md border border-input bg-control shadow-xs" data-testid={dataTestId}>
-      {Array.from({ length: items }).map((_, i) => (
-        <div key={i} className="flex h-7 w-7 items-center justify-center border-r border-input last:border-r-0">
-          <Skeleton className="h-4 w-4 rounded-full" />
-        </div>
-      ))}
-    </div>
   )
 }
 

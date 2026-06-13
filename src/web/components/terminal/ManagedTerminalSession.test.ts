@@ -571,7 +571,7 @@ describe('ManagedTerminalSession', () => {
     expect(xtermMocks.terminals[0]!.options.minimumContrastRatio).toBe(4.5)
     expect(xtermMocks.terminals[0]!.options.allowProposedApi).toBe(true)
     expect(xtermMocks.terminals[0]!.options.cursorStyle).toBe('bar')
-    expect(xtermMocks.terminals[0]!.options.fontFamily).toContain('Goblin Mono')
+    expect(xtermMocks.terminals[0]!.options.fontFamily).toContain('Maple Mono NF CN')
     expect(xtermMocks.terminals[0]!.options.rescaleOverlappingGlyphs).toBe(true)
     expect(terminalCalls.restart).not.toHaveBeenCalled()
     expect(session.snapshot().phase).toBe('open')

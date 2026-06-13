@@ -86,6 +86,7 @@ export interface StatusEntry {
   x: string
   y: string
   path: string
+  originalPath?: string
 }
 
 /** One worktree's working-tree status. The Status tab groups entries by

@@ -90,6 +90,10 @@ describe('repo selectors', () => {
           'top-bottom': 40,
           'left-right': 50,
         },
+        fileTreePaneSizes: {
+          'top-bottom': 44,
+          'left-right': 36,
+        },
         selectedTerminalByWorktree: {
           '/tmp/repo\0/tmp/repo': 'terminal-1',
         },
@@ -103,6 +107,10 @@ describe('repo selectors', () => {
       detailPaneSizes: {
         'top-bottom': 40,
         'left-right': 50,
+      },
+      fileTreePaneSizes: {
+        'top-bottom': 44,
+        'left-right': 36,
       },
       selectedTerminalByWorktree: {
         '/tmp/repo\0/tmp/repo': 'terminal-1',

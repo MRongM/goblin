@@ -54,13 +54,18 @@ afterEach(() => {
 })
 
 describe('BranchDetailToolbar', () => {
-  test('renders status and changes tabs with separator and terminal area', () => {
+  test('does not render a status detail tab', async () => {
+    const { container: c } = renderToolbar({ terminalCount: 0, navigation: navigationWith({}) })
+
+    expect(c.textContent).not.toContain('tab.status')
+    expect(c.querySelector(`[role="tab"][id$="-status-tab"]`)).toBeNull()
+  })
+
+  test('renders terminal area without moved status or changes tabs', () => {
     const { container: c } = renderToolbar({ terminalCount: 0, changeCount: 3, navigation: navigationWith({}) })
 
-    const tabs = Array.from(c.querySelectorAll<HTMLButtonElement>('[role="tab"]') ?? [])
-    expect(tabs.map((tab) => tab.id)).toEqual(['detail-status-tab', 'detail-changes-tab'])
-    expect(c.querySelector('[aria-label="tab.branch-detail"]')?.className).toContain('h-full')
-    expect(c.querySelector('#detail-changes-tab')?.textContent).toContain('3')
+    expect(c.querySelector('#detail-status-tab')).toBeNull()
+    expect(c.querySelector('#detail-changes-tab')).toBeNull()
     // useT is mocked to return the i18n key, so we assert against the key here.
     expect(c.querySelector('#detail-terminal-tab')?.textContent).toContain('terminal.label')
   })
@@ -168,39 +173,24 @@ describe('BranchDetailToolbar', () => {
     expect(document.activeElement?.id).toBe('detail-terminal-tab')
   })
 
-  test('moves focus across status, changes, and terminal tabs with keyboard navigation', async () => {
+  test('keeps terminal focus when keyboard navigation leaves terminal tabs', async () => {
     const showRepoDetailTab = vi.fn()
     const { container: c } = renderToolbar({
       terminalCount: 2,
+      detailTab: 'terminal',
       navigation: navigationWith({ showRepoDetailTab }),
     })
 
-    const statusTab = c.querySelector<HTMLButtonElement>('#detail-status-tab')
-    const changesTab = c.querySelector<HTMLButtonElement>('#detail-changes-tab')
     const terminalTab = c.querySelector<HTMLButtonElement>('#detail-terminal-tab')
-    if (!statusTab || !changesTab || !terminalTab) throw new Error('missing branch detail tabs')
+    if (!terminalTab) throw new Error('missing terminal tab')
 
     act(() => {
-      statusTab.focus()
-      statusTab.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }))
-    })
-    await flush()
-    expect(showRepoDetailTab).toHaveBeenNthCalledWith(1, REPO_ID, 'changes')
-    expect(document.activeElement).toBe(changesTab)
-
-    act(() => {
-      changesTab.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }))
-    })
-    await flush()
-    expect(showRepoDetailTab).toHaveBeenNthCalledWith(2, REPO_ID, 'terminal')
-    expect(document.activeElement).toBe(terminalTab)
-
-    act(() => {
+      terminalTab.focus()
       terminalTab.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }))
     })
     await flush()
-    expect(showRepoDetailTab).toHaveBeenNthCalledWith(3, REPO_ID, 'changes')
-    expect(document.activeElement).toBe(changesTab)
+    expect(showRepoDetailTab).not.toHaveBeenCalledWith(REPO_ID, 'status')
+    expect(document.activeElement).toBe(terminalTab)
   })
 })
 

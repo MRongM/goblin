@@ -62,9 +62,9 @@
 
   /* Type / shadows / radius — shadcn radius scale, project shadow
    * and font stacks. */
-  --font-sans:
-    -apple-system, BlinkMacSystemFont, 'Segoe WPC', 'Segoe UI', 'PingFang SC', 'Noto Sans SC', system-ui, sans-serif;
-  --font-mono: 'Goblin Mono', monospace;
+  --font-sans: 'Maple Mono NF CN', -apple-system, BlinkMacSystemFont, 'Segoe WPC', 'Segoe UI', 'PingFang SC',
+    'Noto Sans SC', system-ui, sans-serif;
+  --font-mono: 'Maple Mono NF CN', monospace;
 
   --shadow-xs: var(--goblin-shadow-xs, var(--goblin-shadow-sm));
   --shadow-sm: var(--goblin-shadow-sm);

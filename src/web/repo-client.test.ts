@@ -209,4 +209,126 @@ describe('repo-client', () => {
       }),
     )
   })
+
+  test('requests repository file tree', async () => {
+    installWebBootstrap(webBootstrap({ initialServer: { url: 'http://127.0.0.1:32100/', secret: 'secret' } }))
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        ok: true,
+        worktreePath: '/repo',
+        dirPath: '/repo/src',
+        entries: [],
+      }),
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { getRepositoryFileTree } = await import('#/web/repo-client.ts')
+    const result = await getRepositoryFileTree('/repo', '/repo', '/repo/src')
+    expect(result).toEqual({ ok: true, worktreePath: '/repo', dirPath: '/repo/src', entries: [] })
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://127.0.0.1:32100/api/repo/file-tree',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({ 'x-goblin-internal-secret': 'secret' }),
+        body: JSON.stringify({ repoId: '/repo', worktreePath: '/repo', dirPath: '/repo/src' }),
+      }),
+    )
+  })
+
+  test('requests repository file transfer', async () => {
+    installWebBootstrap(webBootstrap({ initialServer: { url: 'http://127.0.0.1:32100/', secret: 'secret' } }))
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        ok: true,
+        copied: [{ sourcePath: '/repo/a.txt', destinationPath: '/repo/docs/a.txt', kind: 'file' }],
+        renamed: [],
+        failed: [],
+      }),
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { transferRepositoryFiles } = await import('#/web/repo-client.ts')
+    const result = await transferRepositoryFiles({
+      repoId: '/repo',
+      worktreePath: '/repo',
+      targetDirPath: '/repo/docs',
+      source: { kind: 'fileTreePaths', repoId: '/repo', worktreePath: '/repo', paths: ['/repo/a.txt'] },
+    })
+
+    expect(result).toEqual({
+      ok: true,
+      copied: [{ sourcePath: '/repo/a.txt', destinationPath: '/repo/docs/a.txt', kind: 'file' }],
+      renamed: [],
+      failed: [],
+    })
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://127.0.0.1:32100/api/repo/file-transfer',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({ 'x-goblin-internal-secret': 'secret' }),
+        body: JSON.stringify({
+          repoId: '/repo',
+          worktreePath: '/repo',
+          targetDirPath: '/repo/docs',
+          source: { kind: 'fileTreePaths', repoId: '/repo', worktreePath: '/repo', paths: ['/repo/a.txt'] },
+        }),
+      }),
+    )
+  })
+
+  test('requests file tree rename through the embedded server', async () => {
+    installWebBootstrap(webBootstrap({ initialServer: { url: 'http://127.0.0.1:32100/', secret: 'secret' } }))
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ ok: true, message: '' }),
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { renameRepositoryFileTreeEntry } = await import('#/web/repo-client.ts')
+    await expect(
+      renameRepositoryFileTreeEntry('/repo', '/repo', '/repo/README.md', 'README-renamed.md'),
+    ).resolves.toEqual({ ok: true, message: '' })
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://127.0.0.1:32100/api/repo/file-tree/rename',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({ 'x-goblin-internal-secret': 'secret' }),
+        body: JSON.stringify({
+          repoId: '/repo',
+          worktreePath: '/repo',
+          oldPath: '/repo/README.md',
+          newName: 'README-renamed.md',
+        }),
+      }),
+    )
+  })
+
+  test('requests file tree delete through the embedded server', async () => {
+    installWebBootstrap(webBootstrap({ initialServer: { url: 'http://127.0.0.1:32100/', secret: 'secret' } }))
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ ok: true, message: '' }),
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { deleteRepositoryFileTreeEntries } = await import('#/web/repo-client.ts')
+    await expect(deleteRepositoryFileTreeEntries('/repo', '/repo', ['/repo/README.md', '/repo/src'])).resolves.toEqual({
+      ok: true,
+      message: '',
+    })
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://127.0.0.1:32100/api/repo/file-tree/delete',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({ 'x-goblin-internal-secret': 'secret' }),
+        body: JSON.stringify({
+          repoId: '/repo',
+          worktreePath: '/repo',
+          paths: ['/repo/README.md', '/repo/src'],
+        }),
+      }),
+    )
+  })
 })

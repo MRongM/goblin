@@ -73,7 +73,7 @@ describe('FilePathText', () => {
           fontVariant: 'normal',
           fontWeight: '400',
           fontSize: '16px',
-          fontFamily: 'Goblin Mono',
+          fontFamily: 'Maple Mono NF CN',
           letterSpacing: '1px',
         }) as CSSStyleDeclaration,
     )
@@ -114,7 +114,7 @@ describe('FilePathText', () => {
         fontVariant: 'normal',
         fontWeight: '400',
         fontSize: '16px',
-        fontFamily: 'Goblin Mono',
+        fontFamily: 'Maple Mono NF CN',
         letterSpacing: isTight ? '0px' : '4px',
       } as CSSStyleDeclaration
     })

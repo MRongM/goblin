@@ -5,15 +5,14 @@
 import { Smartphone } from 'lucide-react'
 import { useStoreWithEqualityFn } from 'zustand/traditional'
 import { useReposStore } from '#/web/stores/repos/store.ts'
-import { BranchList } from '#/web/components/BranchList.tsx'
 import { BranchDetail } from '#/web/components/BranchDetail.tsx'
-import { RepoToolbar } from '#/web/components/repo-toolbar/RepoToolbar.tsx'
 import { RepoWorkspaceSkeleton } from '#/web/components/Skeleton.tsx'
 import { RepoWorkspace, RepoWorkspacePane } from '#/web/components/Layout.tsx'
 import { useRepoToasts } from '#/web/hooks/useRepoToasts.tsx'
 import { useT } from '#/web/stores/i18n.ts'
 import { repoWorkspaceBehavior } from '#/web/lib/workspace-layout.ts'
 import { getRepoWorkspacePresentation } from '#/web/components/repo-workspace/model.ts'
+import { RepoExplorerPane } from '#/web/components/repo-workspace/RepoExplorerPane.tsx'
 import { UnavailableRepoView } from '#/web/components/UnavailableRepoView.tsx'
 import { useResponsiveUiMode } from '#/web/hooks/useResponsiveUiMode.tsx'
 import { Button } from '#/web/components/ui/button.tsx'
@@ -63,7 +62,6 @@ export function RepoView({ repoId }: Props) {
   if (view.initialLoading) {
     return (
       <RepoWorkspaceSkeleton
-        showRepoToolbar
         layout={layout}
         detailCollapsed={behavior.detailCollapsed}
         detailFocusMode={behavior.detailFocusMode}
@@ -95,7 +93,7 @@ export function RepoView({ repoId }: Props) {
         onDetailSizeChange={(size) => setDetailPaneSize(layout, size)}
         branchPane={
           <RepoWorkspacePane>
-            <BranchList repoId={repoId} showActions={behavior.branchListActionsVisible} />
+            <RepoExplorerPane repoId={repoId} layout={layout} showActions={behavior.branchListActionsVisible} />
           </RepoWorkspacePane>
         }
         detailPane={detailPane}
@@ -104,8 +102,6 @@ export function RepoView({ repoId }: Props) {
 
   return (
     <section className="relative flex min-w-0 flex-1 flex-col">
-      <RepoToolbar repoId={repoId} />
-
       {compactLeftRight && (
         <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-background/95 p-6 text-center">
           <Smartphone className="mb-4 h-10 w-10 text-muted-foreground" />

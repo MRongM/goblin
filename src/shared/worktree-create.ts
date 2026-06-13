@@ -34,9 +34,14 @@ export function normalizeCreateWorktreeInput(input: unknown): CreateWorktreeInpu
   if (!input || typeof input !== 'object') return null
   const raw = input as { worktreePath?: unknown; mode?: unknown }
   const worktreePath = typeof raw.worktreePath === 'string' ? raw.worktreePath.trim() : ''
-  if (!worktreePath) return null
+  if (!isAbsoluteWorktreePath(worktreePath)) return null
   const mode = normalizeCreateWorktreeMode(raw.mode)
   return mode ? { worktreePath, mode } : null
+}
+
+export function isAbsoluteWorktreePath(value: string): boolean {
+  if (!value || value.includes('\0')) return false
+  return value.startsWith('/') || /^[A-Za-z]:[\\/]/.test(value) || value.startsWith('\\\\')
 }
 
 function normalizeCreateWorktreeMode(input: unknown): CreateWorktreeMode | null {

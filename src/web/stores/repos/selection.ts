@@ -5,10 +5,12 @@ import { persistRestorableRepoSnapshot } from '#/web/stores/repos/persistence.ts
 import {
   DEFAULT_DETAIL_COLLAPSED,
   DEFAULT_DETAIL_PANE_SIZES,
+  DEFAULT_FILE_TREE_PANE_SIZES,
   DEFAULT_WORKSPACE_LAYOUT,
   effectiveDetailCollapsed,
   normalizeDetailPaneSize,
   normalizeDetailPaneSizes,
+  normalizeFileTreePaneSize,
   normalizeWorkspaceSessionLayoutState,
   workspaceLayoutAllowsDetailCollapse,
 } from '#/shared/workspace-layout.ts'
@@ -46,6 +48,7 @@ type RestorableWorkspaceSelectionActions = Pick<
   | 'applySessionSelectedTerminalState'
   | 'setDetailPaneSize'
   | 'setDetailPaneSizes'
+  | 'setFileTreePaneSize'
   | 'resetLayout'
   | 'setSelectedTerminal'
   | 'reorderWorktrees'
@@ -147,7 +150,9 @@ function createRestorableWorkspaceSelectionActions(
           s.detailCollapsed === next.detailCollapsed &&
           s.detailFocusMode === next.detailFocusMode &&
           s.detailPaneSizes['top-bottom'] === next.detailPaneSizes['top-bottom'] &&
-          s.detailPaneSizes['left-right'] === next.detailPaneSizes['left-right']
+          s.detailPaneSizes['left-right'] === next.detailPaneSizes['left-right'] &&
+          s.fileTreePaneSizes['top-bottom'] === next.fileTreePaneSizes['top-bottom'] &&
+          s.fileTreePaneSizes['left-right'] === next.fileTreePaneSizes['left-right']
         ) {
           return s
         }
@@ -156,6 +161,7 @@ function createRestorableWorkspaceSelectionActions(
           detailCollapsed: next.detailCollapsed,
           detailFocusMode: next.detailFocusMode,
           detailPaneSizes: next.detailPaneSizes,
+          fileTreePaneSizes: next.fileTreePaneSizes,
         }
       })
     },
@@ -198,6 +204,14 @@ function createRestorableWorkspaceSelectionActions(
       })
     },
 
+    setFileTreePaneSize(layout: RepoWorkspaceLayout, size: number) {
+      set((s) => {
+        const next = normalizeFileTreePaneSize(layout, size)
+        if (s.fileTreePaneSizes[layout] === next) return s
+        return { fileTreePaneSizes: { ...s.fileTreePaneSizes, [layout]: next } }
+      })
+    },
+
     resetLayout() {
       set((s) => {
         const detailCollapsed = effectiveDetailCollapsed(DEFAULT_WORKSPACE_LAYOUT, DEFAULT_DETAIL_COLLAPSED)
@@ -206,7 +220,9 @@ function createRestorableWorkspaceSelectionActions(
           s.detailCollapsed === detailCollapsed &&
           !s.detailFocusMode &&
           s.detailPaneSizes['top-bottom'] === DEFAULT_DETAIL_PANE_SIZES['top-bottom'] &&
-          s.detailPaneSizes['left-right'] === DEFAULT_DETAIL_PANE_SIZES['left-right']
+          s.detailPaneSizes['left-right'] === DEFAULT_DETAIL_PANE_SIZES['left-right'] &&
+          s.fileTreePaneSizes['top-bottom'] === DEFAULT_FILE_TREE_PANE_SIZES['top-bottom'] &&
+          s.fileTreePaneSizes['left-right'] === DEFAULT_FILE_TREE_PANE_SIZES['left-right']
         ) {
           return s
         }
@@ -215,6 +231,7 @@ function createRestorableWorkspaceSelectionActions(
           detailCollapsed,
           detailFocusMode: false,
           detailPaneSizes: DEFAULT_DETAIL_PANE_SIZES,
+          fileTreePaneSizes: DEFAULT_FILE_TREE_PANE_SIZES,
         }
       })
     },

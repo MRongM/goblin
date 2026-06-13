@@ -16,6 +16,7 @@ import { Button } from '#/web/components/ui/button.tsx'
 import { repoEventActionSuccessLabel } from '#/web/stores/repos/action-labels.ts'
 interface Props {
   repoId: string
+  compact?: boolean
 }
 
 const COMPLETION_VISIBLE_MS = 1500
@@ -47,9 +48,10 @@ function repoActivityControlRepoEqual(a: RepoState | undefined, b: RepoState | u
   )
 }
 
-export function RepoActivityControl({ repoId }: Props) {
+export function RepoActivityControl({ repoId, compact: compactOverride }: Props) {
   const repo = useStoreWithEqualityFn(useReposStore, (s) => s.repos[repoId], repoActivityControlRepoEqual)
-  const compact = useIsCompactUi()
+  const responsiveCompact = useIsCompactUi()
+  const compact = compactOverride ?? responsiveCompact
   if (!repo) return null
   return <RepoActivityControlView repo={repo} compact={compact} />
 }

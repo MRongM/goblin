@@ -40,7 +40,14 @@ export function runtimeCoherentRepoProjectionStateFromStore(
 export function restorableWorkspaceStateFromStore(
   state: Pick<
     ReposStore,
-    'order' | 'activeId' | 'detailCollapsed' | 'detailFocusMode' | 'workspaceLayout' | 'detailPaneSizes' | 'selectedTerminalByWorktree'
+    | 'order'
+    | 'activeId'
+    | 'detailCollapsed'
+    | 'detailFocusMode'
+    | 'workspaceLayout'
+    | 'detailPaneSizes'
+    | 'fileTreePaneSizes'
+    | 'selectedTerminalByWorktree'
   >,
 ): RestorableWorkspaceState {
   return {
@@ -50,6 +57,7 @@ export function restorableWorkspaceStateFromStore(
     detailFocusMode: state.detailFocusMode,
     workspaceLayout: state.workspaceLayout,
     detailPaneSizes: state.detailPaneSizes,
+    fileTreePaneSizes: state.fileTreePaneSizes,
     selectedTerminalByWorktree: state.selectedTerminalByWorktree,
   }
 }

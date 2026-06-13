@@ -13,7 +13,14 @@ const mocks = vi.hoisted(() => ({
   useBranchActions: vi.fn(),
 }))
 
+let container: HTMLDivElement
+let root: Root | null = null
+const reactActEnvironment = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
+
 vi.mock('#/web/runtime-settings-hooks.ts', () => ({
+  useRuntimeExternalAppSettings: mocks.useRuntimeExternalAppSettings,
+}))
+vi.mock('#/web/runtime-settings-external-apps.ts', () => ({
   useRuntimeExternalAppSettings: mocks.useRuntimeExternalAppSettings,
 }))
 vi.mock('#/web/stores/i18n.ts', () => ({
@@ -24,10 +31,6 @@ vi.mock('#/web/hooks/useBranchActions.tsx', () => ({
 }))
 
 describe('useBranchActionItems', () => {
-  let container: HTMLDivElement
-  let root: Root | null = null
-  const reactActEnvironment = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
-
   beforeEach(() => {
     resetReposStore()
     reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true
@@ -96,17 +99,99 @@ describe('useBranchActionItems', () => {
       remote: { target: target!, hasRemotes: true, hasBrowserRemote: true, hasGitHubRemote: true },
     })
 
-    let itemIds: string[] = []
-    root = createRoot(container)
     const { useBranchActionItems: useItems } = await import('#/web/hooks/useBranchActionItems.ts')
-    await act(async () => {
-      root!.render(<ItemsHarness useItems={useItems} repo={repo} branch={branch} onReady={(ids) => (itemIds = ids)} />)
-    })
+    const itemIds = await renderItems(useItems, repo, branch)
 
     expect(itemIds).toContain('terminal')
     expect(itemIds).toContain('editor')
   })
+
+  test('keeps terminal editor and remote in a separate external group', async () => {
+    mocks.useRuntimeExternalAppSettings.mockReturnValue({
+      terminalApp: 'auto',
+      resolvedTerminalApp: 'iterm',
+      terminalAvailable: true,
+      editorApp: 'vscode',
+      resolvedEditorApp: 'vscode',
+      editorAvailable: true,
+    })
+    mocks.useBranchActions.mockReturnValue({
+      blocked: false,
+      busyAction: null,
+      capabilities: {
+        isCurrent: false,
+        checkedOutInAnotherWorktree: true,
+        canRemoveWorktree: false,
+        isRegularBranch: false,
+        canCopyPatch: false,
+        canPull: true,
+        canPush: true,
+        canOpenRemote: true,
+        canOpenTerminal: true,
+        canOpenEditor: true,
+      },
+      actions: {
+        copyPatch: vi.fn(),
+        checkout: vi.fn(),
+        pull: vi.fn(),
+        push: vi.fn(),
+        openTerminal: vi.fn(),
+        openEditor: vi.fn(),
+        openRemote: vi.fn(),
+        requestDeleteBranch: vi.fn(),
+        requestRemoveWorktree: vi.fn(),
+      },
+      dialogs: null,
+    })
+    const branch = createRepoBranch('feature/local', {
+      tracking: 'origin/feature/local',
+      worktree: { path: '/tmp/repo-feature' },
+    })
+    const repo = seedRepoState({
+      id: '/tmp/repo',
+      branches: [branch],
+      remote: { hasRemotes: true, hasBrowserRemote: true, hasGitHubRemote: true },
+    })
+
+    const { useBranchActionItems: useItems } = await import('#/web/hooks/useBranchActionItems.ts')
+    const groups = await renderItemGroups(useItems, repo, branch)
+
+    expect(groups.mainItems.filter((item) => item.visible).map((item) => item.id)).toEqual([
+      'pull',
+      'push',
+      'createWorktree',
+      'sync',
+      'checkoutTo',
+      'merge',
+      'commit',
+    ])
+    expect(groups.externalItems.filter((item) => item.visible).map((item) => item.id)).toEqual(['terminal', 'editor', 'remote'])
+    expect(groups.mainItems.find((item) => item.id === 'pull')?.label).toBe('action.pull-remote')
+  })
 })
+
+async function renderItems(
+  useItems: typeof useBranchActionItems,
+  repo: ReturnType<typeof seedRepoState>,
+  branch: ReturnType<typeof createRepoBranch>,
+): Promise<string[]> {
+  const groups = await renderItemGroups(useItems, repo, branch)
+  return [...groups.patchItems, ...groups.mainItems, ...groups.externalItems, ...groups.destructiveItems].map((item) => item.id)
+}
+
+async function renderItemGroups(
+  useItems: typeof useBranchActionItems,
+  repo: ReturnType<typeof seedRepoState>,
+  branch: ReturnType<typeof createRepoBranch>,
+): Promise<ReturnType<typeof useBranchActionItems>> {
+  let groups: ReturnType<typeof useBranchActionItems> | null = null
+  root = createRoot(container)
+  await act(async () => {
+    root!.render(<ItemsHarness useItems={useItems} repo={repo} branch={branch} onReady={(items) => (groups = items)} />)
+  })
+  if (!groups) throw new Error('items were not rendered')
+  return groups
+}
 
 function ItemsHarness({
   useItems,
@@ -117,11 +202,11 @@ function ItemsHarness({
   useItems: typeof useBranchActionItems
   repo: ReturnType<typeof seedRepoState>
   branch: ReturnType<typeof createRepoBranch>
-  onReady: (itemIds: string[]) => void
+  onReady: (items: ReturnType<typeof useBranchActionItems>) => void
 }) {
   const items = useItems(repo, branch)
   React.useEffect(() => {
-    onReady([...items.patchItems, ...items.mainItems, ...items.destructiveItems].map((item) => item.id))
+    onReady(items)
   }, [items, onReady])
   return null
 }

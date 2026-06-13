@@ -1,6 +1,8 @@
 import { Hono } from 'hono'
 import { getBackgroundSyncRepos, setBackgroundSyncRepos } from '#/server/modules/background-sync.ts'
+import { transferRepositoryFiles } from '#/server/modules/repo-file-transfer.ts'
 import {
+  getRepositoryFileTree,
   getRepositoryPatch,
   getRepositoryPullRequests,
   getRepositorySnapshot,
@@ -15,6 +17,7 @@ import {
   cloneRepository,
   commitRepositoryChanges,
   createRepositoryWorktree,
+  deleteRepositoryFileTreeEntries,
   deleteRepositoryBranch,
   fetchRepository,
   getRepositoryRemoteBranches,
@@ -24,6 +27,7 @@ import {
   openRepositoryTerminal,
   pullRepositoryBranch,
   pushRepositoryBranch,
+  renameRepositoryFileTreeEntry,
   removeRepositoryWorktree,
   resetRepositoryHard,
 } from '#/server/modules/repo-write-paths.ts'
@@ -64,6 +68,60 @@ export function createRepoRoutes() {
     const cwd = typeof body?.cwd === 'string' ? body.cwd : ''
     const worktreePath = typeof body?.worktreePath === 'string' ? body.worktreePath : ''
     return c.json(await jsonOr(() => getRepositoryPatch(cwd, worktreePath, c.req.raw.signal), { ok: false, message: 'error.failed-read-repo' }, 'patch'))
+  })
+  app.post('/file-tree', async (c) => {
+    const body = await c.req.json().catch(() => null)
+    const repoId = typeof body?.repoId === 'string' ? body.repoId : ''
+    const worktreePath = typeof body?.worktreePath === 'string' ? body.worktreePath : ''
+    const dirPath = typeof body?.dirPath === 'string' ? body.dirPath : ''
+    return c.json(
+      await jsonOr(
+        () => getRepositoryFileTree(repoId, worktreePath, dirPath, c.req.raw.signal),
+        { ok: false, message: 'error.failed-read-repo' },
+        'file-tree',
+      ),
+    )
+  })
+  app.post('/file-tree/rename', async (c) => {
+    const body = await c.req.json().catch(() => null)
+    const repoId = typeof body?.repoId === 'string' ? body.repoId : ''
+    const worktreePath = typeof body?.worktreePath === 'string' ? body.worktreePath : ''
+    const oldPath = typeof body?.oldPath === 'string' ? body.oldPath : ''
+    const newName = typeof body?.newName === 'string' ? body.newName : ''
+    const sourceToken = typeof body?.sourceToken === 'string' ? body.sourceToken : undefined
+    return c.json(
+      await jsonOr(
+        () => renameRepositoryFileTreeEntry(repoId, worktreePath, oldPath, newName, c.req.raw.signal, sourceToken),
+        { ok: false, message: 'error.failed-read-repo' },
+        'file-tree-rename',
+      ),
+    )
+  })
+  app.post('/file-tree/delete', async (c) => {
+    const body = await c.req.json().catch(() => null)
+    const repoId = typeof body?.repoId === 'string' ? body.repoId : ''
+    const worktreePath = typeof body?.worktreePath === 'string' ? body.worktreePath : ''
+    const paths = Array.isArray(body?.paths)
+      ? body.paths.filter((item: unknown): item is string => typeof item === 'string')
+      : []
+    const sourceToken = typeof body?.sourceToken === 'string' ? body.sourceToken : undefined
+    return c.json(
+      await jsonOr(
+        () => deleteRepositoryFileTreeEntries(repoId, worktreePath, paths, c.req.raw.signal, sourceToken),
+        { ok: false, message: 'error.failed-read-repo' },
+        'file-tree-delete',
+      ),
+    )
+  })
+  app.post('/file-transfer', async (c) => {
+    const body = await c.req.json().catch(() => null)
+    return c.json(
+      await jsonOr(
+        () => transferRepositoryFiles(body),
+        { ok: false, message: 'error.failed-read-repo' },
+        'file-transfer',
+      ),
+    )
   })
   app.post('/pull-requests', async (c) => {
     const body = await c.req.json().catch(() => null)

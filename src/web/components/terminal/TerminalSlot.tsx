@@ -9,6 +9,7 @@ import {
   type KeyboardEvent,
 } from 'react'
 import { Button } from '#/web/components/ui/button.tsx'
+import { GOBLIN_FILE_PATHS_MIME, parseGoblinFilePathDragPayload } from '#/shared/file-tree.ts'
 import { cn } from '#/web/lib/cn.ts'
 import { setTerminalFocused } from '#/web/terminal-focus.ts'
 import { pathForDroppedFile } from '#/web/app-shell-client.ts'
@@ -156,29 +157,27 @@ export function TerminalSlot({ repoRoot, branch, worktreePath }: TerminalSlotPro
 
   const [dragOver, setDragOver] = useState(false)
   const handleDragEnter = useCallback((event: DragEvent<HTMLDivElement>) => {
-    if (!event.dataTransfer.types.includes('Files')) return
+    if (!hasPathDrop(event)) return
     event.preventDefault()
     setDragOver(true)
   }, [])
   const handleDragOver = useCallback((event: DragEvent<HTMLDivElement>) => {
-    if (!event.dataTransfer.types.includes('Files')) return
+    if (!hasPathDrop(event)) return
     event.preventDefault()
     event.dataTransfer.dropEffect = 'copy'
   }, [])
   const handleDragLeave = useCallback((event: DragEvent<HTMLDivElement>) => {
-    if (!event.dataTransfer.types.includes('Files')) return
+    if (!hasPathDrop(event)) return
     const relatedTarget = event.relatedTarget
     if (!(relatedTarget instanceof Node) || !event.currentTarget.contains(relatedTarget)) setDragOver(false)
   }, [])
   const handleDrop = useCallback(
     (event: DragEvent<HTMLDivElement>) => {
-      if (!event.dataTransfer.types.includes('Files')) return
+      if (!hasPathDrop(event)) return
       event.preventDefault()
       setDragOver(false)
       if (!key) return
-      const paths = Array.from(event.dataTransfer.files)
-        .map((file) => pathForDroppedFile(file))
-        .filter((path) => path.length > 0)
+      const paths = pathsForDrop(event)
       if (paths.length === 0) return
       const escaped = paths.map(shellEscapePath).join(' ')
       writeInput(key, escaped)
@@ -339,4 +338,17 @@ function shellEscapePath(path: string): string {
   if (path.length === 0) return "''"
   if (/^[A-Za-z0-9_@%+=:,./-]+$/.test(path)) return path
   return "'" + path.replace(/'/g, "'\\''") + "'"
+}
+
+function hasPathDrop(event: DragEvent<HTMLDivElement>): boolean {
+  return event.dataTransfer.types.includes(GOBLIN_FILE_PATHS_MIME) || event.dataTransfer.types.includes('Files')
+}
+
+function pathsForDrop(event: DragEvent<HTMLDivElement>): string[] {
+  if (event.dataTransfer.types.includes(GOBLIN_FILE_PATHS_MIME)) {
+    return parseGoblinFilePathDragPayload(event.dataTransfer.getData(GOBLIN_FILE_PATHS_MIME))
+  }
+  return Array.from(event.dataTransfer.files)
+    .map((file) => pathForDroppedFile(file))
+    .filter((path) => path.length > 0)
 }

@@ -1,15 +1,22 @@
 import { describe, expect, test, vi } from 'vitest'
 import {
   checkoutRemoteBranch,
+  commitRemoteChanges,
   createRemoteWorktree,
   deleteRemoteBranch,
+  deleteRemoteFileTreeEntries,
   getRemoteBrowserUrl,
   getRemoteSnapshot,
+  inventoryRemoteFileTransfer,
+  listRemoteFileTreeDirectory,
   pullRemoteBranch,
   fetchRemoteRepository,
   pushRemoteBranch,
+  readRemoteFileBase64,
   remoteExecResult,
+  renameRemoteFileTreeEntry,
   removeRemoteWorktree,
+  writeRemoteFileBase64,
 } from '#/system/ssh/git.ts'
 import type { RemoteCommandResult } from '#/system/ssh/commands.ts'
 import { normalizeRemoteTarget } from '#/shared/remote-repo.ts'
@@ -82,6 +89,113 @@ describe('remote git helpers', () => {
     expect(
       remoteExecResult({ ok: false, stdout: '', stderr: 'permission denied', message: 'unknown' } as RemoteCommandResult),
     ).toEqual({ ok: false, message: 'unknown' })
+  })
+
+  test('maps remote directory JSON to file tree entries', async () => {
+    const run = vi.fn(async () =>
+      okRemoteResult(
+        JSON.stringify({
+          ok: true,
+          entries: [
+            { name: 'src', kind: 'directory' },
+            { name: 'README.md', kind: 'file' },
+            { name: 'link', kind: 'symlink', targetKind: 'directory' },
+          ],
+        }),
+      ),
+    )
+
+    const result = await listRemoteFileTreeDirectory(TARGET, '/srv/repo', '/srv/repo', { run: run as any })
+
+    expect(result).toEqual({
+      ok: true,
+      worktreePath: '/srv/repo',
+      dirPath: '/srv/repo',
+      entries: [
+        { name: 'src', absolutePath: '/srv/repo/src', relativePath: 'src', kind: 'directory' },
+        { name: 'link', absolutePath: '/srv/repo/link', relativePath: 'link', kind: 'symlink', targetKind: 'directory' },
+        { name: 'README.md', absolutePath: '/srv/repo/README.md', relativePath: 'README.md', kind: 'file' },
+      ],
+    })
+    expect(run).toHaveBeenCalledWith(
+      { type: 'listDirectoryEntries', worktreePath: '/srv/repo', dirPath: '/srv/repo' },
+      TARGET,
+      { signal: undefined },
+    )
+  })
+
+  test('inventories remote transfer paths', async () => {
+    const run = vi.fn(async () =>
+      okRemoteResult(JSON.stringify({
+        ok: true,
+        totalBytes: 5,
+        entries: [{ path: '/srv/repo/a.txt', relativePath: 'a.txt', kind: 'file', size: 5 }],
+      })),
+    )
+
+    const result = await inventoryRemoteFileTransfer(TARGET, '/srv/repo', ['/srv/repo/a.txt'], { run: run as any })
+
+    expect(result).toEqual({
+      ok: true,
+      totalBytes: 5,
+      entries: [{ path: '/srv/repo/a.txt', relativePath: 'a.txt', kind: 'file', size: 5 }],
+    })
+    expect(run).toHaveBeenCalledWith(
+      { type: 'fileTransferInventory', rootPath: '/srv/repo', paths: ['/srv/repo/a.txt'] },
+      TARGET,
+      { signal: undefined, timeoutMs: 90_000 },
+    )
+  })
+
+  test('reads and writes remote base64 files', async () => {
+    const run = vi.fn(async () => okRemoteResult(Buffer.from('hello').toString('base64')))
+
+    await expect(readRemoteFileBase64(TARGET, '/srv/repo/a.txt', { run: run as any })).resolves.toEqual({
+      ok: true,
+      bytesBase64: Buffer.from('hello').toString('base64'),
+    })
+    await expect(
+      writeRemoteFileBase64(TARGET, '/srv/repo/b.txt', Buffer.from('hello').toString('base64'), { run: run as any }),
+    ).resolves.toEqual({
+      ok: true,
+      message: Buffer.from('hello').toString('base64'),
+    })
+  })
+
+  test('renameRemoteFileTreeEntry returns parsed success and passes fixed command input', async () => {
+    const run = vi.fn(async () => ({ ok: true, stdout: '{"ok":true,"message":""}', stderr: '' }))
+
+    const result = await renameRemoteFileTreeEntry(
+      TARGET,
+      '/srv/repo',
+      '/srv/repo/README.md',
+      'README-renamed.md',
+      { run: run as any },
+    )
+
+    expect(result).toEqual({ ok: true, message: '' })
+    expect(run).toHaveBeenCalledWith(
+      {
+        type: 'renameFileTreeEntry',
+        worktreePath: '/srv/repo',
+        oldPath: '/srv/repo/README.md',
+        newName: 'README-renamed.md',
+      },
+      TARGET,
+      { signal: undefined },
+    )
+  })
+
+  test('deleteRemoteFileTreeEntries returns parsed validation failure', async () => {
+    const run = vi.fn(async () => ({
+      ok: true,
+      stdout: '{"ok":false,"message":"error.delete-root-forbidden"}',
+      stderr: '',
+    }))
+
+    const result = await deleteRemoteFileTreeEntries(TARGET, '/srv/repo', ['/srv/repo'], { run: run as any })
+
+    expect(result).toEqual({ ok: false, message: 'error.delete-root-forbidden' })
   })
 
   test('deleteRemoteBranch allows safe delete when branch is merged into current HEAD without upstream', async () => {
@@ -198,6 +312,37 @@ describe('remote git helpers', () => {
       mode: { kind: 'newBranch', newBranch: 'feature/test', baseRef: 'main' },
       run: run as any,
     })
+
+    expect(result).toEqual({ ok: false, message: 'error.invalid-path' })
+    expect(run).not.toHaveBeenCalled()
+  })
+
+  test('commitRemoteChanges stages and commits inside a known remote worktree', async () => {
+    const run = vi.fn(async (command: { type: string }) => {
+      switch (command.type) {
+        case 'gitWorktreeList':
+          return okRemoteResult('worktree /srv/repo\nHEAD f00ba4\nbranch refs/heads/main\n')
+        case 'gitCommitAll':
+          return okRemoteResult('[main abc1234] feat: add remote commit')
+        default:
+          return okRemoteResult('')
+      }
+    })
+
+    const result = await commitRemoteChanges(TARGET, '/srv/repo', 'feat: add remote commit', { run: run as any })
+
+    expect(result).toEqual({ ok: true, message: '[main abc1234] feat: add remote commit' })
+    expect(run).toHaveBeenCalledWith(
+      { type: 'gitCommitAll', path: '/srv/repo', message: 'feat: add remote commit' },
+      TARGET,
+      { signal: undefined, timeoutMs: 180_000 },
+    )
+  })
+
+  test('commitRemoteChanges rejects relative worktree paths before running remote commands', async () => {
+    const run = vi.fn()
+
+    const result = await commitRemoteChanges(TARGET, 'relative/repo', 'feat: add remote commit', { run: run as any })
 
     expect(result).toEqual({ ok: false, message: 'error.invalid-path' })
     expect(run).not.toHaveBeenCalled()

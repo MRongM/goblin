@@ -37,6 +37,8 @@ function branchDetailRepoEqual(a: BranchDetailRepo | undefined, b: BranchDetailR
       a.resources.status === b.resources.status &&
       a.resources.pullRequests === b.resources.pullRequests &&
       a.operations.branchAction === b.operations.branchAction &&
+      a.operations.fetch === b.operations.fetch &&
+      a.operations.manualRefresh === b.operations.manualRefresh &&
       a.remote.target === b.remote.target &&
       a.remote.hasRemotes === b.remote.hasRemotes &&
       a.remote.hasBrowserRemote === b.remote.hasBrowserRemote &&
@@ -78,6 +80,8 @@ export function BranchDetail({
             },
             operations: {
               branchAction: repo.operations.branchAction,
+              fetch: repo.operations.fetch,
+              manualRefresh: repo.operations.manualRefresh,
             },
             remote: {
               target: repo.remote.target,

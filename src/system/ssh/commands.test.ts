@@ -17,6 +17,68 @@ describe('remote command scripts', () => {
     )
   })
 
+  test('builds a quoted one-level remote directory listing command', () => {
+    const invocation = buildRemoteCommandInvocation(TARGET, {
+      type: 'listDirectoryEntries',
+      worktreePath: '/srv/repo',
+      dirPath: "/srv/repo/src with 'quote'",
+    })
+    expect(invocation.script).toContain('python3')
+    expect(invocation.script).toContain('"/srv/repo"')
+    expect(invocation.script).toContain('src with')
+    expect(invocation.args).toContain(TARGET.alias)
+  })
+
+  test('builds a fixed remote rename command with JSON encoded inputs', () => {
+    const invocation = buildRemoteCommandInvocation(TARGET, {
+      type: 'renameFileTreeEntry',
+      worktreePath: '/srv/repo',
+      oldPath: "/srv/repo/src/old 'name'.ts",
+      newName: 'new name.ts',
+    })
+
+    expect(invocation.script).toContain('python3')
+    expect(invocation.script).toContain('os.rename')
+    expect(invocation.script).toContain('"/srv/repo"')
+    expect(invocation.script).toContain("old 'name'.ts")
+    expect(invocation.script).toContain('new name.ts')
+    expect(invocation.args).toContain(TARGET.alias)
+  })
+
+  test('builds a fixed remote delete command with JSON encoded paths', () => {
+    const invocation = buildRemoteCommandInvocation(TARGET, {
+      type: 'deleteFileTreeEntries',
+      worktreePath: '/srv/repo',
+      paths: ['/srv/repo/README.md', '/srv/repo/src'],
+    })
+
+    expect(invocation.script).toContain('python3')
+    expect(invocation.script).toContain('shutil.rmtree')
+    expect(invocation.script).toContain('"/srv/repo/README.md"')
+    expect(invocation.script).toContain('"/srv/repo/src"')
+    expect(invocation.args).toContain(TARGET.alias)
+  })
+
+  test('builds quoted remote file inventory command', () => {
+    const invocation = buildRemoteCommandInvocation(TARGET, {
+      type: 'fileTransferInventory',
+      rootPath: '/srv/repo',
+      paths: ['/srv/repo/src', "/srv/repo/file with 'quote'.txt"],
+    })
+    expect(invocation.script).toContain('fileTransferInventory')
+    expect(invocation.script).toContain('"/srv/repo"')
+    expect(invocation.args).toContain(TARGET.alias)
+  })
+
+  test('builds remote uploaded file write command', () => {
+    const invocation = buildRemoteCommandInvocation(TARGET, {
+      type: 'fileTransferWriteBase64',
+      targetPath: '/srv/repo/pasted.txt',
+    })
+    expect(invocation.script).toContain('base64')
+    expect(invocation.script).toContain('/srv/repo/pasted.txt')
+  })
+
   test('renders all worktree add modes', () => {
     expect(
       buildRemoteCommandInvocation(TARGET, {
@@ -44,5 +106,16 @@ describe('remote command scripts', () => {
         input: { worktreePath: '/srv/repo-detached', mode: { kind: 'detached', ref: 'origin/feature/a' } },
       }).script,
     ).toContain("worktree add --detach -- '/srv/repo-detached' 'origin/feature/a'")
+  })
+
+  test('renders quoted remote commit command', () => {
+    const invocation = buildRemoteCommandInvocation(TARGET, {
+      type: 'gitCommitAll',
+      path: '/srv/repo-feature',
+      message: "feat: handle user's changes",
+    })
+
+    expect(invocation.script).toContain("git -C '/srv/repo-feature' add -A")
+    expect(invocation.script).toContain("git -C '/srv/repo-feature' commit -m 'feat: handle user'\\''s changes'")
   })
 })

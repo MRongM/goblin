@@ -6,6 +6,7 @@ import {
   DEFAULT_DETAIL_COLLAPSED,
   DEFAULT_DETAIL_FOCUS_MODE,
   DEFAULT_DETAIL_PANE_SIZES,
+  DEFAULT_FILE_TREE_PANE_SIZES,
   DEFAULT_WORKSPACE_LAYOUT,
 } from '#/shared/workspace-layout.ts'
 
@@ -31,6 +32,7 @@ export function defaultSessionState(): SessionState {
     detailFocusMode: DEFAULT_DETAIL_FOCUS_MODE,
     workspaceLayout: DEFAULT_WORKSPACE_LAYOUT,
     detailPaneSizes: { ...DEFAULT_DETAIL_PANE_SIZES },
+    fileTreePaneSizes: { ...DEFAULT_FILE_TREE_PANE_SIZES },
     selectedTerminalByWorktree: {},
   }
 }

@@ -1,4 +1,5 @@
 import path from 'node:path'
+import type { RepoFileTreeEntry, RepoFileTreeResult } from '#/shared/file-tree.ts'
 import { parseBranches, parseLog, parseStatus, parseWorktrees } from '#/system/git/parsers.ts'
 import { markDefaultBranch, prioritizeDefaultBranch } from '#/system/git/branches.ts'
 import {
@@ -15,6 +16,7 @@ import {
   REMOTE_SNAPSHOT_CURRENT_MARKER,
   REMOTE_SNAPSHOT_DEFAULT_MARKER,
   runRemoteCommand,
+  type RemoteCommandOptions,
   type RemoteCommandKind,
   type RemoteCommandResult,
 } from '#/system/ssh/commands.ts'
@@ -27,13 +29,15 @@ import { isSafeBranchName } from '#/shared/refnames.ts'
 type RemoteGitRunner = (
   command: RemoteCommandKind,
   target: RemoteRepoTarget,
-  options?: { signal?: AbortSignal; timeoutMs?: number },
+  options?: RemoteCommandOptions,
 ) => Promise<RemoteCommandResult>
 
 const REMOTE_WORKTREE_STATUS_CONCURRENCY = 8
 const REMOTE_PATCH_UNTRACKED_DIFF_CONCURRENCY = 8
 const REMOTE_BRANCH_OP_TIMEOUT_MS = 180_000
 const REMOTE_PATCH_TIMEOUT_MS = 90_000
+const REMOTE_FILE_TRANSFER_TIMEOUT_MS = 90_000
+const REMOTE_FILE_TRANSFER_MAX_BUFFER = 160 * 1024 * 1024
 
 export interface RemoteRepoSnapshot {
   branches: BranchSnapshotInfo[]
@@ -41,10 +45,44 @@ export interface RemoteRepoSnapshot {
   remote: RepoRemoteInfo
 }
 
+export interface RemoteTransferInventoryEntry {
+  path: string
+  relativePath: string
+  kind: 'file' | 'directory' | 'symlink'
+  size: number
+  linkTarget?: string
+}
+
+export type RemoteTransferInventoryResult =
+  | { ok: true; entries: RemoteTransferInventoryEntry[]; totalBytes: number }
+  | { ok: false; message: string }
+
+export type RemoteFileReadResult =
+  | { ok: true; bytesBase64: string }
+  | { ok: false; message: string }
+
 interface SnapshotSections {
   current: string[]
   defaultBranch: string[]
   branches: string[]
+}
+
+interface RemoteFileTreeJson {
+  ok?: boolean
+  message?: string
+  entries?: Array<{ name?: unknown; kind?: unknown; targetKind?: unknown }>
+}
+
+interface RemoteFileTreeMutationJson {
+  ok?: boolean
+  message?: string
+}
+
+interface RemoteTransferInventoryJson {
+  ok?: boolean
+  message?: string
+  totalBytes?: unknown
+  entries?: Array<{ path?: unknown; relativePath?: unknown; kind?: unknown; size?: unknown; linkTarget?: unknown }>
 }
 
 export async function getRemoteSnapshot(
@@ -151,6 +189,171 @@ export async function getRemotePatch(
   return { ok: true, message: combined.length > 0 ? `${combined}\n` : '' }
 }
 
+export async function listRemoteFileTreeDirectory(
+  target: RemoteRepoTarget,
+  worktreePath: string,
+  dirPath: string,
+  options: { signal?: AbortSignal; run?: RemoteGitRunner } = {},
+): Promise<RepoFileTreeResult> {
+  const run: RemoteGitRunner = options.run ?? ((command, t, runOptions) => runRemoteCommand(t, command, runOptions))
+  const result = await run({ type: 'listDirectoryEntries', worktreePath, dirPath }, target, { signal: options.signal })
+  if (!result.ok && !result.stdout) return { ok: false, message: result.message || 'error.failed-read-repo' }
+
+  let parsed: RemoteFileTreeJson
+  try {
+    parsed = JSON.parse(result.stdout) as RemoteFileTreeJson
+  } catch {
+    return { ok: false, message: 'error.failed-read-repo' }
+  }
+
+  if (parsed.ok !== true) return { ok: false, message: parsed.message || 'error.failed-read-repo' }
+  const normalizedDir = path.posix.normalize(dirPath)
+  const normalizedWorktree = path.posix.normalize(worktreePath)
+  const entries: RepoFileTreeEntry[] = (parsed.entries ?? [])
+    .filter((entry): entry is { name: string; kind: RepoFileTreeEntry['kind']; targetKind?: RepoFileTreeEntry['targetKind'] } => {
+      return (
+        typeof entry.name === 'string' &&
+        (entry.kind === 'file' || entry.kind === 'directory' || entry.kind === 'symlink') &&
+        (entry.targetKind === undefined ||
+          entry.targetKind === 'file' ||
+          entry.targetKind === 'directory' ||
+          entry.targetKind === 'other' ||
+          entry.targetKind === 'missing')
+      )
+    })
+    .map((entry) => {
+      const absolutePath = path.posix.join(normalizedDir, entry.name)
+      return {
+        name: entry.name,
+        absolutePath,
+        relativePath: remoteRelativePath(normalizedWorktree, absolutePath),
+        kind: entry.kind,
+        ...(entry.targetKind ? { targetKind: entry.targetKind } : {}),
+      }
+    })
+  return { ok: true, worktreePath: normalizedWorktree, dirPath: normalizedDir, entries: sortRemoteFileTreeEntries(entries) }
+}
+
+export async function inventoryRemoteFileTransfer(
+  target: RemoteRepoTarget,
+  rootPath: string,
+  paths: string[],
+  options: { signal?: AbortSignal; run?: RemoteGitRunner } = {},
+): Promise<RemoteTransferInventoryResult> {
+  const run: RemoteGitRunner = options.run ?? ((command, t, runOptions) => runRemoteCommand(t, command, runOptions))
+  const result = await run(
+    { type: 'fileTransferInventory', rootPath, paths },
+    target,
+    { signal: options.signal, timeoutMs: REMOTE_FILE_TRANSFER_TIMEOUT_MS },
+  )
+  if (options.signal?.aborted) return { ok: false, message: 'cancelled' }
+  if (!result.ok && !result.stdout) return { ok: false, message: result.message || 'error.failed-read-repo' }
+  return parseRemoteTransferInventory(result.stdout)
+}
+
+export async function readRemoteFileBase64(
+  target: RemoteRepoTarget,
+  path: string,
+  options: { signal?: AbortSignal; run?: RemoteGitRunner } = {},
+): Promise<RemoteFileReadResult> {
+  const run: RemoteGitRunner = options.run ?? ((command, t, runOptions) => runRemoteCommand(t, command, runOptions))
+  const result = await run(
+    { type: 'fileTransferReadBase64', path },
+    target,
+    {
+      signal: options.signal,
+      timeoutMs: REMOTE_FILE_TRANSFER_TIMEOUT_MS,
+      maxBuffer: REMOTE_FILE_TRANSFER_MAX_BUFFER,
+    },
+  )
+  if (options.signal?.aborted) return { ok: false, message: 'cancelled' }
+  if (!result.ok) {
+    const failure = remoteExecResult(result)
+    return { ok: false, message: failure.message }
+  }
+  return { ok: true, bytesBase64: result.stdout.replace(/\s+/g, '') }
+}
+
+export async function writeRemoteFileBase64(
+  target: RemoteRepoTarget,
+  targetPath: string,
+  bytesBase64: string,
+  options: { signal?: AbortSignal; run?: RemoteGitRunner } = {},
+): Promise<ExecResult> {
+  const run: RemoteGitRunner = options.run ?? ((command, t, runOptions) => runRemoteCommand(t, command, runOptions))
+  const result = await run(
+    { type: 'fileTransferWriteBase64', targetPath },
+    target,
+    { signal: options.signal, timeoutMs: REMOTE_FILE_TRANSFER_TIMEOUT_MS, stdin: bytesBase64 },
+  )
+  if (options.signal?.aborted) return { ok: false, message: 'cancelled' }
+  return remoteExecResult(result)
+}
+
+export async function createRemoteDirectory(
+  target: RemoteRepoTarget,
+  targetPath: string,
+  options: { signal?: AbortSignal; run?: RemoteGitRunner } = {},
+): Promise<ExecResult> {
+  const run: RemoteGitRunner = options.run ?? ((command, t, runOptions) => runRemoteCommand(t, command, runOptions))
+  const result = await run(
+    { type: 'fileTransferMkdir', targetPath },
+    target,
+    { signal: options.signal, timeoutMs: REMOTE_FILE_TRANSFER_TIMEOUT_MS },
+  )
+  if (options.signal?.aborted) return { ok: false, message: 'cancelled' }
+  return remoteExecResult(result)
+}
+
+export async function createRemoteSymlink(
+  target: RemoteRepoTarget,
+  linkPath: string,
+  linkTarget: string,
+  options: { signal?: AbortSignal; run?: RemoteGitRunner } = {},
+): Promise<ExecResult> {
+  const run: RemoteGitRunner = options.run ?? ((command, t, runOptions) => runRemoteCommand(t, command, runOptions))
+  const result = await run(
+    { type: 'fileTransferSymlink', linkPath, target: linkTarget },
+    target,
+    { signal: options.signal, timeoutMs: REMOTE_FILE_TRANSFER_TIMEOUT_MS },
+  )
+  if (options.signal?.aborted) return { ok: false, message: 'cancelled' }
+  return remoteExecResult(result)
+}
+
+export async function renameRemoteFileTreeEntry(
+  target: RemoteRepoTarget,
+  worktreePath: string,
+  oldPath: string,
+  newName: string,
+  options: { signal?: AbortSignal; run?: RemoteGitRunner } = {},
+): Promise<ExecResult> {
+  const run: RemoteGitRunner = options.run ?? ((command, t, runOptions) => runRemoteCommand(t, command, runOptions))
+  const result = await run(
+    { type: 'renameFileTreeEntry', worktreePath, oldPath, newName },
+    target,
+    { signal: options.signal },
+  )
+  if (options.signal?.aborted) return { ok: false, message: 'cancelled' }
+  return remoteFileTreeMutationResult(result)
+}
+
+export async function deleteRemoteFileTreeEntries(
+  target: RemoteRepoTarget,
+  worktreePath: string,
+  paths: string[],
+  options: { signal?: AbortSignal; run?: RemoteGitRunner } = {},
+): Promise<ExecResult> {
+  const run: RemoteGitRunner = options.run ?? ((command, t, runOptions) => runRemoteCommand(t, command, runOptions))
+  const result = await run(
+    { type: 'deleteFileTreeEntries', worktreePath, paths },
+    target,
+    { signal: options.signal },
+  )
+  if (options.signal?.aborted) return { ok: false, message: 'cancelled' }
+  return remoteFileTreeMutationResult(result)
+}
+
 export async function fetchRemoteRepository(
   target: RemoteRepoTarget,
   options: { signal?: AbortSignal; run?: RemoteGitRunner } = {},
@@ -254,6 +457,24 @@ export async function pushRemoteBranch(
       targetBranch: pushTarget.branch,
       setUpstream: pushTarget.setUpstream,
     },
+    target,
+    { signal: options.signal, timeoutMs: REMOTE_BRANCH_OP_TIMEOUT_MS },
+  )
+  return remoteExecResult(result)
+}
+
+export async function commitRemoteChanges(
+  target: RemoteRepoTarget,
+  worktreePath: string,
+  message: string,
+  options: { signal?: AbortSignal; run?: RemoteGitRunner } = {},
+): Promise<ExecResult> {
+  if (!isValidRemotePath(worktreePath)) return { ok: false, message: 'error.invalid-path' }
+  const run: RemoteGitRunner = options.run ?? ((command, t, runOptions) => runRemoteCommand(t, command, runOptions))
+  const known = await resolveKnownRemoteWorktree(target, worktreePath, { signal: options.signal, run })
+  if ('ok' in known) return known
+  const result = await run(
+    { type: 'gitCommitAll', path: known.path, message },
     target,
     { signal: options.signal, timeoutMs: REMOTE_BRANCH_OP_TIMEOUT_MS },
   )
@@ -609,6 +830,63 @@ function splitUpstream(upstream: string): { remote: string; branch: string } | n
 export function remoteExecResult(result: RemoteCommandResult): ExecResult {
   if (result.ok) return { ok: true, message: result.stdout || result.stderr || 'ok' }
   return { ok: false, message: result.message || result.stderr || 'error.unknown' }
+}
+
+function remoteFileTreeMutationResult(result: RemoteCommandResult): ExecResult {
+  if (!result.ok && !result.stdout) return remoteExecResult(result)
+  try {
+    const parsed = JSON.parse(result.stdout) as RemoteFileTreeMutationJson
+    if (parsed.ok === true) return { ok: true, message: parsed.message ?? '' }
+    return { ok: false, message: parsed.message || 'error.failed-read-repo' }
+  } catch {
+    return { ok: false, message: 'error.failed-read-repo' }
+  }
+}
+
+function parseRemoteTransferInventory(output: string): RemoteTransferInventoryResult {
+  let parsed: RemoteTransferInventoryJson
+  try {
+    parsed = JSON.parse(output) as RemoteTransferInventoryJson
+  } catch {
+    return { ok: false, message: 'error.failed-read-repo' }
+  }
+  if (parsed.ok !== true) return { ok: false, message: parsed.message || 'error.failed-read-repo' }
+  if (!Array.isArray(parsed.entries) || typeof parsed.totalBytes !== 'number') {
+    return { ok: false, message: 'error.failed-read-repo' }
+  }
+  const entries: RemoteTransferInventoryEntry[] = []
+  for (const entry of parsed.entries) {
+    if (
+      typeof entry.path !== 'string' ||
+      typeof entry.relativePath !== 'string' ||
+      typeof entry.size !== 'number' ||
+      (entry.kind !== 'file' && entry.kind !== 'directory' && entry.kind !== 'symlink') ||
+      (entry.linkTarget !== undefined && typeof entry.linkTarget !== 'string')
+    ) {
+      return { ok: false, message: 'error.failed-read-repo' }
+    }
+    entries.push({
+      path: entry.path,
+      relativePath: entry.relativePath,
+      kind: entry.kind,
+      size: entry.size,
+      ...(entry.linkTarget !== undefined ? { linkTarget: entry.linkTarget } : {}),
+    })
+  }
+  return { ok: true, entries, totalBytes: parsed.totalBytes }
+}
+
+function remoteRelativePath(worktreePath: string, absolutePath: string): string {
+  return path.posix.relative(path.posix.normalize(worktreePath), path.posix.normalize(absolutePath))
+}
+
+function sortRemoteFileTreeEntries(entries: RepoFileTreeEntry[]): RepoFileTreeEntry[] {
+  return entries.sort((a, b) => {
+    const aDirectory = a.kind === 'directory'
+    const bDirectory = b.kind === 'directory'
+    if (aDirectory !== bDirectory) return aDirectory ? -1 : 1
+    return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
+  })
 }
 
 function isValidRemotePath(value: string): boolean {

@@ -2,6 +2,7 @@ import type { SessionState } from '#/shared/rpc.ts'
 import type { RestorableWorkspaceState, ReposStore } from '#/web/stores/repos/types.ts'
 import { persistedOpenWorkspaceEntries } from '#/web/open-workspace-state.ts'
 import { persistedActiveRepoIdForSession, persistedSelectedTerminalByWorktreeForSession } from '#/web/session-persistence-state.ts'
+import { DEFAULT_FILE_TREE_PANE_SIZES } from '#/shared/workspace-layout.ts'
 
 export function sessionStateFromRestorableWorkspaceState(input: {
   repos: ReposStore['repos']
@@ -15,6 +16,7 @@ export function sessionStateFromRestorableWorkspaceState(input: {
     detailFocusMode: restorableWorkspaceState.detailFocusMode,
     workspaceLayout: restorableWorkspaceState.workspaceLayout,
     detailPaneSizes: restorableWorkspaceState.detailPaneSizes,
+    fileTreePaneSizes: restorableWorkspaceState.fileTreePaneSizes,
     selectedTerminalByWorktree: persistedSelectedTerminalByWorktreeForSession(
       restorableWorkspaceState.selectedTerminalByWorktree,
       repos,
@@ -30,7 +32,13 @@ export function restoreRestorableWorkspaceStateFromSession(
   activeId: string | null = session.activeRepo,
 ): Pick<
   RestorableWorkspaceState,
-  'activeId' | 'detailCollapsed' | 'detailFocusMode' | 'workspaceLayout' | 'detailPaneSizes' | 'selectedTerminalByWorktree'
+  | 'activeId'
+  | 'detailCollapsed'
+  | 'detailFocusMode'
+  | 'workspaceLayout'
+  | 'detailPaneSizes'
+  | 'fileTreePaneSizes'
+  | 'selectedTerminalByWorktree'
 > {
   return {
     activeId,
@@ -38,6 +46,7 @@ export function restoreRestorableWorkspaceStateFromSession(
     detailFocusMode: session.detailFocusMode,
     workspaceLayout: session.workspaceLayout,
     detailPaneSizes: session.detailPaneSizes,
+    fileTreePaneSizes: session.fileTreePaneSizes ?? DEFAULT_FILE_TREE_PANE_SIZES,
     selectedTerminalByWorktree: session.selectedTerminalByWorktree ?? {},
   }
 }

@@ -29,6 +29,9 @@ vi.mock('#/web/repo-client.ts', () => ({
   openRepositoryEditor: mocks.openRepositoryEditor,
   openRepositoryRemote: mocks.openRepositoryRemote,
   openRepositoryTerminal: mocks.openRepositoryTerminal,
+}))
+
+vi.mock('#/web/remote-client.ts', () => ({
   openRemoteRepositoryEditor: mocks.openRemoteRepositoryEditor,
   openRemoteRepositoryTerminal: mocks.openRemoteRepositoryTerminal,
 }))

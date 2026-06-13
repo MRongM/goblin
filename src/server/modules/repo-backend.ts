@@ -18,6 +18,7 @@ import { getRemoteTrackingBranches as getLocalRemoteTrackingBranches } from '#/s
 import { getWorkingStatus } from '#/system/git/status.ts'
 import { createWorktree, getWorktrees, removeWorktree } from '#/system/git/worktrees.ts'
 import { getWorktreePatch } from '#/system/git/patch.ts'
+import { commitAllChanges } from '#/system/git/commit.ts'
 import { type ExecResult, type PullRequestFetchMode, type PullRequestInfo, type WorktreeStatus } from '#/shared/git-types.ts'
 import { resolveKnownWorktree, resolveRemovableWorktree } from '#/shared/worktree-guards.ts'
 import { isValidCwd } from '#/shared/input-validation.ts'
@@ -26,6 +27,7 @@ import { resolveRemoteTarget as resolveSshRemoteTarget } from '#/system/ssh/conf
 import { testRemoteRepository } from '#/system/ssh/diagnostics.ts'
 import {
   checkoutRemoteBranch,
+  commitRemoteChanges,
   createRemoteWorktree,
   deleteRemoteBranch,
   fetchRemoteRepository,
@@ -67,6 +69,7 @@ export interface RepoBackend {
   checkout(branch: string, signal?: AbortSignal): Promise<ExecResult>
   pull(branch: string, worktreePath?: string, signal?: AbortSignal): Promise<ExecResult>
   push(branch: string, signal?: AbortSignal): Promise<ExecResult>
+  commitAll(worktreePath: string, message: string, signal?: AbortSignal): Promise<ExecResult>
   createWorktree(input: CreateWorktreeInput, signal?: AbortSignal): Promise<ExecResult>
   deleteBranch(
     branch: string,
@@ -251,6 +254,10 @@ function createLocalRepoBackend(repoId: string): RepoBackend {
       if (!isValidCwd(repoId)) return { ok: false, message: 'error.invalid-arguments' }
       return await pushBranch(repoId, branch, signal)
     },
+    async commitAll(worktreePath, message, signal) {
+      if (!isValidCwd(worktreePath)) return { ok: false, message: 'error.invalid-arguments' }
+      return await commitAllChanges(worktreePath, message, signal)
+    },
     async createWorktree(input, signal) {
       if (!isValidCwd(repoId)) return { ok: false, message: 'error.invalid-arguments' }
       return await createWorktree(repoId, input, signal)
@@ -348,6 +355,9 @@ async function createRemoteRepoBackend(repoId: string): Promise<RepoBackend> {
     },
     async push(branch, signal) {
       return await pushRemoteBranch(target, branch, { signal })
+    },
+    async commitAll(worktreePath, message, signal) {
+      return await commitRemoteChanges(target, worktreePath, message, { signal })
     },
     async createWorktree(input, signal) {
       return await createRemoteWorktree(target, { ...input, signal })

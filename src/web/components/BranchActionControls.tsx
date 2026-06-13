@@ -13,11 +13,18 @@ interface BranchActionControlsProps {
 }
 
 export function BranchActionControls({ actions, variant = 'bar' }: BranchActionControlsProps) {
-  const { patchItems, mainItems, destructiveItems } = actions
+  const { patchItems, mainItems, externalItems, destructiveItems } = actions
   const visibleItems = visibleBranchActionItems(actions)
 
   if (variant === 'menu') {
-    return <BranchActionsDropdown patchItems={patchItems} mainItems={mainItems} destructiveItems={destructiveItems} />
+    return (
+      <BranchActionsDropdown
+        patchItems={patchItems}
+        mainItems={mainItems}
+        externalItems={externalItems}
+        destructiveItems={destructiveItems}
+      />
+    )
   }
 
   if (variant === 'auto') {
@@ -26,6 +33,7 @@ export function BranchActionControls({ actions, variant = 'bar' }: BranchActionC
         visibleItems={visibleItems}
         patchItems={patchItems}
         mainItems={mainItems}
+        externalItems={externalItems}
         destructiveItems={destructiveItems}
       />
     )
@@ -38,11 +46,13 @@ function BranchActionAuto({
   visibleItems,
   patchItems,
   mainItems,
+  externalItems,
   destructiveItems,
 }: {
   visibleItems: BranchActionItem[]
   patchItems: BranchActionItem[]
   mainItems: BranchActionItem[]
+  externalItems: BranchActionItem[]
   destructiveItems: BranchActionItem[]
 }) {
   const layoutKey = visibleItems.map((item) => `${item.id}:${item.label}:${item.disabled}`).join('|')
@@ -51,7 +61,12 @@ function BranchActionAuto({
   return (
     <div ref={containerRef} className="relative flex min-w-0 flex-1 justify-end">
       {collapsed ? (
-        <BranchActionsDropdown patchItems={patchItems} mainItems={mainItems} destructiveItems={destructiveItems} />
+        <BranchActionsDropdown
+          patchItems={patchItems}
+          mainItems={mainItems}
+          externalItems={externalItems}
+          destructiveItems={destructiveItems}
+        />
       ) : (
         <BranchActionButtonScroller visibleItems={visibleItems} />
       )}
