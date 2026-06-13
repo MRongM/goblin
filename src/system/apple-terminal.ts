@@ -1,7 +1,7 @@
 import { execa } from 'execa'
 import { statSync } from 'node:fs'
 import path from 'node:path'
-import { buildRemoteTerminalInvocation } from '#/system/remote-terminal.ts'
+import { buildExternalRemoteTerminalInvocation, type ExternalRemoteTerminalTarget } from '#/system/remote-terminal.ts'
 
 const OPEN_TIMEOUT_MS = 10_000
 export const TERMINAL_APP_CANDIDATES = [
@@ -39,10 +39,9 @@ export async function openInAppleTerminal(p: string): Promise<{ ok: boolean; mes
 }
 
 export async function openRemoteInAppleTerminal(
-  alias: string,
-  remotePath: string,
+  target: ExternalRemoteTerminalTarget,
 ): Promise<{ ok: boolean; message: string }> {
-  const invocation = buildRemoteTerminalInvocation(alias, remotePath)
+  const invocation = buildExternalRemoteTerminalInvocation(target)
   if (!invocation) return { ok: false, message: 'error.invalid-arguments' }
 
   const script = `
@@ -60,7 +59,7 @@ export async function openRemoteInAppleTerminal(
       timeout: OPEN_TIMEOUT_MS,
       forceKillAfterDelay: 500,
     })
-    return { ok: true, message: remotePath }
+    return { ok: true, message: target.worktreePath }
   } catch (err) {
     return { ok: false, message: err instanceof Error ? err.message : String(err) }
   }

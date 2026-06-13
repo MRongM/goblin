@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, test, vi } from 'vitest'
 import { spawn } from 'node-pty'
 import {
   closeAllServerTerminalSessions,
+  closeServerTerminal,
   createServerTerminal,
   getServerTerminalSessionSnapshot,
   handleRealtimeServerMessage,
@@ -18,6 +19,20 @@ import {
 
 vi.mock('#/system/git/worktrees.ts', () => ({
   getWorktrees: vi.fn(async () => [{ path: '/repo-linked', branch: 'feature', isBare: false, isPrimary: false }]),
+}))
+
+vi.mock('#/system/ssh/config.ts', () => ({
+  resolveRemoteTarget: vi.fn(async () => ({
+    target: {
+      id: 'ssh-config://prod/srv/repo',
+      alias: 'prod',
+      host: 'example.com',
+      user: 'alice',
+      port: 22,
+      remotePath: '/srv/repo',
+      displayName: 'prod:repo',
+    },
+  })),
 }))
 
 interface MockPty {
@@ -128,6 +143,71 @@ describe('server terminal sessions', () => {
     ])
 
     unregisterTerminalSocket('client_1', 'attachment_a', socket)
+  })
+
+  test('creates remote terminal sessions with a tmux-aware ssh command', async () => {
+    const result = await createServerTerminal('client_1', {
+      repoRoot: 'ssh-config://prod/srv/repo',
+      branch: 'feature',
+      worktreePath: '/srv/repo-feature',
+      kind: 'additional',
+      cols: 100,
+      rows: 30,
+    })
+
+    expect(result.ok).toBe(true)
+    expect(spawn).toHaveBeenCalledWith(
+      'ssh',
+      ['-tt', '--', 'prod', expect.stringContaining('tmux new-session -A')],
+      expect.objectContaining({
+        cwd: process.cwd(),
+        cols: 100,
+        rows: 30,
+      }),
+    )
+    const args = vi.mocked(spawn).mock.calls[0]![1] as string[]
+    expect(args[3]).toContain('/srv/repo-feature')
+    expect(args[3]).toContain('tmux new-session -A')
+    expect(args[3]).toContain('goblin-')
+    expect(args[3]).not.toContain('alice@example.com')
+    expect(args[3]).not.toContain('/srv/repo\u0000')
+  })
+
+  test('reuses the smallest missing terminal number for additional sessions', async () => {
+    const first = await createServerTerminal('client_1', {
+      repoRoot: '/repo',
+      branch: 'feature',
+      worktreePath: '/repo-linked',
+      kind: 'additional',
+    })
+    expect(first.ok).toBe(true)
+    if (!first.ok) return
+    expect(first.key).toBe('/repo\u0000/repo-linked\u0000terminal-1')
+    const firstSession = first.sessions.find((session) => session.key === first.key)
+    expect(firstSession).toBeTruthy()
+    if (!firstSession) return
+
+    const second = await createServerTerminal('client_1', {
+      repoRoot: '/repo',
+      branch: 'feature',
+      worktreePath: '/repo-linked',
+      kind: 'additional',
+    })
+    expect(second.ok).toBe(true)
+    if (!second.ok) return
+    expect(second.key).toBe('/repo\u0000/repo-linked\u0000terminal-2')
+
+    expect(closeServerTerminal('client_1', { sessionId: firstSession.sessionId })).toBe(true)
+
+    const reopened = await createServerTerminal('client_1', {
+      repoRoot: '/repo',
+      branch: 'feature',
+      worktreePath: '/repo-linked',
+      kind: 'additional',
+    })
+    expect(reopened.ok).toBe(true)
+    if (!reopened.ok) return
+    expect(reopened.key).toBe('/repo\u0000/repo-linked\u0000terminal-1')
   })
 
   test('clears stale canonical title when the foreground process returns to the shell without a new title', async () => {

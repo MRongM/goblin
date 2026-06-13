@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { buildRemoteCommandInvocation } from '#/system/ssh/commands.ts'
+import { buildRemoteCommandInvocation, buildRemoteTerminalInvocation } from '#/system/ssh/commands.ts'
 import { normalizeRemoteTarget } from '#/shared/remote-repo.ts'
 
 const TARGET = normalizeRemoteTarget({
@@ -64,5 +64,47 @@ describe('remote command scripts', () => {
         remoteRef: 'origin/feature/remote',
       }).script,
     ).toContain("git -C '/srv/repo' branch --track 'feature/remote' 'origin/feature/remote'")
+  })
+
+  test('renders tmux-aware managed remote terminal invocation through the ssh command adapter', () => {
+    const invocation = buildRemoteTerminalInvocation(TARGET, '/srv/repo-feature', {
+      cols: 100,
+      rows: 30,
+      terminalNumber: 2,
+    })
+
+    expect(invocation.command).toBe('ssh')
+    expect(invocation.args).toEqual(['-tt', '--', 'prod', expect.stringContaining('sh -lc')])
+    expect(invocation.script).toContain("cd '/srv/repo-feature' || exit")
+    expect(invocation.script).toContain('command -v tmux >/dev/null 2>&1')
+    expect(invocation.script).toContain("exec tmux new-session -A -s 'goblin-")
+    expect(invocation.script).toContain('exec "${SHELL:-/bin/sh}" -l')
+  })
+
+  test('managed remote terminal hash uses endpoint and terminal number instead of alias', () => {
+    const first = buildRemoteTerminalInvocation(TARGET, '/srv/repo-feature', {
+      cols: 100,
+      rows: 30,
+      terminalNumber: 1,
+    })
+    const sameEndpointDifferentAlias = buildRemoteTerminalInvocation(
+      { ...TARGET, alias: 'renamed-prod', id: 'ssh-config://renamed-prod/srv/repo' },
+      '/srv/repo-feature',
+      { cols: 100, rows: 30, terminalNumber: 1 },
+    )
+    const secondTerminal = buildRemoteTerminalInvocation(TARGET, '/srv/repo-feature', {
+      cols: 100,
+      rows: 30,
+      terminalNumber: 2,
+    })
+
+    const sessionNamePattern = /goblin-[a-f0-9]{24}/
+    const firstName = first.script.match(sessionNamePattern)?.[0]
+    const renamedName = sameEndpointDifferentAlias.script.match(sessionNamePattern)?.[0]
+    const secondName = secondTerminal.script.match(sessionNamePattern)?.[0]
+
+    expect(firstName).toBeTruthy()
+    expect(renamedName).toBe(firstName)
+    expect(secondName).not.toBe(firstName)
   })
 })

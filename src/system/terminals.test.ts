@@ -10,13 +10,19 @@ import { isGhosttyInstalled, openInGhostty, openRemoteInGhostty } from '#/system
 vi.mock('#/system/ghostty.ts', () => ({
   isGhosttyInstalled: vi.fn(() => false),
   openInGhostty: vi.fn(async (path: string) => ({ ok: true, message: path })),
-  openRemoteInGhostty: vi.fn(async (alias: string, path: string) => ({ ok: true, message: `${alias}:${path}` })),
+  openRemoteInGhostty: vi.fn(async (target: { alias: string; worktreePath: string }) => ({
+    ok: true,
+    message: `${target.alias}:${target.worktreePath}`,
+  })),
 }))
 
 vi.mock('#/system/apple-terminal.ts', () => ({
   isAppleTerminalInstalled: vi.fn(async () => true),
   openInAppleTerminal: vi.fn(async (path: string) => ({ ok: true, message: path })),
-  openRemoteInAppleTerminal: vi.fn(async (alias: string, path: string) => ({ ok: true, message: `${alias}:${path}` })),
+  openRemoteInAppleTerminal: vi.fn(async (target: { alias: string; worktreePath: string }) => ({
+    ok: true,
+    message: `${target.alias}:${target.worktreePath}`,
+  })),
 }))
 
 describe('openInPreferredTerminal', () => {
@@ -116,7 +122,10 @@ describe('openInPreferredTerminal', () => {
       message: 'prod:/srv/repo-feature',
     })
 
-    expect(openRemoteInAppleTerminal).toHaveBeenCalledWith('prod', '/srv/repo-feature')
+    expect(openRemoteInAppleTerminal).toHaveBeenCalledWith({
+      alias: 'prod',
+      worktreePath: '/srv/repo-feature',
+    })
     expect(openRemoteInGhostty).not.toHaveBeenCalled()
   })
 
@@ -129,7 +138,10 @@ describe('openInPreferredTerminal', () => {
       message: 'prod:/srv/repo-feature',
     })
 
-    expect(openRemoteInGhostty).toHaveBeenCalledWith('prod', '/srv/repo-feature')
+    expect(openRemoteInGhostty).toHaveBeenCalledWith({
+      alias: 'prod',
+      worktreePath: '/srv/repo-feature',
+    })
     expect(openRemoteInAppleTerminal).not.toHaveBeenCalled()
   })
 
@@ -153,8 +165,7 @@ describe('openInPreferredTerminal', () => {
           isInstalled: () => true,
           open: async (path: string) => ({ ok: true, message: path }),
         },
-        'prod',
-        '/srv/repo-feature',
+        { alias: 'prod', worktreePath: '/srv/repo-feature' },
       ),
     ).resolves.toEqual({
       ok: false,

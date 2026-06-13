@@ -151,15 +151,16 @@ class TerminalCatalog {
 
   async nextTerminalId(repoRoot: string, worktreePath: string): Promise<string> {
     const sessions = await this.options.manager.listSessions(repoRoot)
-    let maxIndex = 0
+    const usedIndexes = new Set<number>()
     for (const session of sessions) {
       const parsed = parseSessionKey(session.key)
       if (!parsed || parsed.repoRoot !== repoRoot || parsed.worktreePath !== worktreePath) continue
       const index = parseTerminalIdIndex(parsed.terminalId)
-      if (index === null) continue
-      if (index > maxIndex) maxIndex = index
+      if (index !== null) usedIndexes.add(index)
     }
-    return formatTerminalId(maxIndex + 1)
+    let nextIndex = 1
+    while (usedIndexes.has(nextIndex)) nextIndex += 1
+    return formatTerminalId(nextIndex)
   }
 
   private async ensureRemote(
@@ -181,9 +182,13 @@ class TerminalCatalog {
     } catch (error) {
       return { ok: false, message: error instanceof Error ? error.message : 'error.ssh-config-changed' }
     }
+    const terminalNumber = parseTerminalIdIndex(context.terminalId)
+    if (terminalNumber === null) return { ok: false, message: 'error.invalid-arguments' }
+
     const invocation = buildRemoteTerminalInvocation(resolved.target, input.worktreePath, {
       cols: context.cols,
       rows: context.rows,
+      terminalNumber,
     })
     const result = this.options.manager.ensureSession({
       ownerId: clientId,

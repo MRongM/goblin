@@ -165,5 +165,9 @@ export async function openServerRemoteTerminal(
   }
 
   const prefs = await getServerSettingsPrefs()
-  return await openRemoteInPreferredTerminal(resolved.target.alias, input.worktreePath, prefs.terminalApp)
+  return await openRemoteInPreferredTerminal(
+    resolved.target.alias,
+    input.worktreePath,
+    prefs.terminalApp,
+  )
 }

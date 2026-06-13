@@ -2,7 +2,7 @@ import { execa } from 'execa'
 import { existsSync, statSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { buildRemoteTerminalInvocation } from '#/system/remote-terminal.ts'
+import { buildExternalRemoteTerminalInvocation, type ExternalRemoteTerminalTarget } from '#/system/remote-terminal.ts'
 
 const GHOSTTY_BUNDLE_ID = 'com.mitchellh.ghostty'
 const APPLE_SCRIPT_TIMEOUT_MS = 5_000
@@ -122,13 +122,13 @@ function openRemoteInRunningGhostty(commandText: string): Promise<boolean> {
   }).then(({ stdout }) => stdout.trim() === 'opened')
 }
 
-export async function openRemoteInGhostty(alias: string, remotePath: string): Promise<{ ok: boolean; message: string }> {
-  const invocation = buildRemoteTerminalInvocation(alias, remotePath)
+export async function openRemoteInGhostty(target: ExternalRemoteTerminalTarget): Promise<{ ok: boolean; message: string }> {
+  const invocation = buildExternalRemoteTerminalInvocation(target)
   if (!invocation) return { ok: false, message: 'error.invalid-arguments' }
   if (!isGhosttyInstalled()) return { ok: false, message: 'error.ghostty-not-installed' }
 
   try {
-    if (await openRemoteInRunningGhostty(invocation.shellCommand)) return { ok: true, message: remotePath }
+    if (await openRemoteInRunningGhostty(invocation.shellCommand)) return { ok: true, message: target.worktreePath }
   } catch (err) {
     console.warn('[ghostty] AppleScript remote open failed, falling back to launch', err)
   }
@@ -143,7 +143,7 @@ export async function openRemoteInGhostty(alias: string, remotePath: string): Pr
     })
     child.unref()
     await child
-    return { ok: true, message: remotePath }
+    return { ok: true, message: target.worktreePath }
   } catch (err) {
     return { ok: false, message: err instanceof Error ? err.message : String(err) }
   }

@@ -1,6 +1,9 @@
 import path from 'node:path'
 import { execa, ExecaError } from 'execa'
 import { FIELD_SEP } from '#/system/git/parsers.ts'
+import {
+  buildManagedRemoteTerminalInvocation,
+} from '#/system/remote-terminal.ts'
 import type { RemoteRepoTarget } from '#/shared/remote-repo.ts'
 import type { CreateWorktreeInput } from '#/shared/worktree-create.ts'
 
@@ -83,13 +86,25 @@ export function buildRemoteCommandInvocation(
 export function buildRemoteTerminalInvocation(
   target: RemoteRepoTarget,
   remotePath: string,
-  _size: { cols: number; rows: number },
+  options: { cols: number; rows: number; terminalNumber: number },
 ): RemoteCommandInvocation {
-  const script = `cd ${shellQuote(remotePath)} && exec "\${SHELL:-/bin/sh}" -l`
-  const args = ['-tt', '-o', 'StrictHostKeyChecking=yes', '-o', `ConnectTimeout=${SSH_CONNECT_TIMEOUT_SEC}`]
-  const destination = target.alias
-  args.push('--', destination, `sh -lc ${shellQuote(script)}`)
-  return { command: 'ssh', args, script }
+  const invocation = buildManagedRemoteTerminalInvocation({
+    alias: target.alias,
+    endpoint: {
+      user: target.user,
+      host: target.host,
+      port: target.port,
+    },
+    repoPath: target.remotePath,
+    worktreePath: remotePath,
+    terminalNumber: options.terminalNumber,
+  })
+  if (!invocation) throw new Error('Invalid remote terminal invocation')
+  return {
+    command: invocation.command,
+    args: invocation.args,
+    script: invocation.script,
+  }
 }
 
 export async function runRemoteCommand(
