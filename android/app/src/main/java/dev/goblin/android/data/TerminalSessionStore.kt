@@ -72,7 +72,8 @@ object TerminalSessionCodec {
     private const val RecordSeparator = "\n"
     private const val LegacyRecordFieldCount = 11
     private const val DisplayNameRecordFieldCount = 12
-    private const val RecordFieldCount = 13
+    private const val DisconnectMessageRecordFieldCount = 13
+    private const val TmuxIdentityRecordFieldCount = 15
 
     fun encode(sessions: List<TerminalSessionRecord>): String =
         sessions.joinToString(RecordSeparator) { session ->
@@ -90,6 +91,8 @@ object TerminalSessionCodec {
                 session.foregroundServiceOwned.toString(),
                 session.disconnectedReason?.name.orEmpty(),
                 terminalDisconnectedMessageSnapshot(session.disconnectedMessage).orEmpty(),
+                session.terminalId?.toString().orEmpty(),
+                session.repositoryRemotePath.orEmpty(),
             ).joinToString(FieldSeparator) { it.encodeField() }
         }
 
@@ -103,10 +106,18 @@ object TerminalSessionCodec {
 
     private fun decodeSession(index: Int, line: String): TerminalSessionRecord? {
         val fields = line.split(FieldSeparator).map { it.decodeField() }
-        if (fields.size !in listOf(LegacyRecordFieldCount, DisplayNameRecordFieldCount, RecordFieldCount)) return null
+        if (
+            fields.size !in listOf(
+                LegacyRecordFieldCount,
+                DisplayNameRecordFieldCount,
+                DisconnectMessageRecordFieldCount,
+                TmuxIdentityRecordFieldCount,
+            )
+        ) return null
         return runCatching {
             val hasDisplayName = fields.size >= DisplayNameRecordFieldCount
-            val hasDisconnectMessage = fields.size == RecordFieldCount
+            val hasDisconnectMessage = fields.size >= DisconnectMessageRecordFieldCount
+            val hasTmuxIdentity = fields.size == TmuxIdentityRecordFieldCount
             TerminalSessionRecord(
                 id = fields[0],
                 hostId = fields[1],
@@ -114,6 +125,11 @@ object TerminalSessionCodec {
                 remotePath = fields[3],
                 targetLabel = fields[4],
                 displayName = fields[5].takeIf { hasDisplayName } ?: "",
+                terminalId = fields.getOrNull(13)
+                    ?.takeIf { hasTmuxIdentity && it.isNotBlank() }
+                    ?.toIntOrNull(),
+                repositoryRemotePath = fields.getOrNull(14)
+                    ?.takeIf { hasTmuxIdentity && it.isNotBlank() },
                 status = TerminalSessionStatus.valueOf(if (hasDisplayName) fields[6] else fields[5]),
                 lastOutputSnapshot = terminalOutputSnapshot(if (hasDisplayName) fields[7] else fields[6]),
                 lastActivityAt = (if (hasDisplayName) fields[8] else fields[7]).takeIf { it.isNotBlank() }?.toLong(),

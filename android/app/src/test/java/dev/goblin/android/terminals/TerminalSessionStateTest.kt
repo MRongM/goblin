@@ -102,6 +102,7 @@ class TerminalSessionStateTest {
         override fun openShell(
             target: RemoteTarget,
             secrets: SshConnectionSecrets,
+            startupContext: TerminalStartupContext?,
             cols: Int,
             rows: Int,
             onOutput: (ByteArray) -> Unit,

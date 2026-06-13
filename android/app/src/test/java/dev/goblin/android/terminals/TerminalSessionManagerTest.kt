@@ -45,6 +45,79 @@ class TerminalSessionManagerTest {
     }
 
     @Test
+    fun `project terminals allocate smallest available numeric terminal id`() {
+        val service = FakeTerminalSessionFactory()
+        val manager = terminalSessionManager(service, ids = terminalIds())
+
+        val first = manager.createNew(
+            target = target(remotePath = "/srv/repo-feature"),
+            repositoryId = "repo-1",
+            repositoryRemotePath = "/srv/repo",
+            targetLabel = "App - /srv/repo-feature",
+        )
+        val second = manager.createNew(
+            target = target(remotePath = "/srv/repo-feature"),
+            repositoryId = "repo-1",
+            repositoryRemotePath = "/srv/repo",
+            targetLabel = "App - /srv/repo-feature",
+        )
+        manager.removeSession(first.id)
+        val reused = manager.createNew(
+            target = target(remotePath = "/srv/repo-feature"),
+            repositoryId = "repo-1",
+            repositoryRemotePath = "/srv/repo",
+            targetLabel = "App - /srv/repo-feature",
+        )
+
+        assertEquals(1, first.terminalId)
+        assertEquals(2, second.terminalId)
+        assertEquals(1, reused.terminalId)
+        assertEquals("terminal-1", reused.displayName)
+        assertEquals(1, service.startupContext(index = 2)?.terminalId)
+    }
+
+    @Test
+    fun `terminal ids are scoped by repository root and worktree path`() {
+        val service = FakeTerminalSessionFactory()
+        val manager = terminalSessionManager(service, ids = terminalIds())
+
+        val app = manager.createNew(
+            target = target(remotePath = "/srv/repo-feature"),
+            repositoryId = "repo-1",
+            repositoryRemotePath = "/srv/repo",
+            targetLabel = "App - /srv/repo-feature",
+        )
+        val otherRepo = manager.createNew(
+            target = target(remotePath = "/srv/repo-feature"),
+            repositoryId = "repo-2",
+            repositoryRemotePath = "/srv/other-repo",
+            targetLabel = "Other - /srv/repo-feature",
+        )
+        val otherWorktree = manager.createNew(
+            target = target(remotePath = "/srv/repo-other"),
+            repositoryId = "repo-1",
+            repositoryRemotePath = "/srv/repo",
+            targetLabel = "App - /srv/repo-other",
+        )
+
+        assertEquals(1, app.terminalId)
+        assertEquals(1, otherRepo.terminalId)
+        assertEquals(1, otherWorktree.terminalId)
+    }
+
+    @Test
+    fun `temporary terminal does not pass tmux startup context`() {
+        val service = FakeTerminalSessionFactory()
+        val manager = terminalSessionManager(service, ids = terminalIds())
+
+        val record = manager.createNew(target(remotePath = "/"), repositoryId = null, targetLabel = "Dev - /")
+
+        assertEquals(null, record.terminalId)
+        assertEquals(null, record.repositoryRemotePath)
+        assertEquals(null, service.startupContext())
+    }
+
+    @Test
     fun `old sessions without display name get normalized when loading session store`() {
         val manager = terminalSessionManager(
             service = FakeTerminalSessionFactory(),
@@ -62,6 +135,37 @@ class TerminalSessionManagerTest {
 
         assertEquals("terminal-1", normalizedById["terminal-2"]?.displayName)
         assertEquals("terminal-2", normalizedById["terminal-1"]?.displayName)
+    }
+
+    @Test
+    fun `legacy project sessions preserve parseable terminal ids during load normalization`() {
+        val manager = terminalSessionManager(
+            service = FakeTerminalSessionFactory(),
+            ids = terminalIds(),
+            store = RecordingTerminalSessionStore(
+                initial = listOf(
+                    legacyTerminalRecord(
+                        id = "session-a",
+                        remotePath = "/srv/app",
+                        openedAt = 1L,
+                        displayName = "terminal-2",
+                    ),
+                    legacyTerminalRecord(
+                        id = "session-b",
+                        remotePath = "/srv/app",
+                        openedAt = 2L,
+                        displayName = "",
+                    ),
+                ),
+            ),
+        )
+
+        val byId = manager.sessions().associateBy { it.id }
+
+        assertEquals(2, byId["session-a"]?.terminalId)
+        assertEquals(1, byId["session-b"]?.terminalId)
+        assertEquals("terminal-2", byId["session-a"]?.displayName)
+        assertEquals("terminal-1", byId["session-b"]?.displayName)
     }
 
     @Test
@@ -118,6 +222,34 @@ class TerminalSessionManagerTest {
         assertEquals(0, service.session.closeCount)
         assertEquals(TerminalSessionStatus.Running, manager.session(record.id)?.status)
         assertEquals(listOf(record.id), manager.sessions().map { it.id })
+    }
+
+    @Test
+    fun `reconnect preserves project terminal id and startup context`() {
+        val service = FakeTerminalSessionFactory()
+        val manager = terminalSessionManager(service, ids = terminalIds())
+        val record = manager.createNew(
+            target = target(remotePath = "/srv/repo-feature"),
+            repositoryId = "repo-1",
+            repositoryRemotePath = "/srv/repo",
+            targetLabel = "App - /srv/repo-feature",
+        )
+        service.fail(IOException("connection lost"))
+
+        val reconnected = manager.reconnect(
+            sessionId = record.id,
+            target = target(remotePath = "/srv/repo-feature"),
+            repositoryId = "repo-1",
+            repositoryRemotePath = "/srv/repo",
+            targetLabel = "App - /srv/repo-feature",
+        )
+
+        assertEquals(record.id, reconnected?.id)
+        assertEquals(1, reconnected?.terminalId)
+        assertEquals("/srv/repo", reconnected?.repositoryRemotePath)
+        assertEquals(1, service.startupContext(index = 1)?.terminalId)
+        assertEquals("/srv/repo", service.startupContext(index = 1)?.repositoryRemotePath)
+        assertEquals("/srv/repo-feature", service.startupContext(index = 1)?.worktreeRemotePath)
     }
 
     @Test
@@ -629,6 +761,7 @@ class TerminalSessionManagerTest {
         override fun openShell(
             target: RemoteTarget,
             secrets: SshConnectionSecrets,
+            startupContext: TerminalStartupContext?,
             cols: Int,
             rows: Int,
             onOutput: (ByteArray) -> Unit,
@@ -638,9 +771,17 @@ class TerminalSessionManagerTest {
             openCount += 1
             val session = FakeTerminalSession(id = "backend-session-$openCount")
             sessions += session
-            opened += OpenedTerminal(onOutput = onOutput, onExit = onExit, onFailure = onFailure)
+            opened += OpenedTerminal(
+                startupContext = startupContext,
+                onOutput = onOutput,
+                onExit = onExit,
+                onFailure = onFailure,
+            )
             return session
         }
+
+        fun startupContext(index: Int = opened.lastIndex): TerminalStartupContext? =
+            opened[index].startupContext
 
         fun emitOutput(value: String, index: Int = opened.lastIndex) {
             opened[index].onOutput(value.toByteArray(Charsets.UTF_8))
@@ -655,6 +796,7 @@ class TerminalSessionManagerTest {
         }
 
         private data class OpenedTerminal(
+            val startupContext: TerminalStartupContext?,
             val onOutput: (ByteArray) -> Unit,
             val onExit: () -> Unit,
             val onFailure: (Throwable) -> Unit,
@@ -702,12 +844,14 @@ class TerminalSessionManagerTest {
         id: String,
         remotePath: String,
         openedAt: Long,
+        displayName: String = "",
     ): TerminalSessionRecord = TerminalSessionRecord(
         id = id,
         hostId = "lee@example.com:22/",
         repositoryId = "repo-1",
         remotePath = remotePath,
         targetLabel = "App - $remotePath",
+        displayName = displayName,
         status = TerminalSessionStatus.Running,
         openedAt = openedAt,
         foregroundServiceOwned = true,

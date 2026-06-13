@@ -88,6 +88,7 @@ fun TerminalScreen(
     host: SshHostProfile,
     remotePath: String = "/",
     repositoryId: String? = null,
+    repositoryRemotePath: String? = null,
     targetLabel: String = terminalTargetLabel(host.title, remotePath),
     backHint: String = TerminalBackKeepsSessionHint,
     terminalSessionId: String? = null,
@@ -229,12 +230,14 @@ fun TerminalScreen(
                         sessionId = sessionId,
                         target = target,
                         repositoryId = repositoryId,
+                        repositoryRemotePath = repositoryRemotePath,
                         targetLabel = targetLabel,
                     )
                 } else {
                     terminalSessionManager.createOrAttach(
                         target = target,
                         repositoryId = repositoryId,
+                        repositoryRemotePath = repositoryRemotePath,
                         targetLabel = targetLabel,
                     )
                 }
@@ -369,23 +372,20 @@ fun TerminalScreen(
         onDispose { observer.close() }
     }
 
-    LaunchedEffect(target, repositoryId, targetLabel, terminalSessionId) {
+    LaunchedEffect(target, repositoryId, repositoryRemotePath, targetLabel, terminalSessionId) {
         val record = withContext(Dispatchers.IO) {
             terminalSessionId
                 ?.let { terminalSessionManager.session(it) }
                 ?: terminalSessionManager.createOrAttach(
                     target = target,
                     repositoryId = repositoryId,
+                    repositoryRemotePath = repositoryRemotePath,
                     targetLabel = targetLabel,
                 )
         }
         activeSessionId = record.id
         terminalState = record.toTerminalSessionState()
         syncTerminalForeground()
-    }
-
-    LaunchedEffect(terminalState) {
-        inputNotice = terminalInputUnavailableMessage(terminalState)
     }
 
     LaunchedEffect(terminalSessions, activeSessionId, workspaceHostIds, activeTerminalPath) {
@@ -577,6 +577,7 @@ fun TerminalScreen(
                     emulatorController = emulatorController,
                     fitToScreen = fitToScreen,
                     fontSizeSp = terminalFontSizeSp,
+                    notice = inputNotice,
                     onOpenUrl = { openTerminalUrl(it) },
                     onCopyText = ::copyTerminalSelection,
                     onOpenSelectedText = ::openSelectedTerminalText,
@@ -663,13 +664,6 @@ fun TerminalScreen(
                         text = "Close",
                         enabled = inlineActions.closeEnabled,
                         onClick = { requestCloseTerminal() },
-                    )
-                }
-                inputNotice?.let {
-                    Text(
-                        text = it,
-                        color = GoblinColors.TerminalInputForeground,
-                        style = MaterialTheme.typography.labelMedium,
                     )
                 }
             }

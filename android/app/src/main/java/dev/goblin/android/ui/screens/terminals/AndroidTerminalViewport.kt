@@ -36,11 +36,12 @@ internal fun AndroidTerminalViewport(
     emulatorController: RemoteTerminalEmulatorController?,
     fitToScreen: Boolean,
     fontSizeSp: Int,
+    notice: String? = null,
     onOpenUrl: (String) -> Unit,
     onCopyText: (String) -> Boolean,
     onOpenSelectedText: (String) -> Boolean,
 ) {
-    val banner = terminalSessionBannerMessage(state)
+    val banner = terminalViewportBannerMessage(state, notice)
     BoxWithConstraints(
         modifier = modifier
             .fillMaxSize()

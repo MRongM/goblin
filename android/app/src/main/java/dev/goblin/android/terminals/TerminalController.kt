@@ -46,7 +46,11 @@ class TerminalController(
         )
     }
 
-    fun open(target: RemoteTarget, secrets: SshConnectionSecrets = SshConnectionSecrets()) {
+    fun open(
+        target: RemoteTarget,
+        secrets: SshConnectionSecrets = SshConnectionSecrets(),
+        startupContext: TerminalStartupContext? = null,
+    ) {
         session?.close()
         session = null
         activeRemotePath = target.remotePath
@@ -58,6 +62,7 @@ class TerminalController(
             terminalService.openShell(
                 target = target,
                 secrets = secrets,
+                startupContext = startupContext,
                 cols = cols,
                 rows = rows,
                 onOutput = ::appendOutput,
@@ -327,6 +332,7 @@ interface TerminalSessionFactory {
     fun openShell(
         target: RemoteTarget,
         secrets: SshConnectionSecrets,
+        startupContext: TerminalStartupContext?,
         cols: Int,
         rows: Int,
         onOutput: (ByteArray) -> Unit,

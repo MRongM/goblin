@@ -9,6 +9,7 @@ import dev.goblin.android.ssh.SshPublicKeyEncoding
 import dev.goblin.android.ssh.SshjClients
 import dev.goblin.android.ssh.SshPrivateKeys
 import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
@@ -26,6 +27,7 @@ class SshTerminalService(
     override fun openShell(
         target: RemoteTarget,
         secrets: SshConnectionSecrets,
+        startupContext: TerminalStartupContext?,
         cols: Int,
         rows: Int,
         onOutput: (ByteArray) -> Unit,
@@ -58,7 +60,7 @@ class SshTerminalService(
         )
         terminalSession.startReader(onOutput)
         terminalSession.scheduleStartupInput(
-            input = SshTerminalStartupCommand.initialInputForRemotePath(target.remotePath),
+            input = SshTerminalStartupCommand.initialInputForTarget(target, startupContext),
             onOutput = onOutput,
         )
         return terminalSession
@@ -84,14 +86,69 @@ class SshTerminalService(
 internal object SshTerminalStartupCommand {
     const val InputDelayMillis = 150L
 
-    fun initialInputForRemotePath(remotePath: String): String? {
-        val normalizedPath = remotePath.trim().ifEmpty { "/" }
-        if (normalizedPath == "/") return null
-        return "cd ${shellQuote(normalizedPath)} && pwd\r"
+    fun initialInputForTarget(
+        target: RemoteTarget,
+        startupContext: TerminalStartupContext?,
+    ): String? {
+        val normalizedPath = normalizeRemotePath(target.remotePath)
+        if (startupContext == null) {
+            if (normalizedPath == "/") return null
+            return "cd ${shellQuote(normalizedPath)} && pwd\r"
+        }
+
+        val sessionName = tmuxSessionName(target, startupContext)
+        return """
+            goblin_remote_path=${shellQuote(normalizedPath)}
+            goblin_tmux_session=${shellQuote(sessionName)}
+            if cd "${'$'}goblin_remote_path"; then
+              if command -v tmux >/dev/null 2>&1; then
+                tmux new-session -A -s "${'$'}goblin_tmux_session"
+                goblin_tmux_status=${'$'}?
+                if [ "${'$'}goblin_tmux_status" -eq 0 ]; then
+                  exit 0
+                fi
+                printf '\r\ntmux unavailable (exit %s); falling back to shell\r\n' "${'$'}goblin_tmux_status"
+              fi
+              exec "${'$'}{SHELL:-sh}"
+            else
+              exit 1
+            fi
+        """.trimIndent() + "\r"
+    }
+
+    fun tmuxSessionName(
+        target: RemoteTarget,
+        startupContext: TerminalStartupContext,
+    ): String {
+        val identity = listOf(
+            target.authority,
+            normalizeRemotePath(startupContext.repositoryRemotePath),
+            normalizeRemotePath(startupContext.worktreeRemotePath),
+            startupContext.terminalId.toString(),
+        ).joinToString("\u0000")
+        return "goblin-${sha256HexPrefix(identity, TmuxHashHexChars)}"
     }
 
     fun startupInputFailureOutput(error: Throwable): String =
         "\r\nStartup cd failed: ${error.toTerminalDetail()}\r\n"
+
+    private fun normalizeRemotePath(remotePath: String): String {
+        val trimmed = remotePath.trim()
+        if (trimmed.isEmpty() || trimmed == "/") return "/"
+        return trimmed.trimEnd('/')
+    }
+
+    private fun sha256HexPrefix(value: String, hexChars: Int): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+            .digest(value.toByteArray(StandardCharsets.UTF_8))
+        return digest
+            .take((hexChars + 1) / 2)
+            .joinToString("") { byte ->
+                val intValue = byte.toInt() and 0xff
+                "${HexChars[intValue ushr 4]}${HexChars[intValue and 0x0f]}"
+            }
+            .take(hexChars)
+    }
 
     private fun shellQuote(value: String): String = "'${value.replace("'", "'\"'\"'")}'"
 
@@ -101,6 +158,9 @@ internal object SshTerminalStartupCommand {
             ?: this::class.java.name
         return message ?: className
     }
+
+    private val HexChars = "0123456789abcdef".toCharArray()
+    private const val TmuxHashHexChars = 24
 }
 
 internal object TerminalHostKeyPolicy {

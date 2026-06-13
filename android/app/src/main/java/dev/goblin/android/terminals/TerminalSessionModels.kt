@@ -7,6 +7,8 @@ data class TerminalSessionRecord(
     val remotePath: String,
     val targetLabel: String,
     val displayName: String = "",
+    val terminalId: Int? = null,
+    val repositoryRemotePath: String? = null,
     val status: TerminalSessionStatus,
     val lastOutputSnapshot: String = "",
     val lastActivityAt: Long? = null,
@@ -20,6 +22,15 @@ data class TerminalSessionRecord(
         require(hostId.isNotBlank()) { "Terminal host id is required" }
         require(remotePath.isNotBlank()) { "Terminal remote path is required" }
         require(targetLabel.isNotBlank()) { "Terminal target label is required" }
+        require(terminalId == null || terminalId >= 1) {
+            "Terminal id must be positive when present"
+        }
+        require(repositoryRemotePath == null || repositoryRemotePath.startsWith("/")) {
+            "Terminal repository path must be absolute"
+        }
+        require(repositoryRemotePath == null || terminalId != null) {
+            "Project terminal records require a terminal id"
+        }
         require(lastOutputSnapshot.length <= MaxOutputSnapshotChars) {
             "Terminal output snapshot must be bounded"
         }

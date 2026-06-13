@@ -327,6 +327,7 @@ fun GoblinAndroidApp(
                         val session = terminalSessionManager.createNew(
                             target = RemoteTarget.fromHostProfile(host, remotePath),
                             repositoryId = repository.id,
+                            repositoryRemotePath = repository.remotePath,
                             targetLabel = terminalTargetLabel(repository.title, remotePath),
                         )
                         terminalForegroundBridge.sync()
@@ -413,6 +414,7 @@ fun GoblinAndroidApp(
                     host = host,
                     remotePath = currentRoute.remotePath,
                     repositoryId = currentRoute.repositoryId,
+                    repositoryRemotePath = repository?.remotePath,
                     targetLabel = terminalTargetLabel(repository?.title ?: host.title, currentRoute.remotePath),
                     terminalSessionId = currentRoute.terminalSessionId,
                     fitToScreen = terminalFitToScreen,

@@ -21,7 +21,9 @@ class TerminalSessionStoreTest {
         assertEquals("host-1", decoded.single().hostId)
         assertEquals("repo-1", decoded.single().repositoryId)
         assertEquals("/srv/app", decoded.single().remotePath)
-        assertEquals("terminal-1", decoded.single().displayName)
+        assertEquals("terminal-2", decoded.single().displayName)
+        assertEquals(2, decoded.single().terminalId)
+        assertEquals("/srv/repo", decoded.single().repositoryRemotePath)
         assertEquals(TerminalSessionStatus.Disconnected, decoded.single().status)
         assertEquals(250L, decoded.single().lastActivityAt)
         assertEquals("recent output", decoded.single().lastOutputSnapshot)
@@ -53,6 +55,20 @@ class TerminalSessionStoreTest {
     }
 
     @Test
+    fun `temporary terminal session round trip keeps tmux identity empty`() {
+        val record = terminalRecord(
+            id = "temporary-1",
+            terminalId = null,
+            repositoryRemotePath = null,
+        )
+
+        val decoded = TerminalSessionCodec.decode(TerminalSessionCodec.encode(listOf(record))).single()
+
+        assertEquals(null, decoded.terminalId)
+        assertEquals(null, decoded.repositoryRemotePath)
+    }
+
+    @Test
     fun `terminal session store policy upserts and deletes records`() {
         val first = terminalRecord(id = "terminal-1")
         val updated = terminalRecord(id = "terminal-1", lastOutputSnapshot = "updated")
@@ -68,6 +84,8 @@ class TerminalSessionStoreTest {
     private fun terminalRecord(
         id: String = "terminal-1",
         lastOutputSnapshot: String = "recent output",
+        terminalId: Int? = 2,
+        repositoryRemotePath: String? = "/srv/repo",
     ): TerminalSessionRecord = TerminalSessionRecord(
         id = id,
         hostId = "host-1",
@@ -75,7 +93,9 @@ class TerminalSessionStoreTest {
         remotePath = "/srv/app",
         targetLabel = "App - /srv/app",
         status = TerminalSessionStatus.Disconnected,
-        displayName = "terminal-1",
+        displayName = "terminal-${terminalId ?: 1}",
+        terminalId = terminalId,
+        repositoryRemotePath = repositoryRemotePath,
         lastOutputSnapshot = lastOutputSnapshot,
         lastActivityAt = 250L,
         openedAt = 100L,

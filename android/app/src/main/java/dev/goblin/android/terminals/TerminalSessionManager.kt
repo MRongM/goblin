@@ -85,14 +85,16 @@ class TerminalSessionManager(
         target: RemoteTarget,
         repositoryId: String?,
         targetLabel: String,
+        repositoryRemotePath: String? = null,
         secrets: SshConnectionSecrets = SshConnectionSecrets(),
     ): TerminalSessionRecord {
-        findAttachable(target, repositoryId)
+        findAttachable(target, repositoryId, repositoryRemotePath)
             ?.let { it -> return touchSession(it.id) ?: it }
         return createNew(
             target = target,
             repositoryId = repositoryId,
             targetLabel = targetLabel,
+            repositoryRemotePath = repositoryRemotePath,
             secrets = secrets,
         )
     }
@@ -101,13 +103,25 @@ class TerminalSessionManager(
         target: RemoteTarget,
         repositoryId: String?,
         targetLabel: String,
+        repositoryRemotePath: String? = null,
         secrets: SshConnectionSecrets = SshConnectionSecrets(),
     ): TerminalSessionRecord {
         val sessionId = idGenerator()
         val openedAt = clock()
-        val displayName = synchronized(lock) {
-            nextWorkspaceTerminalDisplayName(hostId = target.id, remotePath = target.remotePath)
+        val normalizedRepositoryPath = normalizeRepositoryRemotePath(repositoryRemotePath)
+        val terminalId = synchronized(lock) {
+            normalizedRepositoryPath?.let {
+                nextProjectTerminalId(
+                    target = target,
+                    repositoryRemotePath = it,
+                    worktreeRemotePath = target.remotePath,
+                )
+            }
         }
+        val displayName = terminalId?.let(::terminalSessionDisplayNameFromIndex)
+            ?: synchronized(lock) {
+                nextWorkspaceTerminalDisplayName(hostId = target.id, remotePath = target.remotePath)
+            }
         val starting = TerminalSessionRecord(
             id = sessionId,
             hostId = target.id,
@@ -115,6 +129,8 @@ class TerminalSessionManager(
             remotePath = target.remotePath,
             targetLabel = targetLabel,
             displayName = displayName,
+            terminalId = terminalId,
+            repositoryRemotePath = normalizedRepositoryPath,
             status = TerminalSessionStatus.Starting,
             openedAt = openedAt,
             lastActivityAt = openedAt,
@@ -135,7 +151,7 @@ class TerminalSessionManager(
         persist(starting)
         notifyObservers(starting)
 
-        controller.open(target, secrets)
+        controller.open(target = target, secrets = secrets, startupContext = projectStartupContext(starting))
         return session(sessionId) ?: starting
     }
 
@@ -144,6 +160,7 @@ class TerminalSessionManager(
         target: RemoteTarget,
         repositoryId: String?,
         targetLabel: String,
+        repositoryRemotePath: String? = null,
         secrets: SshConnectionSecrets = SshConnectionSecrets(),
     ): TerminalSessionRecord? {
         val existing = session(sessionId) ?: return null
@@ -155,11 +172,31 @@ class TerminalSessionManager(
         }
         controllerToClose?.let(::closeTerminalController)
 
+        val normalizedRepositoryPath = normalizeRepositoryRemotePath(repositoryRemotePath)
+            ?: existing.repositoryRemotePath
+        val resolvedTerminalId = existing.terminalId
+            ?: terminalDisplayNameIndex(existing.displayName)
+                ?.takeIf { normalizedRepositoryPath != null }
+            ?: synchronized(lock) {
+                normalizedRepositoryPath?.let {
+                    nextProjectTerminalId(
+                        target = target,
+                        repositoryRemotePath = it,
+                        worktreeRemotePath = target.remotePath,
+                        excludeSessionId = sessionId,
+                    )
+                }
+            }
+        val resolvedDisplayName = resolvedTerminalId?.let(::terminalSessionDisplayNameFromIndex)
+            ?: existing.displayName
         val starting = existing.copy(
             hostId = target.id,
             repositoryId = repositoryId,
             remotePath = target.remotePath,
             targetLabel = targetLabel,
+            displayName = resolvedDisplayName,
+            terminalId = resolvedTerminalId,
+            repositoryRemotePath = normalizedRepositoryPath,
             status = TerminalSessionStatus.Starting,
             lastActivityAt = clock(),
             foregroundServiceOwned = false,
@@ -183,7 +220,7 @@ class TerminalSessionManager(
         persist(starting)
         notifyObservers(starting)
 
-        controller.open(target, secrets)
+        controller.open(target = target, secrets = secrets, startupContext = projectStartupContext(starting))
         return session(sessionId)
     }
 
@@ -448,11 +485,17 @@ class TerminalSessionManager(
         }
     }
 
-    private fun findAttachable(target: RemoteTarget, repositoryId: String?): TerminalSessionRecord? =
+    private fun findAttachable(
+        target: RemoteTarget,
+        repositoryId: String?,
+        repositoryRemotePath: String?,
+    ): TerminalSessionRecord? =
         synchronized(lock) {
+            val normalizedRepositoryPath = normalizeRepositoryRemotePath(repositoryRemotePath)
             sessions.values.firstOrNull {
                 it.hostId == target.id &&
                     it.repositoryId == repositoryId &&
+                    (normalizedRepositoryPath == null || it.repositoryRemotePath == normalizedRepositoryPath) &&
                     it.remotePath == target.remotePath &&
                     it.status in attachableStatuses
             }
@@ -611,23 +654,36 @@ class TerminalSessionManager(
         if (sessions.isEmpty()) return sessions
 
         val updatedById = sessions.associateBy { it.id }.toMutableMap()
-        val sessionsByWorkspace = sessions.groupBy { it.hostId to terminalSessionRemotePath(it.remotePath) }
+        val sessionsByWorkspace = sessions.groupBy {
+            Triple(
+                it.hostId,
+                it.repositoryRemotePath ?: it.repositoryId.orEmpty(),
+                terminalSessionRemotePath(it.remotePath),
+            )
+        }
         sessionsByWorkspace.values.forEach { workspaceSessions ->
             val orderedSessions = workspaceSessions
                 .sortedWith(compareBy<TerminalSessionRecord> { it.openedAt }.thenBy { it.id })
             val usedIndices = orderedSessions
-                .mapNotNull { terminalDisplayNameIndex(it.displayName) }
+                .mapNotNull { it.terminalId ?: terminalDisplayNameIndex(it.displayName) }
                 .toMutableSet()
             var nextIndex = 1
 
             orderedSessions.forEach { session ->
-                if (terminalDisplayNameIndex(session.displayName) != null) return@forEach
-                while (usedIndices.contains(nextIndex)) {
-                    nextIndex += 1
+                val parsedIndex = session.terminalId ?: terminalDisplayNameIndex(session.displayName)
+                val assignedIndex = parsedIndex ?: run {
+                    while (usedIndices.contains(nextIndex)) {
+                        nextIndex += 1
+                    }
+                    nextIndex.also {
+                        usedIndices.add(it)
+                        nextIndex += 1
+                    }
                 }
-                updatedById[session.id] = session.copy(displayName = terminalSessionDisplayNameFromIndex(nextIndex))
-                usedIndices.add(nextIndex)
-                nextIndex += 1
+                updatedById[session.id] = session.copy(
+                    terminalId = if (session.repositoryId != null) assignedIndex else session.terminalId,
+                    displayName = terminalSessionDisplayNameFromIndex(assignedIndex),
+                )
             }
         }
         return sessions.map { updatedById[it.id] ?: it }
@@ -637,6 +693,45 @@ class TerminalSessionManager(
         TerminalDisplayNamePattern.matchEntire(displayName)?.groupValues?.getOrNull(1)?.toIntOrNull()
 
     private fun terminalSessionDisplayNameFromIndex(index: Int): String = "terminal-$index"
+
+    private fun normalizeRepositoryRemotePath(path: String?): String? {
+        val trimmed = path?.trim()?.takeIf { it.isNotBlank() } ?: return null
+        if (trimmed == "/") return "/"
+        return trimmed.trimEnd('/').ifEmpty { "/" }
+    }
+
+    private fun nextProjectTerminalId(
+        target: RemoteTarget,
+        repositoryRemotePath: String,
+        worktreeRemotePath: String,
+        excludeSessionId: String? = null,
+    ): Int {
+        val normalizedRepositoryPath = normalizeRepositoryRemotePath(repositoryRemotePath) ?: repositoryRemotePath
+        val normalizedWorktreePath = terminalSessionRemotePath(worktreeRemotePath)
+        val used = sessions.values
+            .asSequence()
+            .filter { excludeSessionId == null || it.id != excludeSessionId }
+            .filter {
+                it.hostId == target.id &&
+                    it.repositoryRemotePath == normalizedRepositoryPath &&
+                    terminalSessionRemotePath(it.remotePath) == normalizedWorktreePath
+            }
+            .mapNotNull { it.terminalId }
+            .toSet()
+        var candidate = 1
+        while (candidate in used) candidate += 1
+        return candidate
+    }
+
+    private fun projectStartupContext(record: TerminalSessionRecord): TerminalStartupContext? {
+        val terminalId = record.terminalId ?: return null
+        val repositoryPath = record.repositoryRemotePath ?: return null
+        return TerminalStartupContext(
+            repositoryRemotePath = repositoryPath,
+            worktreeRemotePath = record.remotePath,
+            terminalId = terminalId,
+        )
+    }
 
     private fun terminalSessionRemotePath(remotePath: String): String =
         remotePath.ifBlank { "/" }.trimEnd('/').ifEmpty { "/" }

@@ -319,6 +319,15 @@ internal fun terminalSessionBannerMessage(state: TerminalSessionState): String? 
     -> null
 }
 
+internal fun terminalViewportBannerMessage(state: TerminalSessionState, notice: String? = null): String? {
+    val cleanedNotice = notice?.trim()?.takeIf { it.isNotEmpty() }
+    val sessionBanner = terminalSessionBannerMessage(state)
+    return listOfNotNull(cleanedNotice, sessionBanner)
+        .distinct()
+        .joinToString("\n")
+        .takeIf { it.isNotEmpty() }
+}
+
 internal fun terminalSessionStatusLabel(state: TerminalSessionState): String = when (state) {
     TerminalSessionState.Idle -> "idle"
     TerminalSessionState.Connecting -> "connecting"

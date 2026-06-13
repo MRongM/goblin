@@ -123,6 +123,50 @@ class TerminalInteractionStateTest {
     }
 
     @Test
+    fun `viewport banner shows transient notices inside terminal viewport`() {
+        assertEquals(
+            "Copied.",
+            terminalViewportBannerMessage(
+                state = TerminalSessionState.Connected("session-1", "", 80, 24),
+                notice = "Copied.",
+            ),
+        )
+    }
+
+    @Test
+    fun `viewport banner keeps session state visible when transient notice exists`() {
+        val disconnected = TerminalSessionState.Disconnected(
+            sessionId = "session-1",
+            reason = TerminalDisconnectedReason.AndroidServiceStopped,
+        )
+
+        assertEquals(
+            "Copy failed.\nTerminal disconnected: Android service stopped. Reconnect or return to diagnostics.",
+            terminalViewportBannerMessage(
+                state = disconnected,
+                notice = "Copy failed.",
+            ),
+        )
+    }
+
+    @Test
+    fun `viewport banner does not duplicate matching transient and session messages`() {
+        val disconnected = TerminalSessionState.Disconnected(
+            sessionId = "session-1",
+            reason = TerminalDisconnectedReason.AndroidServiceStopped,
+        )
+        val message = terminalSessionBannerMessage(disconnected)
+
+        assertEquals(
+            message,
+            terminalViewportBannerMessage(
+                state = disconnected,
+                notice = message,
+            ),
+        )
+    }
+
+    @Test
     fun `terminal status label includes disconnected reason`() {
         assertEquals(
             "disconnected: Android service stopped",
