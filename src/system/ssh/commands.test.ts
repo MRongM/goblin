@@ -1,18 +1,41 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { execa } from 'execa'
 import { afterEach, describe, expect, test } from 'vitest'
-import { buildRemoteCommandInvocation, runRemoteCommand } from '#/system/ssh/commands.ts'
+import {
+  REMOTE_UNSUPPORTED_PLATFORM_MARKER,
+  buildRemoteCommandInvocation,
+  runRemoteCommand,
+} from '#/system/ssh/commands.ts'
 import { buildCanonicalSshConnectionSnapshot, buildRemoteTerminalInvocation } from '#/system/ssh/invocation.ts'
 import type { RemoteWorkspaceTarget } from '#/shared/remote-workspace.ts'
 import { workspaceIdForTest } from '#/test-utils/workspace-id.ts'
 import { encodeRemoteWorktreeBootstrapRecord } from '#/test-utils/remote-worktree-bootstrap.ts'
+import { installLinuxStatShim } from '#/test-utils/linux-stat-shim.ts'
 
 const originalPath = process.env.PATH
 const originalPathExt = process.env.PATHEXT
 const tempDirs: string[] = []
 const testPosix = process.platform === 'win32' ? test.skip : test
+
+function linuxStatEnv(): NodeJS.ProcessEnv {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'goblin-linux-stat-'))
+  tempDirs.push(root)
+  return installLinuxStatShim(root)
+}
 
 afterEach(() => {
   if (originalPath === undefined) delete process.env.PATH
@@ -23,6 +46,17 @@ afterEach(() => {
 })
 
 describe('remote ssh command builders', () => {
+  testPosix('admits Linux and rejects other remote operating systems', async () => {
+    const invocation = buildRemoteCommandInvocation(target(), { type: 'checkShell' })
+    const linux = await execa('sh', ['-c', `uname() { printf '%s\\n' Linux; }\n${invocation.script}`])
+    const darwin = await execa('sh', ['-c', `uname() { printf '%s\\n' Darwin; }\n${invocation.script}`], {
+      reject: false,
+    })
+
+    expect(linux.stdout).toBe('ok')
+    expect(darwin).toMatchObject({ exitCode: 1, stdout: `${REMOTE_UNSUPPORTED_PLATFORM_MARKER}Darwin` })
+  })
+
   test('proves that a command was not started when cancellation predates invocation', async () => {
     const controller = new AbortController()
     controller.abort()
@@ -96,41 +130,54 @@ describe('remote ssh command builders', () => {
     mkdirSync(path.join(root, 'nested folder'), { recursive: true })
     writeFileSync(path.join(root, 'visible file'), 'abc')
     writeFileSync(path.join(root, '.hidden'), '12345')
-    writeFileSync(path.join(root, 'nested folder', 'child'), '1234567')
+    utimesSync(root, new Date(1_700_000_000_000), new Date(1_700_000_000_000))
     const invocation = buildRemoteCommandInvocation(targetWithPath(root), {
       type: 'directoryOverview',
       path: root,
     })
 
-    const result = await execa('sh', ['-lc', invocation.script])
+    const result = await execa('sh', ['-c', invocation.script], { env: linuxStatEnv() })
 
-    expect(result.stdout.trim().split('\n').at(-1)).toBe('2\t1\t15')
+    const overviewFields = result.stdout.trim().split('\n').at(-1)?.split('\t')
+    expect(overviewFields?.slice(0, 2)).toEqual(['2', '1'])
+    expect(overviewFields?.[2]).toBe('1700000000')
   })
 
-  testPosix('keeps directory facts when recursive size collection fails', async () => {
-    const root = path.join(os.tmpdir(), `goblin-directory-overview-partial-${process.pid}-${Date.now()}`)
-    const bin = path.join(root, 'bin')
-    tempDirs.push(root)
-    mkdirSync(path.join(root, 'blocked'), { recursive: true })
-    mkdirSync(bin)
+  testPosix('follows a root directory symbolic link during remote admission and overview reads', async () => {
+    const root = path.join(os.tmpdir(), `goblin-directory-probe-${process.pid}-${Date.now()}`)
+    const link = `${root}-link`
+    tempDirs.push(root, link)
+    mkdirSync(root, { recursive: true })
     writeFileSync(path.join(root, 'visible'), 'abc')
-    writeFileSync(path.join(root, 'blocked', 'nested'), 'not measurable')
-    const statShim = path.join(bin, 'stat')
-    writeFileSync(
-      statShim,
-      '#!/bin/sh\ncase "$*" in *blocked*) exit 1;; esac\nPATH=/usr/bin:/bin\nexport PATH\nexec stat "$@"\n',
-    )
-    chmodSync(statShim, 0o755)
-    const invocation = buildRemoteCommandInvocation(targetWithPath(root), {
-      type: 'directoryOverview',
-      path: root,
-    })
+    utimesSync(root, new Date(1_700_000_000_000), new Date(1_700_000_000_000))
+    symlinkSync(root, link)
 
-    const result = await execa('sh', ['-c', invocation.script], {
-      env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ''}` },
-    })
+    const admission = buildRemoteCommandInvocation(targetWithPath(link), { type: 'testDirectory', path: link })
+    await expect(execa('sh', ['-lc', admission.script])).resolves.toMatchObject({ stdout: realpathSync(root) })
 
-    expect(result.stdout.trim().split('\n').at(-1)).toBe('1\t2\t-')
+    const overview = buildRemoteCommandInvocation(targetWithPath(link), { type: 'directoryOverview', path: link })
+    await expect(execa('sh', ['-c', overview.script], { env: linuxStatEnv() })).resolves.toMatchObject({
+      stdout: '1\t0\t1700000000',
+    })
+  })
+
+  testPosix('recognizes a Git workspace root through a symbolic link', async () => {
+    const root = path.join(os.tmpdir(), `goblin-git-directory-probe-${process.pid}-${Date.now()}`)
+    const link = `${root}-link`
+    tempDirs.push(root, link)
+    mkdirSync(root, { recursive: true })
+    await execa('git', ['init', '-q', root])
+    symlinkSync(root, link)
+
+    const admission = buildRemoteCommandInvocation(targetWithPath(link), { type: 'testDirectory', path: link })
+    const gitRoot = buildRemoteCommandInvocation(targetWithPath(link), { type: 'revParseTopLevel', path: link })
+    const [admissionResult, gitRootResult] = await Promise.all([
+      execa('sh', ['-lc', admission.script]),
+      execa('sh', ['-lc', gitRoot.script]),
+    ])
+
+    expect(admissionResult.stdout).toBe(realpathSync(root))
+    expect(gitRootResult.stdout).toBe(admissionResult.stdout)
   })
 
   test('uses an ssh executable discovered on PATH', () => {
@@ -356,7 +403,7 @@ describe('remote ssh command builders', () => {
       exclude: ['config dir/*.log'],
     })
 
-    const result = await execa('bash', ['-lc', invocation.script])
+    const result = await execa('bash', ['-c', invocation.script], { env: linuxStatEnv() })
 
     expect(result.stdout).toBe(
       encodeRemoteWorktreeBootstrapRecord('copy', 'foo bar.txt') +
@@ -393,7 +440,9 @@ describe('remote ssh command builders', () => {
 
     const targetReadonly = path.join(targetRoot, 'config', 'readonly')
     try {
-      const result = await execa('bash', ['-lc', `umask 0077\n${invocation.script}`])
+      const result = await execa('bash', ['-c', `umask 0077\n${invocation.script}`], {
+        env: linuxStatEnv(),
+      })
 
       expect(result.stdout).toBe(encodeRemoteWorktreeBootstrapRecord('copy', 'config'))
       expect(readFileSync(path.join(targetReadonly, 'settings.json'), 'utf8')).toBe('{}\n')
@@ -430,8 +479,8 @@ describe('remote ssh command builders', () => {
     })
 
     try {
-      const result = await execa('bash', ['-lc', invocation.script], {
-        env: { BASH_ENV: bashEnv },
+      const result = await execa('bash', ['-c', invocation.script], {
+        env: { ...linuxStatEnv(), BASH_ENV: bashEnv },
         reject: false,
       })
 
@@ -443,58 +492,6 @@ describe('remote ssh command builders', () => {
       chmodSync(sourceConfig, 0o755)
       if (existsSync(targetConfig)) chmodSync(targetConfig, 0o755)
     }
-  })
-
-  testPosix('remote bootstrap fails fast when required globstar support is unavailable', async () => {
-    const dir = path.join(os.tmpdir(), `goblin-remote-bootstrap-test-${Date.now()}-${process.pid}`)
-    tempDirs.push(dir)
-    const sourceRoot = path.join(dir, 'repo')
-    const targetRoot = path.join(dir, 'worktree')
-    const bashEnv = path.join(dir, 'bash-env')
-    mkdirSync(sourceRoot, { recursive: true })
-    mkdirSync(targetRoot, { recursive: true })
-    writeFileSync(
-      bashEnv,
-      'shopt() {\n  if [ "$1" = "-s" ] && [ "$2" = "globstar" ]; then return 1; fi\n  builtin shopt "$@"\n}\n',
-    )
-    const withGlobstar = buildRemoteCommandInvocation(target(), {
-      type: 'bootstrapRemoteWorktree',
-      sourceRoot,
-      targetRoot,
-      copy: ['config/**/*.json'],
-      symlink: [],
-      hardlink: [],
-      exclude: [],
-    })
-    const withoutGlobstar = buildRemoteCommandInvocation(target(), {
-      type: 'bootstrapRemoteWorktree',
-      sourceRoot,
-      targetRoot,
-      copy: ['config/*.json'],
-      symlink: [],
-      hardlink: [],
-      exclude: [],
-    })
-    const ordinaryDoubleStars = buildRemoteCommandInvocation(target(), {
-      type: 'bootstrapRemoteWorktree',
-      sourceRoot,
-      targetRoot,
-      copy: ['config/[**].json', 'config/foo**.json'],
-      symlink: [],
-      hardlink: [],
-      exclude: [],
-    })
-
-    const [withGlobstarResult, withoutGlobstarResult, ordinaryDoubleStarsResult] = await Promise.all([
-      execa('bash', ['-lc', withGlobstar.script], { env: { BASH_ENV: bashEnv }, reject: false }),
-      execa('bash', ['-lc', withoutGlobstar.script], { env: { BASH_ENV: bashEnv }, reject: false }),
-      execa('bash', ['-lc', ordinaryDoubleStars.script], { env: { BASH_ENV: bashEnv }, reject: false }),
-    ])
-
-    expect(withGlobstarResult.exitCode).toBe(1)
-    expect(withGlobstarResult.stderr).toContain('error: remote bash does not support ** glob patterns')
-    expect(withoutGlobstarResult.exitCode).toBe(0)
-    expect(ordinaryDoubleStarsResult.exitCode).toBe(0)
   })
 
   testPosix('remote bootstrap script rejects sources under a symlink parent', async () => {
