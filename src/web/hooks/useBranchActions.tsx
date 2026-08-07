@@ -158,6 +158,10 @@ export function useBranchActions(repo: BranchActionRepo, branch: BranchSnapshotI
     }
 
     return runUiAction('copyPatch', async () => {
+      // Known issue: some browsers require clipboard writes to remain within
+      // the original user-activation window, which may expire while this
+      // asynchronous patch request runs. We accept that compatibility limit
+      // here instead of adding a two-stage generate-then-copy interaction.
       const result = await copyPatchMutation.mutateAsync(worktreePath)
       if (!result.ok) return { ok: false, message: result.message }
       if (!result.message) return { ok: false, message: 'status.copy-patch-empty' }

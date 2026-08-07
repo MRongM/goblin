@@ -525,7 +525,7 @@ export function TerminalSessionView({
         return null
       }
       try {
-        const outcome = await processDrop({ files })
+        const outcome = await trackFileResolution(terminalFileInputSessionId, processDrop({ files }))
         if (outcome.kind === 'no-op') return null
         const plan = prepareResolvedPaths(outcome.resolution)
         if (!plan) return null
@@ -537,7 +537,7 @@ export function TerminalSessionView({
         return null
       }
     },
-    [prepareResolvedPaths, t, terminalFileInputAdmission, terminalFileInputSessionId],
+    [prepareResolvedPaths, t, terminalFileInputAdmission, terminalFileInputSessionId, trackFileResolution],
   )
   const handlePasteCapture = useCallback(
     (event: ClipboardEvent<HTMLDivElement>) => {

@@ -450,6 +450,35 @@ describe('TerminalSessionView composer', () => {
     }
   })
 
+  test('shows file progress while Composer resolves an uploaded file', async () => {
+    const shellClient = await import('#/web/app-shell-client.ts')
+    vi.mocked(shellClient.pathForDroppedFile).mockReturnValue('')
+    const savedPaths = Promise.withResolvers<string[]>()
+    vi.mocked(shellClient.saveClipboardFiles).mockReturnValueOnce(savedPaths.promise)
+    const rendered = await renderTerminalSession()
+
+    try {
+      const textarea = chooseComposerFile(rendered.container, '', new File(['content'], 'notes.txt'))
+
+      await vi.waitFor(() =>
+        expect(rendered.container.querySelector('[aria-label="terminal.file-resolution-progress"]')).not.toBeNull(),
+      )
+
+      await act(async () => {
+        savedPaths.resolve(['/tmp/notes.txt'])
+        await savedPaths.promise
+      })
+
+      await vi.waitFor(() => {
+        expect(rendered.container.querySelector('[aria-label="terminal.file-resolution-progress"]')).toBeNull()
+        expect(textarea.value).toBe("'/tmp/notes.txt'")
+      })
+      expect(rendered.writeInput).not.toHaveBeenCalled()
+    } finally {
+      await rendered.cleanup()
+    }
+  })
+
   test('keeps the composer draft and reports an oversized uploaded blob', async () => {
     const shellClient = await import('#/web/app-shell-client.ts')
     vi.mocked(shellClient.pathForDroppedFile).mockReturnValue('')
