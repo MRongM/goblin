@@ -193,6 +193,7 @@ const WorkspaceViewContent = defineComponent<WorkspaceViewProps>({
       const isCompact = compact.value
       const activeSinglePane = singlePane.value
       const routeBranchName = currentBranchName.value
+      const openWorkspaceRootPane = props.onOpenWorkspaceRootPane
 
       if (!currentView.workspaceMembershipReady) {
         return (
@@ -292,6 +293,9 @@ const WorkspaceViewContent = defineComponent<WorkspaceViewProps>({
                 compact={isCompact}
                 trafficLightOffset={workspaceTrafficLightOffset}
                 onBack={() => props.onOpenWorkspaceNavigator?.(currentWorkspace.id)}
+                onOpenWorkspaceRoot={
+                  openWorkspaceRootPane ? () => openWorkspaceRootPane(currentWorkspace.id) : undefined
+                }
                 onSelectBranch={(branchName) => props.onOpenRepoBranch?.(currentWorkspace.id, branchName)}
               />
             )

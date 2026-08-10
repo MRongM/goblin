@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 
 import { flushTestUpdates } from '#/test-utils/render.tsx'
+import { screen } from '@testing-library/vue'
+import { userEvent } from '@testing-library/user-event'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import { WorkspacePicker } from '#/web/components/workspace-picker/WorkspacePicker.tsx'
 import type { WorkspacePickerItem } from '#/web/components/workspace-picker/types.ts'
@@ -418,10 +420,8 @@ function render(element: VNode) {
 }
 
 async function clickPopoverTrigger(trigger: HTMLButtonElement): Promise<void> {
-  await flushTestUpdates(() => {
-    trigger.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0 }))
-    trigger.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0 }))
-  })
+  await userEvent.setup().click(trigger)
+  await screen.findByRole('dialog')
 }
 
 function workspace(name: string, id: string, overrides: Partial<WorkspacePickerItem> = {}): WorkspacePickerItem {

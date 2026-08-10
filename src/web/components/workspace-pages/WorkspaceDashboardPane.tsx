@@ -1,6 +1,6 @@
-import { LayoutDashboard } from '@lucide/vue'
+import { ArrowRight, FolderTree, LayoutDashboard } from '@lucide/vue'
 import { computed, defineComponent } from 'vue'
-import type { FunctionalComponent } from 'vue'
+import type { FunctionalComponent, VNodeChild } from 'vue'
 import { workspaceNameFromLocator } from '#/shared/workspace-display-location.ts'
 import type { WorkspaceDirectoryOverview } from '#/shared/workspace-overview.ts'
 import type { WorkspaceId } from '#/shared/workspace-locator.ts'
@@ -15,7 +15,7 @@ import {
   DashboardStats,
 } from '#/web/components/workspace-pages/WorkspaceDashboardSections.tsx'
 import { WorkspacePagePane } from '#/web/components/workspace-pages/WorkspacePagePane.tsx'
-import { DASHBOARD_CARD_CLASS } from '#/web/components/workspace-pages/dashboard-ui.tsx'
+import { DASHBOARD_CARD_CLASS, DashboardSection } from '#/web/components/workspace-pages/dashboard-ui.tsx'
 import { buildDashboardSummary } from '#/web/components/workspace-pages/workspace-dashboard-model.ts'
 import type { DashboardPullRequestState } from '#/web/components/workspace-pages/workspace-dashboard-model.ts'
 import { cn } from '#/web/lib/cn.ts'
@@ -39,12 +39,13 @@ interface WorkspaceDashboardPaneProps {
   compact?: boolean
   trafficLightOffset?: boolean
   onBack?: () => void
+  onOpenWorkspaceRoot?: () => void
   onSelectBranch?: (branchName: string) => void
 }
 
 export const WorkspaceDashboardPane = defineComponent<WorkspaceDashboardPaneProps>({
   name: 'WorkspaceDashboardPane',
-  props: ['workspaceId', 'compact', 'trafficLightOffset', 'onBack', 'onSelectBranch'],
+  props: ['workspaceId', 'compact', 'trafficLightOffset', 'onBack', 'onOpenWorkspaceRoot', 'onSelectBranch'],
 
   setup(props) {
     const t = useT()
@@ -60,9 +61,33 @@ export const WorkspaceDashboardPane = defineComponent<WorkspaceDashboardPaneProp
           }
         : null
     })
+
+    function renderDashboardContent(
+      currentWorkspace: DashboardWorkspaceProjection | null,
+      compact: boolean,
+    ): VNodeChild {
+      if (currentWorkspace?.capability.kind === 'filesystem') {
+        return (
+          <DirectoryDashboardReadModel
+            workspace={currentWorkspace}
+            compact={compact}
+            onOpenWorkspaceRoot={props.onOpenWorkspaceRoot}
+          />
+        )
+      }
+
+      const gitWorkspace = isGitDashboardWorkspace(currentWorkspace) ? currentWorkspace : null
+      if (gitWorkspace) {
+        return (
+          <GitDashboardReadModel workspace={gitWorkspace} compact={compact} onSelectBranch={props.onSelectBranch} />
+        )
+      }
+
+      return <div class={cn(DASHBOARD_CARD_CLASS, 'p-4 text-sm text-muted-foreground')}>{t('dashboard.loading')}</div>
+    }
+
     return () => {
       const currentWorkspace = workspace.value
-      const gitWorkspace = isGitDashboardWorkspace(currentWorkspace) ? currentWorkspace : null
       const compact = props.compact ?? false
 
       return (
@@ -75,19 +100,7 @@ export const WorkspaceDashboardPane = defineComponent<WorkspaceDashboardPaneProp
         >
           <ScrollArea class="min-h-0 flex-1 bg-background">
             <div class="mx-auto flex w-full max-w-5xl flex-col gap-4 p-4 sm:p-5">
-              {currentWorkspace?.capability.kind === 'filesystem' ? (
-                <DirectoryDashboardReadModel workspace={currentWorkspace} compact={compact} />
-              ) : gitWorkspace ? (
-                <GitDashboardReadModel
-                  workspace={gitWorkspace}
-                  compact={compact}
-                  onSelectBranch={props.onSelectBranch}
-                />
-              ) : (
-                <div class={cn(DASHBOARD_CARD_CLASS, 'p-4 text-sm text-muted-foreground')}>
-                  {t('dashboard.loading')}
-                </div>
-              )}
+              {renderDashboardContent(currentWorkspace, compact)}
             </div>
           </ScrollArea>
         </WorkspacePagePane>
@@ -236,9 +249,13 @@ const GitDashboardReadModel = defineComponent<{
   },
 })
 
-const DirectoryDashboardReadModel = defineComponent<{ workspace: DashboardWorkspaceProjection; compact: boolean }>({
+const DirectoryDashboardReadModel = defineComponent<{
+  workspace: DashboardWorkspaceProjection
+  compact: boolean
+  onOpenWorkspaceRoot?: () => void
+}>({
   name: 'DirectoryDashboardReadModel',
-  props: ['workspace', 'compact'],
+  props: ['workspace', 'compact', 'onOpenWorkspaceRoot'],
   setup(props) {
     const t = useT()
     const overviewReadModel = useWorkspaceDirectoryOverview(
@@ -252,6 +269,7 @@ const DirectoryDashboardReadModel = defineComponent<{ workspace: DashboardWorksp
           workspace={props.workspace}
           overview={overviewReadModel.data.value}
           compact={props.compact}
+          onOpenWorkspaceRoot={props.onOpenWorkspaceRoot}
         />
       ) : overviewReadModel.isError.value ? (
         <div class={cn(DASHBOARD_CARD_CLASS, 'p-4 text-sm text-destructive')}>
@@ -267,9 +285,11 @@ interface DirectoryDashboardProps {
   workspace: Pick<WorkspaceState, 'id' | 'admission'>
   overview: WorkspaceDirectoryOverview
   compact: boolean
+  onOpenWorkspaceRoot?: () => void
 }
 
 const DirectoryDashboard: FunctionalComponent<DirectoryDashboardProps> = (props) => {
+  const t = useT()
   const displayLocation = formatWorkspaceDisplayLocation(
     props.workspace.id,
     remoteWorkspaceTarget(
@@ -286,8 +306,28 @@ const DirectoryDashboard: FunctionalComponent<DirectoryDashboardProps> = (props)
         </div>
       </div>
       <DirectoryOverviewContent overview={props.overview} compact={props.compact} />
+      <DashboardSection title={t('dashboard.directory.working-directory')}>
+        <button
+          type="button"
+          class={cn(
+            'flex w-full min-w-0 items-center gap-3 px-3 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45',
+            props.onOpenWorkspaceRoot ? 'hover:bg-accent/45' : 'cursor-default',
+          )}
+          disabled={!props.onOpenWorkspaceRoot}
+          onClick={() => props.onOpenWorkspaceRoot?.()}
+        >
+          <FolderTree size={16} class="shrink-0 text-muted-foreground" />
+          <span class="min-w-0 flex-1">
+            <span class="block truncate text-sm font-medium text-foreground" title={displayLocation}>
+              {displayLocation}
+            </span>
+            <span class="block truncate text-xs text-muted-foreground">{t('dashboard.directory.open-files')}</span>
+          </span>
+          <ArrowRight size={15} class="shrink-0 text-muted-foreground" />
+        </button>
+      </DashboardSection>
     </>
   )
 }
 
-DirectoryDashboard.props = ['workspace', 'overview', 'compact']
+DirectoryDashboard.props = ['workspace', 'overview', 'compact', 'onOpenWorkspaceRoot']

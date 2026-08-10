@@ -90,8 +90,9 @@ describe('WorkspaceDashboardPane', () => {
     expect(queryObserverCount(workspaceDirectoryOverviewQueryKey(WORKSPACE_ID, workspace.workspaceRuntimeId))).toBe(0)
   })
 
-  test('shows directory metrics without mounting Git reads for a non-Git workspace', async () => {
+  test('shows directory metrics and opens the workspace root in compact mode without Git reads', async () => {
     const workspace = seedRepoWithReadModelForTest({ id: WORKSPACE_ID })
+    const openWorkspaceRoot = vi.fn()
     setWorkspaceProbeForTest(WORKSPACE_ID, {
       status: 'ready',
       capabilities: {
@@ -109,7 +110,7 @@ describe('WorkspaceDashboardPane', () => {
 
     const { container } = renderInJsdom(
       <VueQueryClientScope client={appQueryClient}>
-        <WorkspaceDashboardPane workspaceId={WORKSPACE_ID} />
+        <WorkspaceDashboardPane workspaceId={WORKSPACE_ID} compact onOpenWorkspaceRoot={openWorkspaceRoot} />
       </VueQueryClientScope>,
     )
 
@@ -123,6 +124,8 @@ describe('WorkspaceDashboardPane', () => {
     expect(lastModifiedValue?.textContent).toMatch(/ ago$/u)
     expect(lastModifiedValue?.className).toContain('truncate')
     expect(container.textContent).toContain('/workspace')
+    await userEvent.click(screen.getByRole('button', { name: /dashboard\.directory\.open-files/u }))
+    expect(openWorkspaceRoot).toHaveBeenCalledOnce()
     expect(container.textContent).not.toContain('goblin+file://')
     expect(
       appQueryClient.getQueryState(repoWorktreeStatusQueryKey(WORKSPACE_ID, workspace.workspaceRuntimeId))?.fetchStatus,

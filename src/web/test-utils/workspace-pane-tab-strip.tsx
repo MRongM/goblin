@@ -1,3 +1,5 @@
+import { screen } from '@testing-library/vue'
+import { userEvent } from '@testing-library/user-event'
 import { afterEach, beforeEach, vi } from 'vitest'
 import { useFakeTimers } from '#/test-utils/timers.ts'
 import { flushTestUpdates, renderInJsdom } from '#/test-utils/render.tsx'
@@ -261,10 +263,8 @@ export async function flushTimers() {
 }
 
 export async function openCompactSwitcher(trigger: HTMLButtonElement) {
-  await flushTestUpdates(() => {
-    trigger.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0 }))
-    trigger.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0 }))
-  })
+  await userEvent.setup({ advanceTimers: vi.advanceTimersByTime }).click(trigger)
+  await screen.findByRole('dialog')
 }
 
 export function appendTerminalFocusTarget(): HTMLTextAreaElement {

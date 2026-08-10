@@ -43,14 +43,16 @@ DashboardMetricCard.props = ['icon', 'label', 'value', 'valueClass', 'valueTitle
 
 interface DashboardSectionProps {
   title: string
-  description: string
+  description?: string
 }
 
 export const DashboardSection: FunctionalComponent<DashboardSectionProps> = (props, { slots }) => (
   <section class={cn(DASHBOARD_CARD_CLASS, 'overflow-hidden')}>
     <div class="flex min-w-0 flex-col gap-0.5 border-b border-separator px-3 py-2.5 sm:flex-row sm:items-baseline sm:gap-2">
       <h2 class="shrink-0 text-[13px] font-semibold text-foreground">{props.title}</h2>
-      <div class="min-w-0 truncate text-[11px] text-muted-foreground">{props.description}</div>
+      {props.description ? (
+        <div class="min-w-0 truncate text-[11px] text-muted-foreground">{props.description}</div>
+      ) : null}
     </div>
     {slots.default?.()}
   </section>
