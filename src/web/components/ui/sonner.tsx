@@ -1,4 +1,4 @@
-import { CircleCheckIcon, InfoIcon, Loader2Icon, OctagonXIcon, TriangleAlertIcon } from '@lucide/vue'
+import { CircleCheckIcon, CircleXIcon, InfoIcon, LoaderCircleIcon, TriangleAlertIcon } from '@lucide/vue'
 import { Toaster as VueSonner } from 'vue-sonner'
 import type { ToasterProps } from 'vue-sonner'
 import { defineComponent } from 'vue'
@@ -6,11 +6,11 @@ import type { CSSProperties, FunctionalComponent } from 'vue'
 import { themeStore } from '#/web/stores/theme.ts'
 import { useStoreSelector } from '#/web/stores/store-selector.ts'
 
-const ToastSuccessIcon: FunctionalComponent = () => <CircleCheckIcon class="size-4" />
-const ToastInfoIcon: FunctionalComponent = () => <InfoIcon class="size-4" />
-const ToastWarningIcon: FunctionalComponent = () => <TriangleAlertIcon class="size-4" />
-const ToastErrorIcon: FunctionalComponent = () => <OctagonXIcon class="size-4" />
-const ToastLoadingIcon: FunctionalComponent = () => <Loader2Icon class="size-4 animate-spin" />
+const ToastSuccessIcon: FunctionalComponent = () => <CircleCheckIcon class="size-4 text-success" />
+const ToastInfoIcon: FunctionalComponent = () => <InfoIcon class="size-4 text-brand-text" />
+const ToastWarningIcon: FunctionalComponent = () => <TriangleAlertIcon class="size-4 text-warning" />
+const ToastErrorIcon: FunctionalComponent = () => <CircleXIcon class="size-4 text-danger" />
+const ToastLoadingIcon: FunctionalComponent = () => <LoaderCircleIcon class="size-4 animate-spin text-muted-foreground" />
 
 type ToastStyle = CSSProperties & Record<`--${string}`, string>
 
@@ -38,7 +38,7 @@ export const Toaster = defineComponent<ToasterProps>({
         '--warning-text': 'var(--color-warning)',
         '--warning-border': 'var(--color-border)',
         '--info-bg': 'var(--color-popover)',
-        '--info-text': 'var(--color-brand)',
+        '--info-text': 'var(--color-brand-text)',
         '--info-border': 'var(--color-border)',
         '--border-radius': 'var(--radius)',
         '--width': 'min(520px, calc(100vw - 2rem))',
@@ -50,12 +50,12 @@ export const Toaster = defineComponent<ToasterProps>({
           {...attrs}
           theme={theme.value}
           class={['toaster group', props.class].filter(Boolean).join(' ')}
-          icons={{
-            success: ToastSuccessIcon,
-            info: ToastInfoIcon,
-            warning: ToastWarningIcon,
-            error: ToastErrorIcon,
-            loading: ToastLoadingIcon,
+          v-slots={{
+            'success-icon': ToastSuccessIcon,
+            'info-icon': ToastInfoIcon,
+            'warning-icon': ToastWarningIcon,
+            'error-icon': ToastErrorIcon,
+            'loading-icon': ToastLoadingIcon,
           }}
           style={style}
           toastOptions={{
