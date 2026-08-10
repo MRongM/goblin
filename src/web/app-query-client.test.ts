@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { focusManager } from '@tanstack/react-query'
+import { focusManager } from '@tanstack/query-core'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import '#/web/app-query-client.ts'
 

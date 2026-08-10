@@ -202,6 +202,7 @@ export const en = {
   // ---- Empty state --------------------------------------------------------
   'empty.title': 'No workspace open',
   'empty.body': 'Choose a workspace from the sidebar, or drop a folder here.',
+  'route.not-found-title': 'Page not found',
   'workspace-route.not-found-title': 'Workspace not found',
 
   // ---- Drag and drop ------------------------------------------------------
@@ -483,7 +484,7 @@ export const en = {
   'worktree-bootstrap.summary.setup': 'Ran setup: {command}',
   'action.confirm-push-protected-title': 'Push to {branch}?',
   'action.confirm-push-protected-body':
-    'You are about to push directly to <branch>{branch}</branch>, which usually deserves a pull request. Continue?',
+    'You are about to push directly to {branch}, which usually deserves a pull request. Continue?',
   'action.confirm-push-confirm': 'Push anyway',
   'action.confirm-delete-branch-title': 'Delete branch?',
   'action.confirm-delete-branch-body': 'This will delete the local branch:',

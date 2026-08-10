@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
 
 import { seedRepoShellForTest, resetWorkspacesStore } from '#/web/test-utils/repo-store.ts'
-import { act } from '@testing-library/react'
+import { flushTestUpdates } from '#/test-utils/render.tsx'
 import { describe, expect, test, vi } from 'vitest'
 import '#/web/test-utils/workspace-view.tsx'
 import { WorkspaceView } from '#/web/components/WorkspaceView.tsx'
-import { useWorkspacesStore } from '#/web/stores/workspaces/store.ts'
+import { workspacesStore } from '#/web/stores/workspaces/store.ts'
 import {
   responsiveMocks,
   REPO_ID,
@@ -24,12 +24,12 @@ import {
 } from '#/web/test-utils/workspace-view.tsx'
 
 describe('WorkspaceView branch and page routes', () => {
-  test('large-screen branch activation keeps the Branch Navigator visible', () => {
+  test('large-screen branch activation keeps the Branch Navigator visible', async () => {
     const { container } = render(branchWorkspaceView())
 
     expect(workspaceLayout(container)?.dataset.mode).toBe('split')
 
-    act(() => {
+    await flushTestUpdates(() => {
       branchNavigator(container)?.click()
     })
 
@@ -141,8 +141,8 @@ describe('WorkspaceView branch and page routes', () => {
     expect(workspacePane(container)).toBeNull()
   })
 
-  test('large-screen Zen Mode repo root keeps the sidebar as the active single pane', () => {
-    useWorkspacesStore.getState().setZenMode(true)
+  test('large-screen Zen Mode repo root keeps the sidebar as the active single pane', async () => {
+    workspacesStore.getState().setZenMode(true)
 
     const { container } = render(
       <WorkspaceView workspaceId={REPO_ID} routeView={{ kind: 'empty', workspaceId: REPO_ID }} />,
@@ -185,17 +185,17 @@ describe('WorkspaceView branch and page routes', () => {
     expect(container.querySelector<HTMLElement>('[data-testid="create-worktree-page"]')?.dataset.compact).toBe('true')
   })
 
-  test('large-screen Zen Mode uses Branch Navigator until a branch opens a collapsed split workspace', () => {
-    useWorkspacesStore.getState().setZenMode(true)
+  test('large-screen Zen Mode uses Branch Navigator until a branch opens a collapsed split workspace', async () => {
+    workspacesStore.getState().setZenMode(true)
     const { container, rerender } = render(<WorkspaceView workspaceId={REPO_ID} />)
 
     expect(branchNavigator(container)).not.toBeNull()
     expect(workspacePane(container)).toBeNull()
     expect(workspaceLayout(container)).toBeNull()
 
-    act(() => {
+    await flushTestUpdates(async () => {
       branchNavigator(container)?.click()
-      rerender(branchWorkspaceView())
+      await rerender(branchWorkspaceView())
     })
 
     expect(branchNavigator(container)).not.toBeNull()

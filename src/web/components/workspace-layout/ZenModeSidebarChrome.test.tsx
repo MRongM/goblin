@@ -1,15 +1,18 @@
 // @vitest-environment jsdom
 
-import { useState } from 'react'
+import { defineComponent, ref } from 'vue'
 import { userEvent } from '@testing-library/user-event'
-import { act, screen, waitFor } from '@testing-library/react'
+import { screen, waitFor } from '@testing-library/vue'
+import { flushTestUpdates } from '#/test-utils/render.tsx'
+import { PopoverTrigger } from 'reka-ui'
 import { beforeEach, describe, expect, test, vi } from 'vitest'
 import { workspaceIdForTest } from '#/test-utils/workspace-id.ts'
+import { advanceTimersAndFlush, useFakeTimers } from '#/test-utils/timers.ts'
 import type { WorkspaceId } from '#/shared/workspace-locator.ts'
 import { renderInJsdom } from '#/test-utils/render.tsx'
 import { ZenModeSidebarChrome } from '#/web/components/workspace-layout/ZenModeSidebarChrome.tsx'
 import { TITLE_BAR_HEIGHT_PX } from '#/shared/title-bar-chrome.ts'
-import { Popover, PopoverContent, PopoverTrigger } from '#/web/components/ui/popover.tsx'
+import { Popover, PopoverContent } from '#/web/components/ui/popover.tsx'
 
 const WORKSPACE_ID = workspaceIdForTest('goblin+file:///workspace')
 
@@ -25,7 +28,7 @@ vi.mock('#/web/components/WorkspaceNavigationControls.tsx', () => ({
   }) => (
     <div data-testid="mock-workspace-navigation-controls" data-workspace-id={workspaceId}>
       <span data-testid="mock-zen-reveal-surface" data-zen-reveal-surface={zenRevealTriggerEnabled ? '' : undefined}>
-        <button type="button" data-testid="zen-mode-sidebar-trigger" onMouseEnter={onZenRevealTriggerEnter}>
+        <button type="button" data-testid="zen-mode-sidebar-trigger" onMouseenter={onZenRevealTriggerEnter}>
           zen
         </button>
       </span>
@@ -54,7 +57,7 @@ beforeEach(() => {
 })
 
 describe('ZenModeSidebarChrome', () => {
-  test('uses the zen control as the reveal trigger surface', () => {
+  test('uses the zen control as the reveal trigger surface', async () => {
     const { container } = renderInJsdom(
       <ZenModeSidebarChrome
         workspaceId={WORKSPACE_ID}
@@ -68,17 +71,19 @@ describe('ZenModeSidebarChrome', () => {
 
     const controls = screen.getByTestId('mock-workspace-navigation-controls')
     const zenSurface = screen.getByTestId('mock-zen-reveal-surface')
+    const overlay = screen.getByTestId('zen-mode-toggle-overlay')
     expect(controls.dataset.workspaceId).toBe(WORKSPACE_ID)
+    expect(overlay.style.height).toBe(`${TITLE_BAR_HEIGHT_PX}px`)
     expect(controls.hasAttribute('data-zen-reveal-surface')).toBe(false)
     expect(zenSurface.hasAttribute('data-zen-reveal-surface')).toBe(true)
     expect(controls.closest('[data-title-bar-chrome-region="interactive"]')).not.toBeNull()
-    act(() => {
-      screen.getByTestId('zen-mode-sidebar-trigger').dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))
+    await flushTestUpdates(() => {
+      screen.getByTestId('zen-mode-sidebar-trigger').dispatchEvent(new MouseEvent('mouseenter'))
     })
     expect(zenModeSidebarReveal(container)?.dataset.open).toBe('true')
   })
 
-  test('reveals from the left-edge hit area below the draggable titlebar', () => {
+  test('reveals from the left-edge hit area below the draggable titlebar', async () => {
     const { container } = renderInJsdom(
       <ZenModeSidebarChrome
         workspaceId={WORKSPACE_ID}
@@ -97,13 +102,183 @@ describe('ZenModeSidebarChrome', () => {
     expect(hitArea?.dataset.titleBarChromeRegion).toBeUndefined()
     expect(hitArea?.hasAttribute('data-zen-reveal-surface')).toBe(false)
 
-    act(() => {
-      hitArea?.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))
+    await flushTestUpdates(() => {
+      hitArea?.dispatchEvent(new MouseEvent('mouseenter'))
     })
     expect(zenModeSidebarReveal(container)?.dataset.open).toBe('true')
   })
 
-  test('uses a top-level drag plate for the revealed sidebar titlebar', () => {
+  test('commits the opening CSS baseline before scheduling the open frame', async () => {
+    const { container } = renderInJsdom(
+      <ZenModeSidebarChrome
+        workspaceId={WORKSPACE_ID}
+        zenModeToggleEnabled
+        revealEnabled
+        sidebarSize={36}
+        onSidebarSizeChange={() => {}}
+        sidebarPane={mockSidebarPane()}
+      />,
+    )
+    const reveal = zenModeSidebarReveal(container)!
+    const originalGetBoundingClientRect = reveal.getBoundingClientRect.bind(reveal)
+    const order: string[] = []
+    const frames: FrameRequestCallback[] = []
+    const resolveOpeningStyle = vi.spyOn(reveal, 'getBoundingClientRect').mockImplementation(() => {
+      expect(reveal.dataset.state).toBe('opening')
+      order.push('resolve-opening-style')
+      return originalGetBoundingClientRect()
+    })
+    const requestFrame = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+      order.push('request-open-frame')
+      frames.push(callback)
+      return frames.length
+    })
+
+    try {
+      await flushTestUpdates(() => {
+        screen.getByTestId('zen-mode-sidebar-trigger').dispatchEvent(new MouseEvent('mouseenter'))
+      })
+
+      expect(reveal.dataset.state).toBe('opening')
+      expect(order).toEqual(['resolve-opening-style', 'request-open-frame'])
+      expect(frames).toHaveLength(1)
+
+      frames[0]?.(16)
+      await flushTestUpdates(() => {})
+      expect(reveal.dataset.state).toBe('open')
+    } finally {
+      requestFrame.mockRestore()
+      resolveOpeningStyle.mockRestore()
+    }
+  })
+
+  test('does not let a cancelled opening frame reopen the reveal', async () => {
+    const { container } = renderInJsdom(
+      <ZenModeSidebarChrome
+        workspaceId={WORKSPACE_ID}
+        zenModeToggleEnabled
+        revealEnabled
+        sidebarSize={36}
+        onSidebarSizeChange={() => {}}
+        sidebarPane={mockSidebarPane()}
+      />,
+    )
+    const frames: FrameRequestCallback[] = []
+    const requestFrame = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+      frames.push(callback)
+      return frames.length
+    })
+    const cancelFrame = vi.spyOn(window, 'cancelAnimationFrame')
+
+    try {
+      await flushTestUpdates(() => {
+        screen.getByTestId('zen-mode-sidebar-trigger').dispatchEvent(new MouseEvent('mouseenter'))
+      })
+      const reveal = zenModeSidebarReveal(container)
+      expect(reveal?.dataset.state).toBe('opening')
+      expect(frames).toHaveLength(1)
+
+      await flushTestUpdates(() => {
+        reveal?.dispatchEvent(
+          new MouseEvent('mouseleave', {
+            clientX: 900,
+            clientY: 24,
+            relatedTarget: document.body,
+          }),
+        )
+      })
+      expect(reveal?.dataset.state).toBe('closing')
+      expect(cancelFrame).toHaveBeenCalledWith(1)
+
+      frames[0]?.(16)
+      await flushTestUpdates(() => {})
+      expect(reveal?.dataset.state).toBe('closing')
+    } finally {
+      cancelFrame.mockRestore()
+      requestFrame.mockRestore()
+    }
+  })
+
+  test('retains the reveal through the closing animation state', async () => {
+    useFakeTimers()
+    const { container } = renderInJsdom(
+      <ZenModeSidebarChrome
+        workspaceId={WORKSPACE_ID}
+        zenModeToggleEnabled
+        revealEnabled
+        sidebarSize={36}
+        onSidebarSizeChange={() => {}}
+        sidebarPane={mockSidebarPane()}
+      />,
+    )
+
+    await flushTestUpdates(() => {
+      zenModeSidebarHitArea(container)?.dispatchEvent(new MouseEvent('mouseenter'))
+    })
+    expect(zenModeSidebarReveal(container)?.dataset.state).toBe('opening')
+    await advanceTimersAndFlush(16)
+    expect(zenModeSidebarReveal(container)?.dataset.state).toBe('open')
+
+    const reveal = zenModeSidebarReveal(container)
+    await flushTestUpdates(() => {
+      reveal?.dispatchEvent(
+        new MouseEvent('mouseleave', {
+          clientX: 900,
+          clientY: 24,
+          relatedTarget: document.body,
+        }),
+      )
+    })
+
+    expect(reveal?.dataset.open).toBe('false')
+    expect(reveal?.dataset.state).toBe('closing')
+    expect(reveal?.isConnected).toBe(true)
+    await advanceTimersAndFlush(259)
+    expect(reveal?.dataset.state).toBe('closing')
+    await advanceTimersAndFlush(1)
+    expect(reveal?.dataset.state).toBe('closed')
+  })
+
+  test('cancels the closing timer when the reveal reopens', async () => {
+    useFakeTimers()
+    const { container } = renderInJsdom(
+      <ZenModeSidebarChrome
+        workspaceId={WORKSPACE_ID}
+        zenModeToggleEnabled
+        revealEnabled
+        sidebarSize={36}
+        onSidebarSizeChange={() => {}}
+        sidebarPane={mockSidebarPane()}
+      />,
+    )
+
+    await flushTestUpdates(() => {
+      zenModeSidebarHitArea(container)?.dispatchEvent(new MouseEvent('mouseenter'))
+    })
+    await advanceTimersAndFlush(16)
+    const reveal = zenModeSidebarReveal(container)
+    expect(reveal?.dataset.state).toBe('open')
+
+    await flushTestUpdates(() => {
+      reveal?.dispatchEvent(
+        new MouseEvent('mouseleave', {
+          clientX: 900,
+          clientY: 24,
+          relatedTarget: document.body,
+        }),
+      )
+    })
+    expect(reveal?.dataset.state).toBe('closing')
+
+    await flushTestUpdates(() => {
+      zenModeSidebarHitArea(container)?.dispatchEvent(new MouseEvent('mouseenter'))
+    })
+    expect(reveal?.dataset.state).toBe('opening')
+    await advanceTimersAndFlush(260)
+    expect(reveal?.dataset.state).toBe('open')
+  })
+
+  test('uses a top-level drag plate for the revealed sidebar titlebar', async () => {
     renderInJsdom(
       <ZenModeSidebarChrome
         workspaceId={WORKSPACE_ID}
@@ -117,8 +292,8 @@ describe('ZenModeSidebarChrome', () => {
 
     expect(screen.queryByTestId('zen-mode-sidebar-drag-plate')).toBeNull()
 
-    act(() => {
-      screen.getByTestId('zen-mode-sidebar-trigger').dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))
+    await flushTestUpdates(() => {
+      screen.getByTestId('zen-mode-sidebar-trigger').dispatchEvent(new MouseEvent('mouseenter'))
     })
 
     const dragPlate = screen.getByTestId('zen-mode-sidebar-drag-plate')
@@ -129,7 +304,7 @@ describe('ZenModeSidebarChrome', () => {
     expect(dragPlate.style.height).toBe(`${TITLE_BAR_HEIGHT_PX}px`)
   })
 
-  test('keeps the resize visual full-height while the hit target stays below the draggable reveal titlebar', () => {
+  test('keeps the resize visual full-height while the hit target stays below the draggable reveal titlebar', async () => {
     renderInJsdom(
       <ZenModeSidebarChrome
         workspaceId={WORKSPACE_ID}
@@ -141,8 +316,8 @@ describe('ZenModeSidebarChrome', () => {
       />,
     )
 
-    act(() => {
-      screen.getByTestId('zen-mode-sidebar-trigger').dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))
+    await flushTestUpdates(() => {
+      screen.getByTestId('zen-mode-sidebar-trigger').dispatchEvent(new MouseEvent('mouseenter'))
     })
 
     const resizeVisual = screen.getByTestId('zen-mode-sidebar-resize-visual')
@@ -155,6 +330,15 @@ describe('ZenModeSidebarChrome', () => {
     expect(resizeHandle.dataset.titleBarChromeRegion).toBe('interactive')
     expect(resizeHandle.style.top).toBe(`${TITLE_BAR_HEIGHT_PX}px`)
     expect(resizeHandle.style.height).toBe(`calc(100% - ${TITLE_BAR_HEIGHT_PX}px)`)
+
+    await flushTestUpdates(() => {
+      resizeHandle.dispatchEvent(new MouseEvent('mouseenter'))
+    })
+    expect(resizeVisual.dataset.state).toBe('hover')
+    expect(resizeHandle.dataset.state).toBe('hover')
+    const resizeLine = resizeVisual.querySelector('span')
+    expect(resizeLine?.className).toContain('group-data-[state=hover]:bg-brand')
+    expect(resizeLine?.className).toContain('group-data-[state=drag]:bg-brand')
   })
 
   test('forwards route actions to the revealed sidebar controls', async () => {
@@ -180,8 +364,8 @@ describe('ZenModeSidebarChrome', () => {
       />,
     )
 
-    act(() => {
-      screen.getByTestId('zen-mode-sidebar-trigger').dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))
+    await flushTestUpdates(() => {
+      screen.getByTestId('zen-mode-sidebar-trigger').dispatchEvent(new MouseEvent('mouseenter'))
     })
 
     const sidebar = screen.getByTestId('mock-sidebar')
@@ -211,8 +395,8 @@ describe('ZenModeSidebarChrome', () => {
       />,
     )
 
-    act(() => {
-      screen.getByTestId('zen-mode-sidebar-trigger').dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))
+    await flushTestUpdates(() => {
+      screen.getByTestId('zen-mode-sidebar-trigger').dispatchEvent(new MouseEvent('mouseenter'))
     })
     expect(zenModeSidebarReveal(container)?.dataset.open).toBe('true')
 
@@ -221,10 +405,8 @@ describe('ZenModeSidebarChrome', () => {
       expect(screen.queryByTestId('descendant-popover-content')).not.toBeNull()
     })
 
-    act(() => {
-      zenModeSidebarReveal(container)?.dispatchEvent(
-        new MouseEvent('mouseout', { bubbles: true, relatedTarget: document.body }),
-      )
+    await flushTestUpdates(() => {
+      zenModeSidebarReveal(container)?.dispatchEvent(new MouseEvent('mouseleave', { relatedTarget: document.body }))
       document.body.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: 900, clientY: 24 }))
     })
     expect(zenModeSidebarReveal(container)?.dataset.open).toBe('true')
@@ -279,45 +461,50 @@ function mockSidebarPane(props: MockSidebarProps = {}) {
   return <MockSidebar {...props} />
 }
 
-function MockSidebar({
-  onOpenDashboard,
-  onCreateWorktree,
-  onSelectBranch,
-  dashboardSelected = false,
-  newWorktreeSelected = false,
-  currentBranchName,
-}: MockSidebarProps) {
-  const [open, setOpen] = useState(false)
+const MockSidebar = defineComponent<MockSidebarProps>({
+  name: 'MockSidebar',
+  props: [
+    'onOpenDashboard',
+    'onCreateWorktree',
+    'onSelectBranch',
+    'dashboardSelected',
+    'newWorktreeSelected',
+    'currentBranchName',
+  ],
 
-  return (
-    <div
-      data-testid="mock-sidebar"
-      data-dashboard-selected={String(dashboardSelected)}
-      data-new-worktree-selected={String(newWorktreeSelected)}
-      data-current-branch-name={currentBranchName ?? ''}
-    >
-      <button type="button" data-testid="mock-dashboard-action" onClick={onOpenDashboard}>
-        Dashboard
-      </button>
-      <button type="button" data-testid="mock-create-worktree-action" onClick={onCreateWorktree}>
-        Create worktree
-      </button>
-      <button type="button" data-testid="mock-branch-action" onClick={() => onSelectBranch?.('feature/a')}>
-        Open branch
-      </button>
-      <Popover open={open} onOpenChange={setOpen}>
-        <PopoverTrigger asChild>
-          <button type="button" data-testid="descendant-popover-trigger">
-            Open descendant menu
-          </button>
-        </PopoverTrigger>
-        <PopoverContent>
-          <div data-testid="descendant-popover-content">Descendant menu</div>
-          <button type="button" onClick={() => setOpen(false)}>
-            Close descendant menu
-          </button>
-        </PopoverContent>
-      </Popover>
-    </div>
-  )
-}
+  setup(props) {
+    const open = ref(false)
+
+    return () => (
+      <div
+        data-testid="mock-sidebar"
+        data-dashboard-selected={String(props.dashboardSelected ?? false)}
+        data-new-worktree-selected={String(props.newWorktreeSelected ?? false)}
+        data-current-branch-name={props.currentBranchName ?? ''}
+      >
+        <button type="button" data-testid="mock-dashboard-action" onClick={props.onOpenDashboard}>
+          Dashboard
+        </button>
+        <button type="button" data-testid="mock-create-worktree-action" onClick={props.onCreateWorktree}>
+          Create worktree
+        </button>
+        <button type="button" data-testid="mock-branch-action" onClick={() => props.onSelectBranch?.('feature/a')}>
+          Open branch
+        </button>
+        <Popover open={open.value} onOpenChange={(nextOpen) => (open.value = nextOpen)}>
+          <PopoverTrigger asChild>
+            <button type="button" data-testid="descendant-popover-trigger">
+              Open descendant menu
+            </button>
+          </PopoverTrigger>
+          <PopoverContent>
+            <div data-testid="descendant-popover-content">Descendant menu</div>
+            <button type="button" onClick={() => (open.value = false)}>
+              Close descendant menu
+            </button>
+          </PopoverContent>
+        </Popover>
+      </div>
+    )
+  },
+})

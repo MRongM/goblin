@@ -7,7 +7,7 @@ import {
 import {
   filetreeInteractionScopeKey,
   resetFiletreeInteractionStore,
-  useFiletreeInteractionStore,
+  filetreeInteractionStore,
 } from '#/web/stores/workspaces/filetree-interaction-state.ts'
 
 const WORKSPACE_ID = workspaceIdForTest('goblin+file:///tmp/example-repo')
@@ -61,7 +61,7 @@ describe('filetree-session-state', () => {
     })
   })
 
-  test('restores session view state into the file tree interaction store', () => {
+  test('restores session view state into the file tree interaction store', async () => {
     restoreFiletreeViewStateFromSession({
       [WORKSPACE_ID]: {
         'goblin+file:///tmp/worktree': {
@@ -73,7 +73,7 @@ describe('filetree-session-state', () => {
     })
 
     expect(
-      useFiletreeInteractionStore.getState().interactionByScope[
+      filetreeInteractionStore.getState().interactionByScope[
         filetreeInteractionScopeKey(WORKSPACE_ID, '/tmp/worktree')
       ],
     ).toEqual({

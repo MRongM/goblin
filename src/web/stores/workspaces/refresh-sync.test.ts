@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest'
 import { createRefreshSyncHelpers, refreshFailureMessage } from '#/web/stores/workspaces/refresh-sync.ts'
-import { useWorkspacesStore } from '#/web/stores/workspaces/store.ts'
+import { workspacesStore } from '#/web/stores/workspaces/store.ts'
 import { requireGitWorkspaceForTest } from '#/web/stores/workspaces/git-workspace-client-state.test-utils.ts'
 import { REPO_ID, branch, ipcHandlers, resetRefreshTest, seedRepo } from '#/web/stores/workspaces/refresh-test-utils.ts'
 
@@ -37,25 +37,23 @@ describe('refresh sync pipeline', () => {
     ipcHandlers['repo.fetch'] = async () => fetchResult
     const projectionFailure = new Error('projection failed')
     const refreshReadModels = vi.fn(async () => {
-      const workspace = requireGitWorkspaceForTest(useWorkspacesStore.getState().workspaces[REPO_ID])
+      const workspace = requireGitWorkspaceForTest(workspacesStore.getState().workspaces[REPO_ID])
       expect(workspace.capability.git.events.at(-1)).toMatchObject({
         kind: 'result',
         result: fetchResult,
       })
       throw projectionFailure
     })
-    const { runRefreshSyncPipeline } = createRefreshSyncHelpers(
-      useWorkspacesStore.setState,
-      useWorkspacesStore.getState,
-      { refreshReadModels },
-    )
+    const { runRefreshSyncPipeline } = createRefreshSyncHelpers(workspacesStore.setState, workspacesStore.getState, {
+      refreshReadModels,
+    })
 
     await expect(runRefreshSyncPipeline(REPO_ID, workspaceRuntimeId, new AbortController().signal)).rejects.toBe(
       projectionFailure,
     )
     expect(refreshReadModels).toHaveBeenCalledOnce()
     expect(
-      requireGitWorkspaceForTest(useWorkspacesStore.getState().workspaces[REPO_ID]).capability.git.events.at(-1),
+      requireGitWorkspaceForTest(workspacesStore.getState().workspaces[REPO_ID]).capability.git.events.at(-1),
     ).toMatchObject({
       kind: 'result',
       result: fetchResult,

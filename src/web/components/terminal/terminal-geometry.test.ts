@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 
 import { afterEach, describe, expect, test } from 'vitest'
-import { createTerminalSizingOptions, preloadTerminalFont } from '#/web/components/terminal/terminal-geometry.ts'
+import { preloadTerminalFont } from '#/web/components/terminal/terminal-font.ts'
+import { createTerminalSizingOptions } from '#/web/components/terminal/terminal-geometry.ts'
 
 const originalFonts = document.fonts
 

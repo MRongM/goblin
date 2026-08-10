@@ -25,15 +25,15 @@ describe('InlineShortcut', () => {
     expect(span!.className).not.toContain('opacity-0')
   })
 
-  test('forwards aria-hidden to avoid screen-reader duplication', () => {
-    const { container } = renderInJsdom(<InlineShortcut shortcut="⌘N" aria-hidden={true} />)
+  test('forwards aria-hidden to avoid screen-reader duplication', async () => {
+    const { container } = renderInJsdom(<InlineShortcut shortcut="⌘N" ariaHidden={true} />)
     const span = container.querySelector('span')
     expect(span!.getAttribute('aria-hidden')).toBe('true')
   })
 
-  test('forwards custom className', () => {
-    const { container } = renderInJsdom(<InlineShortcut shortcut="⌘N" className="custom-class" />)
+  test('forwards a custom class', async () => {
+    const { container } = renderInJsdom(<InlineShortcut shortcut="⌘N" class="custom-class" />)
     const span = container.querySelector('span')
-    expect(span!.className).toContain('custom-class')
+    expect(span!.className.split(/\s+/).filter((token) => token === 'custom-class')).toHaveLength(1)
   })
 })

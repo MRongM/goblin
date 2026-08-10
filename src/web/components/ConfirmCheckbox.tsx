@@ -1,45 +1,48 @@
-import { useId, type ReactNode } from 'react'
+import { defineComponent, useId } from 'vue'
+import type { PropType } from 'vue'
 import { Checkbox } from '#/web/components/ui/checkbox.tsx'
 import { cn } from '#/web/lib/cn.ts'
-interface ConfirmCheckboxProps {
+
+export const ConfirmCheckbox = defineComponent<{
   checked: boolean
-  children: ReactNode
   describedBy?: string
   destructive?: boolean
   disabled?: boolean
   onCheckedChange: (checked: boolean) => void
   title?: string
-}
+}>({
+  name: 'ConfirmCheckbox',
+  props: {
+    checked: { type: Boolean, required: true },
+    describedBy: String,
+    destructive: Boolean,
+    disabled: Boolean,
+    onCheckedChange: { type: Function as PropType<(checked: boolean) => void>, required: true },
+    title: String,
+  },
 
-export function ConfirmCheckbox({
-  checked,
-  children,
-  describedBy,
-  destructive = false,
-  disabled = false,
-  onCheckedChange,
-  title,
-}: ConfirmCheckboxProps) {
-  const id = useId()
-  return (
-    <div
-      className={cn(
-        'flex items-center gap-2 select-none',
-        disabled ? 'cursor-not-allowed text-muted-foreground' : 'text-foreground',
-      )}
-      title={title}
-    >
-      <Checkbox
-        id={id}
-        checked={checked}
-        disabled={disabled}
-        aria-describedby={describedBy}
-        variant={destructive ? 'destructive' : 'default'}
-        onCheckedChange={(next) => onCheckedChange(next === true)}
-      />
-      <label htmlFor={id} className={cn(disabled ? 'cursor-not-allowed' : 'cursor-pointer')}>
-        {children}
-      </label>
-    </div>
-  )
-}
+  setup(props, { slots }) {
+    const id = useId()
+    return () => (
+      <div
+        class={cn(
+          'flex items-center gap-2 select-none',
+          props.disabled ? 'cursor-not-allowed text-muted-foreground' : 'text-foreground',
+        )}
+        title={props.title}
+      >
+        <Checkbox
+          id={id}
+          modelValue={props.checked}
+          disabled={props.disabled}
+          aria-describedby={props.describedBy}
+          variant={props.destructive ? 'destructive' : 'default'}
+          onUpdate:modelValue={(next) => props.onCheckedChange(next === true)}
+        />
+        <label for={id} class={props.disabled ? 'cursor-not-allowed' : 'cursor-pointer'}>
+          {slots.default?.()}
+        </label>
+      </div>
+    )
+  },
+})

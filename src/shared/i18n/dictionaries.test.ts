@@ -1,5 +1,8 @@
 import { describe, expect, test } from 'vitest'
-import { en, ja, ko, zh, type DictKey } from '#/shared/i18n/dictionaries.ts'
+import { en, type DictKey } from '#/shared/i18n/en.ts'
+import { ja } from '#/shared/i18n/ja.ts'
+import { ko } from '#/shared/i18n/ko.ts'
+import { zh } from '#/shared/i18n/zh.ts'
 
 const dicts = { en, zh, ko, ja } as const
 

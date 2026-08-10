@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act } from '@testing-library/react'
+import { flushTestUpdates } from '#/test-utils/render.tsx'
 import { describe, expect, test, vi } from 'vitest'
 import { terminalSessionBaseForTest } from '#/web/test-utils/terminal-model.ts'
 import {
@@ -35,7 +35,7 @@ describe('GitWorkspacePaneToolbar presentation', () => {
     expect(c.querySelector('#workspace-workspace-pane-tab-empty')).toBeNull()
     expect(c.querySelector('button[aria-label="terminal.new"]')).toBeNull()
 
-    act(() => {
+    await flushTestUpdates(() => {
       terminalTab.click()
     })
     await flush()
@@ -189,7 +189,7 @@ describe('GitWorkspacePaneToolbar presentation', () => {
     const statusCloseButton = closeButtonFor(c, 'workspace-pane:status')
     expect(statusCloseButton).not.toBeNull()
 
-    act(() => {
+    await flushTestUpdates(() => {
       statusCloseButton?.click()
     })
     await flush()
@@ -208,7 +208,7 @@ describe('GitWorkspacePaneToolbar presentation', () => {
     const statusCloseButton = closeButtonFor(c, 'workspace-pane:status')
     expect(statusCloseButton).not.toBeNull()
 
-    act(() => {
+    await flushTestUpdates(() => {
       statusCloseButton?.click()
     })
     await flush()
@@ -232,7 +232,7 @@ describe('GitWorkspacePaneToolbar presentation', () => {
     const terminalCloseButton = closeButtonFor(c, 'terminal:term-111111111111111111111')
     expect(terminalCloseButton).not.toBeNull()
 
-    act(() => {
+    await flushTestUpdates(() => {
       terminalCloseButton?.click()
     })
     await flush()
@@ -259,7 +259,7 @@ describe('GitWorkspacePaneToolbar presentation', () => {
     const historyCloseButton = closeButtonFor(c, 'workspace-pane:history')
     expect(historyCloseButton).not.toBeNull()
 
-    act(() => {
+    await flushTestUpdates(() => {
       historyCloseButton?.click()
     })
     await flush()
@@ -267,7 +267,7 @@ describe('GitWorkspacePaneToolbar presentation', () => {
     expect(openTabsFor('feature/worktree')).toEqual(['status'])
   })
 
-  test('compact workspace tab popover merges status and terminal tabs', () => {
+  test('compact workspace tab popover merges status and terminal tabs', async () => {
     toolbarResponsiveMocks.compactUi = true
     const { container: c } = renderToolbar({
       terminalCount: 1,
@@ -281,7 +281,7 @@ describe('GitWorkspacePaneToolbar presentation', () => {
     const trigger = c.querySelector<HTMLButtonElement>('button[aria-label="workspace-pane-tabs.tabs"]')
     if (!trigger) throw new Error('missing workspace tab popover trigger')
 
-    openPopover(trigger)
+    await openPopover(trigger)
 
     const list = document.body.querySelector('[role="list"]')
     expect(list?.textContent).toContain('tab.status')
@@ -289,7 +289,7 @@ describe('GitWorkspacePaneToolbar presentation', () => {
     expect(document.body.textContent).toContain('terminal.new')
   })
 
-  test('puts compact back at the start of the workspace tab row', () => {
+  test('puts compact back at the start of the workspace tab row', async () => {
     toolbarResponsiveMocks.compactUi = true
     const { container: c } = renderToolbar({
       terminalCount: 1,
@@ -314,7 +314,7 @@ describe('GitWorkspacePaneToolbar presentation', () => {
     const tabStripHost = back?.nextElementSibling
     expect(tabStripHost?.querySelector('[role="tablist"]')).toBe(tablist)
 
-    act(() => {
+    await flushTestUpdates(() => {
       back?.click()
     })
   })

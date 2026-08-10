@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act } from '@testing-library/react'
+import { flushTestUpdates } from '#/test-utils/render.tsx'
 import { userEvent } from '@testing-library/user-event'
 import { describe, expect, test, vi } from 'vitest'
 import { WorkspacePaneTabStrip } from '#/web/components/workspace-pane/WorkspacePaneTabStrip.tsx'
@@ -48,7 +48,7 @@ describe('WorkspacePaneTabStrip presentation and interaction', () => {
         toJSON: () => ({}),
       }) as DOMRect
 
-    act(() => {
+    await flushTestUpdates(() => {
       tab.dispatchEvent(new MouseEvent('pointerover', { bubbles: true }))
     })
     await flushTimers()
@@ -59,7 +59,7 @@ describe('WorkspacePaneTabStrip presentation and interaction', () => {
     expect(tooltip?.textContent).not.toContain('~/Developer/goblin')
   })
 
-  test('blocks tab switching and closing while terminal creation is pending', () => {
+  test('blocks tab switching and closing while terminal creation is pending', async () => {
     const onSelect = vi.fn()
     const onClose = vi.fn()
     render(
@@ -82,19 +82,24 @@ describe('WorkspacePaneTabStrip presentation and interaction', () => {
     )
 
     const inactiveTab = document.body.querySelector<HTMLButtonElement>('#workspace-workspace-pane-tab-1')
-    const activeClose = document.body.querySelector<HTMLButtonElement>('button[aria-label="close term-1"]')
-    const inactiveClose = document.body.querySelector<HTMLButtonElement>('button[aria-label="close term-2"]')
+    const activeClose = document.body.querySelector<HTMLElement>(
+      '[data-toolbar-tab-close-action][title="close term-1"]',
+    )
+    const inactiveClose = document.body.querySelector<HTMLElement>(
+      '[data-toolbar-tab-close-action][title="close term-2"]',
+    )
     expect(inactiveTab).not.toBeNull()
     expect(inactiveTab?.disabled).toBe(true)
     expect(activeClose).not.toBeNull()
-    expect(activeClose?.disabled).toBe(true)
+    expect(activeClose?.dataset.disabled).toBe('true')
     expect(activeClose?.className).toContain('opacity-100')
+    expect(activeClose?.className).toContain('ml-auto')
     expect(inactiveClose).not.toBeNull()
-    expect(inactiveClose?.disabled).toBe(true)
+    expect(inactiveClose?.dataset.disabled).toBe('true')
     expect(inactiveClose?.className).toContain('opacity-0')
     expect(inactiveClose?.className).not.toContain('group-hover:opacity-100')
 
-    act(() => {
+    await flushTestUpdates(() => {
       inactiveTab?.click()
       activeClose?.click()
       inactiveClose?.click()
@@ -122,11 +127,13 @@ describe('WorkspacePaneTabStrip presentation and interaction', () => {
     )
 
     const pendingTab = document.body.querySelector('[data-workspace-pane-pending-tab="terminal"]')
-    expect(pendingTab?.querySelector('[data-toolbar-tab-close-placeholder]')).not.toBeNull()
+    const closePlaceholder = pendingTab?.querySelector<HTMLElement>('[data-toolbar-tab-close-placeholder]')
+    expect(closePlaceholder).not.toBeNull()
+    expect(closePlaceholder?.className).toContain('ml-auto')
     expect(pendingTab?.querySelector('button[aria-label^="close "]')).toBeNull()
   })
 
-  test('keeps all terminal tabs visible in a horizontal scroll area when not in compact mode', () => {
+  test('keeps all terminal tabs visible in a horizontal scroll area when not in compact mode', async () => {
     render(
       <TestWorkspacePaneTabStrip
         terminalFilesystemTargetKey="/repo\0/repo/worktree"
@@ -157,18 +164,22 @@ describe('WorkspacePaneTabStrip presentation and interaction', () => {
       ),
     ).toBe(true)
     expect(document.body.querySelectorAll('[role="tab"]').length).toBe(3)
-    const inactiveCloseButton = document.body.querySelector<HTMLButtonElement>('button[aria-label="close term-2"]')
+    const inactiveCloseButton = document.body.querySelector<HTMLElement>(
+      '[data-toolbar-tab-close-action][title="close term-2"]',
+    )
     expect(inactiveCloseButton?.className).toContain('shrink-0')
     expect(inactiveCloseButton?.className).toContain('before:-inset-x-1.5')
     expect(inactiveCloseButton?.className).toContain('before:-inset-y-1')
     expect(inactiveCloseButton?.className).toContain('pointer-events-none')
     expect(inactiveCloseButton?.className).toContain('group-hover:pointer-events-auto')
+    expect(tablist?.querySelectorAll('button:not([role="tab"])')).toHaveLength(0)
     const firstTab = document.body.querySelector('#workspace-workspace-pane-tab')
+    expect(firstTab?.getAttribute('aria-keyshortcuts')).toBe('Delete')
     expect(firstTab?.getAttribute('aria-posinset')).toBe('1')
     expect(firstTab?.getAttribute('aria-setsize')).toBe('3')
   })
 
-  test('uses the last tab separator for the new terminal boundary while hovering new terminal', () => {
+  test('uses the last tab separator for the new terminal boundary while hovering new terminal', async () => {
     render(
       <TestWorkspacePaneTabStrip
         terminalFilesystemTargetKey="/repo\0/repo/worktree"
@@ -195,7 +206,7 @@ describe('WorkspacePaneTabStrip presentation and interaction', () => {
 
     expect(terminalTwo.querySelector(':scope > [data-slot="separator"][data-orientation="vertical"]')).not.toBeNull()
 
-    act(() => {
+    await flushTestUpdates(() => {
       newButton.dispatchEvent(new MouseEvent('pointerover', { bubbles: true }))
     })
 

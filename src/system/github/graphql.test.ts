@@ -15,12 +15,12 @@ vi.mock('#/system/github-cli.ts', () => ({
 
 import {
   formatGraphqlError,
-  GITHUB_API_CONCURRENCY,
   GITHUB_API_TIMEOUT_MS,
   graphqlRequestResult,
   parseGitHubRemoteUrl,
   type GraphqlRequestError,
 } from '#/system/github/graphql.ts'
+import { GITHUB_API_CONCURRENCY } from '#/system/github/queue.ts'
 
 const repo = { host: 'github.com', owner: 'acme', name: 'repo' }
 

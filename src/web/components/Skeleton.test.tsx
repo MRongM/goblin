@@ -4,15 +4,20 @@ import { beforeEach, describe, expect, test, vi } from 'vitest'
 import { renderInJsdom } from '#/test-utils/render.tsx'
 import { WorkspaceLayoutSkeleton } from '#/web/components/Skeleton.tsx'
 import { STATUS_ROW_LAYOUT_CLASS } from '#/web/components/workspace-pane/status-ui.tsx'
+import type { VNodeChild } from 'vue'
 
 const responsiveMocks = vi.hoisted(() => ({ compact: false }))
 
 vi.mock('#/web/hooks/useResponsiveUiMode.tsx', () => ({
-  useIsCompactUi: () => responsiveMocks.compact,
+  useIsCompactUi: () => ({
+    get value() {
+      return responsiveMocks.compact
+    },
+  }),
 }))
 
 vi.mock('#/web/components/SplitPane.tsx', () => ({
-  SplitPane: ({ before, after }: { before: React.ReactNode; after: React.ReactNode }) => (
+  SplitPane: ({ before, after }: { before: VNodeChild; after: VNodeChild }) => (
     <div data-testid="mock-split-pane">
       {before}
       {after}

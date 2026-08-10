@@ -6,8 +6,8 @@ import { ClientRealtimeRequestError } from '#/web/realtime/client-realtime-reque
 
 const mocks = vi.hoisted(() => ({ warning: vi.fn() }))
 
-vi.mock('sonner', () => ({ toast: { warning: mocks.warning } }))
-vi.mock('i18next', () => ({ t: (key: string) => key }))
+vi.mock('vue-sonner', () => ({ toast: { warning: mocks.warning } }))
+vi.mock('#/web/stores/i18n-vue.ts', () => ({ translate: (key: string) => key }))
 
 describe('terminal write failure feedback', () => {
   beforeEach(() => {

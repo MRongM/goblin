@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import type { UserSettings } from '#/shared/api-types.ts'
+import type { UserSettings } from '#/shared/settings.ts'
 import { defaultServerWorkspaceState, defaultUserSettings } from '#/shared/settings-defaults.ts'
 import { currentSettingsData, type UserSettingsData } from '#/server/modules/user-settings-codec.ts'
 import {

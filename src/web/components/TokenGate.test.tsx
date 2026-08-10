@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
-import { act, screen, waitFor } from '@testing-library/react'
+import { screen, waitFor } from '@testing-library/vue'
+import { flushTestUpdates } from '#/test-utils/render.tsx'
 import { userEvent } from '@testing-library/user-event'
 import { beforeEach, describe, expect, test, vi } from 'vitest'
 import { TokenGate } from '#/web/components/TokenGate.tsx'
@@ -20,10 +21,6 @@ vi.mock('#/web/auth/AuthProvider.tsx', () => ({
 
 vi.mock('#/web/lib/server-fetch.ts', () => ({
   postServerJson: vi.fn(),
-}))
-
-vi.mock('#/web/stores/i18n.ts', () => ({
-  useT: () => (key: string) => key,
 }))
 
 beforeEach(() => {
@@ -91,7 +88,7 @@ describe('TokenGate', () => {
     })
     expect(screen.queryByText('bad token')).toBeNull()
 
-    await act(async () => {
+    await flushTestUpdates(async () => {
       retry.resolve({ ok: true })
       await retry.promise
     })

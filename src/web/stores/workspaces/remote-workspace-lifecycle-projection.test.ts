@@ -5,7 +5,7 @@ import {
   acceptRemoteWorkspaceLifecycleProjection,
   acceptRemoteWorkspaceLifecycleSnapshot,
 } from '#/web/stores/workspaces/remote-workspace-lifecycle-projection.ts'
-import { useWorkspacesStore } from '#/web/stores/workspaces/store.ts'
+import { workspacesStore } from '#/web/stores/workspaces/store.ts'
 import { workspaceIdForTest } from '#/test-utils/workspace-id.ts'
 
 const repoRoot = workspaceIdForTest('goblin+ssh://example/repo')
@@ -21,7 +21,7 @@ const target = normalizeRemoteTarget({
 describe('remote lifecycle projection acceptance', () => {
   beforeEach(() => {
     const repo = emptyWorkspace(repoRoot, workspaceRuntimeId)
-    useWorkspacesStore.setState({ workspaces: { [repoRoot]: repo }, workspaceOrder: [repoRoot] })
+    workspacesStore.setState({ workspaces: { [repoRoot]: repo }, workspaceOrder: [repoRoot] })
   })
 
   test('accepts connecting then terminal within one server attempt', () => {
@@ -44,8 +44,8 @@ describe('remote lifecycle projection acceptance', () => {
     })
   })
 
-  test('rejects a projection for a replaced runtime generation', () => {
-    useWorkspacesStore.setState((state) => ({
+  test('rejects a projection for a replaced runtime generation', async () => {
+    workspacesStore.setState((state) => ({
       workspaces: {
         ...state.workspaces,
         [repoRoot]: { ...state.workspaces[repoRoot]!, workspaceRuntimeId: 'repo-runtime-test-2' },
@@ -54,8 +54,8 @@ describe('remote lifecycle projection acceptance', () => {
     expect(accept({ kind: 'ready', attemptId: 1, target })).toBe(false)
   })
 
-  test('applies only runtime entries represented by this window', () => {
-    acceptRemoteWorkspaceLifecycleSnapshot(useWorkspacesStore.setState, useWorkspacesStore.getState, {
+  test('applies only runtime entries represented by this window', async () => {
+    acceptRemoteWorkspaceLifecycleSnapshot(workspacesStore.setState, workspacesStore.getState, {
       runtimes: [
         {
           workspaceId: repoRoot,
@@ -74,14 +74,14 @@ describe('remote lifecycle projection acceptance', () => {
     expect(remoteAdmission()).toMatchObject({
       lifecycle: { kind: 'ready', target },
     })
-    expect(useWorkspacesStore.getState().workspaces['goblin+ssh://other/repo']).toBeUndefined()
+    expect(workspacesStore.getState().workspaces['goblin+ssh://other/repo']).toBeUndefined()
   })
 })
 
 function accept(
   remoteLifecycle: NonNullable<Parameters<typeof acceptRemoteWorkspaceLifecycleProjection>[2]['remoteLifecycle']>,
 ) {
-  return acceptRemoteWorkspaceLifecycleProjection(useWorkspacesStore.setState, useWorkspacesStore.getState, {
+  return acceptRemoteWorkspaceLifecycleProjection(workspacesStore.setState, workspacesStore.getState, {
     workspaceId: repoRoot,
     workspaceRuntimeId,
     remoteLifecycle,
@@ -89,7 +89,7 @@ function accept(
 }
 
 function remoteAdmission() {
-  const admission = useWorkspacesStore.getState().workspaces[repoRoot]?.admission
+  const admission = workspacesStore.getState().workspaces[repoRoot]?.admission
   if (admission?.kind !== 'remote') throw new Error('expected remote workspace admission')
   return admission
 }

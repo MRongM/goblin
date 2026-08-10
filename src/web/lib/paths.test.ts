@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest'
-import { defaultWorktreePath, joinPath, parentDir, tildifyPath, untildifyPath } from '#/web/lib/paths.ts'
+import { tildifyPath, untildifyPath } from '#/shared/paths.ts'
+import { defaultWorktreePath, joinPath, parentDir } from '#/web/lib/paths.ts'
 
 describe('tildifyPath', () => {
   test('shortens paths inside home', () => {

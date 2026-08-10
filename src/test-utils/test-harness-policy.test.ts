@@ -28,9 +28,8 @@ const TEST_UTILITY_GLOBS = [
 ]
 
 const repositoryPolicyLabels = [
-  'hand-rolled React root',
-  'act imported directly from React',
-  'manual React act-environment mutation',
+  'hand-rolled Vue app',
+  'direct RTL render',
   'direct RTL renderHook',
   'inline WebSocket mock',
   'test-local fetch replacement',
@@ -96,35 +95,32 @@ describe('test harness policy', () => {
     expect(violations).toEqual([])
   })
 
-  test('ignores comments, strings, shadowed imports, and unrelated bindings', () => {
+  test('ignores comments, strings, shadowed imports, and unrelated bindings', async () => {
     const source = `
-      // createRoot(); vi.stubGlobal('fetch'); class MockWebSocket {}
-      const documentation = "new KeyboardEvent('keydown'); IS_REACT_ACT_ENVIRONMENT"
+      // createApp(); vi.stubGlobal('fetch'); class MockWebSocket {}
+      const documentation = "new KeyboardEvent('keydown')"
       import { vi } from 'vitest'
-      import { createRoot } from 'react-dom/client'
-      function probe(vi, createRoot, KeyboardEvent, Promise, Object, window, global, globalThis) {
+      import { createApp } from 'vue'
+      function probe(vi, createApp, KeyboardEvent, Promise, Object, window, global, globalThis) {
         vi.stubGlobal('fetch')
         vi.useFakeTimers()
-        createRoot()
+        createApp()
         Object.defineProperty(window, 'localStorage', {})
         global.WebSocket = class TestSocket {}
         globalThis.fetch = fetchMock
         window.localStorage = storage
       }
-      const config = { IS_REACT_ACT_ENVIRONMENT: false }
-      config.IS_REACT_ACT_ENVIRONMENT = true
-      let IS_REACT_ACT_ENVIRONMENT = false
-      IS_REACT_ACT_ENVIRONMENT = true
     `
 
     expect(analyzeSource(source, 'fixture.test.ts')).toEqual(new Set())
   })
 
   test.each([
-    ['hand-rolled React root', "import { createRoot as mount } from 'react-dom/client'; mount(node)"],
-    ['act imported directly from React', "import { act as reactAct } from 'react'"],
-    ['direct RTL renderHook', "import { renderHook as mountHook } from '@testing-library/react'"],
-    ['direct RTL renderHook', "import * as rtl from '@testing-library/react'; rtl.renderHook(() => null)"],
+    ['hand-rolled Vue app', "import { createApp as mount } from 'vue'; mount({})"],
+    ['direct RTL render', "import { render as mount } from '@testing-library/vue'; mount({})"],
+    ['direct RTL render', "import * as rtl from '@testing-library/vue'; rtl.render({})"],
+    ['direct RTL renderHook', "import { renderHook as mountHook } from '@testing-library/vue'"],
+    ['direct RTL renderHook', "import * as rtl from '@testing-library/vue'; rtl.renderHook(() => null)"],
     ['inline WebSocket mock', 'class FakeWebSocket {}'],
     ['test-local fetch replacement', "import { vi } from 'vitest'; vi.stubGlobal('fetch', fetchMock)"],
     ['test-local fetch replacement', 'globalThis.fetch = fetchMock'],
@@ -143,20 +139,6 @@ describe('test harness policy', () => {
     expect(analyzeSource(source, 'fixture.test.tsx')).toContain(label)
   })
 
-  test.each([
-    'IS_REACT_ACT_ENVIRONMENT = true',
-    'globalThis.IS_REACT_ACT_ENVIRONMENT = true',
-    ';(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true',
-    `
-      const reactActEnvironment = globalThis as typeof globalThis & {
-        IS_REACT_ACT_ENVIRONMENT?: boolean
-      }
-      reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true
-    `,
-  ])('detects act-environment mutation through global syntax and aliases', (source) => {
-    expect(analyzeSource(source, 'fixture.test.ts')).toContain('manual React act-environment mutation')
-  })
-
   test('detects xterm mocks through Vitest bindings without matching text', () => {
     expect(hasXtermMock("import { vi as testVi } from 'vitest'; testVi.mock('@xterm/xterm', () => ({}))", 'x.ts')).toBe(
       true,
@@ -171,7 +153,8 @@ describe('test harness policy', () => {
 })
 
 function isCanonicalPolicyOwner(file: string, label: (typeof repositoryPolicyLabels)[number]): boolean {
-  if (label === 'hand-rolled React root') return !isTestFile(file)
+  if (label === 'hand-rolled Vue app') return !isTestFile(file)
+  if (label === 'direct RTL render') return file === CANONICAL_RENDER_FILE
   if (label === 'direct RTL renderHook') return file === CANONICAL_RENDER_FILE
   if (label === 'inline WebSocket mock') return file === CANONICAL_WEBSOCKET_MOCK_FILE
   if (label === 'test-local fetch replacement') return CANONICAL_FETCH_MOCK_FILES.has(file)
@@ -200,10 +183,10 @@ function analyzeSource(source: string, file: string): ReadonlySet<PolicyLabel> {
 
   traverse(ast, {
     ImportSpecifier(path) {
-      if (importSource(path) === 'react' && importedName(path) === 'act') {
-        violations.add('act imported directly from React')
+      if (importSource(path) === '@testing-library/vue' && importedName(path) === 'render') {
+        violations.add('direct RTL render')
       }
-      if (importSource(path) === '@testing-library/react' && importedName(path) === 'renderHook') {
+      if (importSource(path) === '@testing-library/vue' && importedName(path) === 'renderHook') {
         violations.add('direct RTL renderHook')
       }
     },
@@ -213,7 +196,6 @@ function analyzeSource(source: string, file: string): ReadonlySet<PolicyLabel> {
       }
     },
     AssignmentExpression(path) {
-      if (isActEnvironmentTarget(path.get('left'))) violations.add('manual React act-environment mutation')
       if (isGlobalWebSocketTarget(path.get('left'))) violations.add('inline WebSocket mock')
       if (isGlobalNamedTarget(path.get('left'), 'fetch')) violations.add('test-local fetch replacement')
       if (
@@ -223,14 +205,10 @@ function analyzeSource(source: string, file: string): ReadonlySet<PolicyLabel> {
         violations.add('test-local Storage replacement')
       }
     },
-    UnaryExpression(path) {
-      if (path.node.operator === 'delete' && isActEnvironmentTarget(path.get('argument'))) {
-        violations.add('manual React act-environment mutation')
-      }
-    },
     CallExpression(path) {
       const callee = path.get('callee')
-      if (isImportedCreateRoot(callee)) violations.add('hand-rolled React root')
+      if (isImportedCreateApp(callee)) violations.add('hand-rolled Vue app')
+      if (isTestingLibraryRender(callee)) violations.add('direct RTL render')
       if (isTestingLibraryRenderHook(callee)) violations.add('direct RTL renderHook')
       if (isVitestViMember(callee, 'useFakeTimers')) {
         violations.add('direct fake-timer configuration')
@@ -240,9 +218,6 @@ function analyzeSource(source: string, file: string): ReadonlySet<PolicyLabel> {
         if (globalName === 'fetch') violations.add('test-local fetch replacement')
         if (isStorageName(globalName)) violations.add('test-local Storage replacement')
         if (globalName === 'WebSocket') violations.add('inline WebSocket mock')
-      }
-      if (isDefinePropertyOnGlobal(path, 'IS_REACT_ACT_ENVIRONMENT')) {
-        violations.add('manual React act-environment mutation')
       }
       if (isDefinePropertyOnGlobal(path, 'localStorage') || isDefinePropertyOnGlobal(path, 'sessionStorage')) {
         violations.add('test-local Storage replacement')
@@ -276,16 +251,22 @@ function isImportedNamespace(path: NodePath, source: string): boolean {
   return binding?.path.isImportNamespaceSpecifier() === true && importSource(binding.path) === source
 }
 
-function isImportedCreateRoot(callee: NodePath): boolean {
-  if (isImportedIdentifier(callee, 'react-dom/client', 'createRoot')) return true
-  if (!callee.isMemberExpression() || memberPropertyName(callee) !== 'createRoot') return false
-  return isImportedNamespace(callee.get('object'), 'react-dom/client')
+function isImportedCreateApp(callee: NodePath): boolean {
+  if (isImportedIdentifier(callee, 'vue', 'createApp')) return true
+  if (!callee.isMemberExpression() || memberPropertyName(callee) !== 'createApp') return false
+  return isImportedNamespace(callee.get('object'), 'vue')
 }
 
 function isTestingLibraryRenderHook(callee: NodePath): boolean {
-  if (isImportedIdentifier(callee, '@testing-library/react', 'renderHook')) return true
+  if (isImportedIdentifier(callee, '@testing-library/vue', 'renderHook')) return true
   if (!callee.isMemberExpression() || memberPropertyName(callee) !== 'renderHook') return false
-  return isImportedNamespace(callee.get('object'), '@testing-library/react')
+  return isImportedNamespace(callee.get('object'), '@testing-library/vue')
+}
+
+function isTestingLibraryRender(callee: NodePath): boolean {
+  if (isImportedIdentifier(callee, '@testing-library/vue', 'render')) return true
+  if (!callee.isMemberExpression() || memberPropertyName(callee) !== 'render') return false
+  return isImportedNamespace(callee.get('object'), '@testing-library/vue')
 }
 
 function isVitestViMember(callee: NodePath, property: string): boolean {
@@ -366,13 +347,6 @@ function isGlobalObject(path: NodePath, seen = new Set<Binding>()): boolean {
 
 function isGlobalObjectName(name: string): boolean {
   return name === 'globalThis' || name === 'global' || name === 'window'
-}
-
-function isActEnvironmentTarget(path: NodePath): boolean {
-  const target = unwrapExpression(path)
-  if (isUnboundIdentifier(target, 'IS_REACT_ACT_ENVIRONMENT')) return true
-  if (!target.isMemberExpression() || memberPropertyName(target) !== 'IS_REACT_ACT_ENVIRONMENT') return false
-  return isGlobalObject(target.get('object'))
 }
 
 function isUnboundIdentifier(path: NodePath, name: string): boolean {

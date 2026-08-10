@@ -4,6 +4,17 @@ import { describe, expect, test } from 'vitest'
 import { checkArchitectureSources } from '#scripts/check-boundaries.ts'
 
 describe('architecture boundary rules', () => {
+  test('requires JSX instead of the Vue h render helper', () => {
+    expect(
+      checkArchitectureSources([
+        {
+          relativeFilePath: '/src/web/components/Example.tsx',
+          source: "import { h as createVNode } from 'vue'\ncreateVNode('div')\n",
+        },
+      ]),
+    ).toEqual([expect.stringContaining('/src/web/components/Example.tsx: Vue h() is forbidden')])
+  })
+
   test('rejects namespace re-exports from disallowed modules', () => {
     expect(
       checkArchitectureSources([

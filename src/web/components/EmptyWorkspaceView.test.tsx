@@ -9,8 +9,16 @@ const responsiveMocks = vi.hoisted(() => ({
 }))
 
 vi.mock('#/web/hooks/useResponsiveUiMode.tsx', () => ({
-  useResponsiveUiMode: () => responsiveMocks.mode,
-  useIsCompactUi: () => responsiveMocks.mode === 'compact',
+  useResponsiveUiMode: () => ({
+    get value() {
+      return responsiveMocks.mode
+    },
+  }),
+  useIsCompactUi: () => ({
+    get value() {
+      return responsiveMocks.mode === 'compact'
+    },
+  }),
 }))
 
 vi.mock('#/web/components/workspace-layout/WorkspaceLayoutShell.tsx', () => ({

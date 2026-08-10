@@ -1,81 +1,110 @@
-import { Slot } from 'radix-ui'
-import type { ComponentProps } from 'react'
+import { Primitive } from 'reka-ui'
+import { defineComponent } from 'vue'
+import type { HTMLAttributes } from 'vue'
 import { cn } from '#/web/lib/cn.ts'
 
-// Electron folds app-region rectangles in DOM workspaceOrder: drag rectangles are
-// unioned, then later no-drag rectangles are subtracted. Render broad drag
-// surfaces before interactive controls that must cut through them.
-
-interface TitleBarDragRegionProps extends ComponentProps<'div'> {
+interface TitleBarDragRegionProps {
   reserveWindowControls?: boolean
 }
 
-type NativeDragPlateProps = Omit<TitleBarDragRegionProps, 'reserveWindowControls'>
+export const TitleBarDragRegion = defineComponent<TitleBarDragRegionProps>({
+  name: 'TitleBarDragRegion',
+  props: ['reserveWindowControls'],
+  inheritAttrs: false,
 
-export function TitleBarDragRegion({
-  reserveWindowControls = true,
-  className,
-  ref,
-  ...props
-}: TitleBarDragRegionProps) {
-  return (
-    <div
-      ref={ref}
-      {...props}
-      data-title-bar-chrome-region="drag"
-      className={cn(reserveWindowControls ? 'title-bar-chrome' : 'app-drag-region', className)}
-    />
-  )
-}
+  setup(props, { attrs, slots }) {
+    return () => {
+      const { class: classValue, ...elementAttrs } = attrs as HTMLAttributes
+      return (
+        <div
+          {...elementAttrs}
+          data-title-bar-chrome-region="drag"
+          class={cn(props.reserveWindowControls === false ? 'app-drag-region' : 'title-bar-chrome', classValue)}
+        >
+          {slots.default?.()}
+        </div>
+      )
+    }
+  },
+})
 
-export function NativeDragPlate({ className, ref, ...props }: NativeDragPlateProps) {
-  // Electron app-region hit-testing is native region composition, not normal
-  // DOM hit-testing. Use this for final transparent drag surfaces that must sit
-  // above layered no-drag UI such as tab strips, floating panels, or overlays.
-  return (
-    <TitleBarDragRegion
-      ref={ref}
-      aria-hidden
-      {...props}
-      reserveWindowControls={false}
-      className={cn('pointer-events-auto absolute left-0 top-0 bg-transparent', className)}
-    />
-  )
-}
+export const NativeDragPlate = defineComponent<HTMLAttributes>({
+  name: 'NativeDragPlate',
+  inheritAttrs: false,
+  setup(_props, { attrs }) {
+    return () => {
+      const { class: classValue, ...elementAttrs } = attrs as HTMLAttributes
+      return (
+        <TitleBarDragRegion
+          {...elementAttrs}
+          aria-hidden
+          reserveWindowControls={false}
+          class={cn('pointer-events-auto absolute left-0 top-0 bg-transparent', classValue)}
+        />
+      )
+    }
+  },
+})
 
-interface TitleBarInteractiveRegionProps extends ComponentProps<'div'> {
+interface TitleBarInteractiveRegionProps {
   asChild?: boolean
 }
 
-export function TitleBarInteractiveRegion({ asChild = false, ref, ...props }: TitleBarInteractiveRegionProps) {
-  const Comp = asChild ? Slot.Root : 'div'
-  return <Comp ref={ref} {...props} data-interactive data-title-bar-chrome-region="interactive" />
-}
+export const TitleBarInteractiveRegion = defineComponent<TitleBarInteractiveRegionProps>({
+  name: 'TitleBarInteractiveRegion',
+  props: ['asChild'],
+  inheritAttrs: false,
 
-export function TitleBarScrollableInteractiveRegion({
-  asChild = false,
-  className,
-  ref,
-  ...props
-}: TitleBarInteractiveRegionProps) {
-  const Comp = asChild ? Slot.Root : 'div'
-  return (
-    <Comp
-      ref={ref}
-      {...props}
-      data-interactive
-      data-title-bar-chrome-region="interactive"
-      data-title-bar-scroll-region=""
-      className={cn('title-bar-scroll-region', className)}
-    />
-  )
-}
+  setup(props, { attrs, slots }) {
+    return () => (
+      <Primitive
+        {...attrs}
+        as="div"
+        asChild={props.asChild ?? false}
+        data-interactive
+        data-title-bar-chrome-region="interactive"
+      >
+        {slots.default?.()}
+      </Primitive>
+    )
+  },
+})
 
-interface TitleBarNoDragRegionProps extends ComponentProps<'div'> {
-  asChild?: boolean
-}
+export const TitleBarScrollableInteractiveRegion = defineComponent<TitleBarInteractiveRegionProps>({
+  name: 'TitleBarScrollableInteractiveRegion',
+  props: ['asChild'],
+  inheritAttrs: false,
 
-export function TitleBarNoDragRegion({ asChild = false, ref, ...props }: TitleBarNoDragRegionProps) {
-  const Comp = asChild ? Slot.Root : 'div'
-  return <Comp ref={ref} {...props} data-title-bar-chrome-region="no-drag" />
-}
+  setup(props, { attrs, slots }) {
+    return () => {
+      const { class: classValue, ...elementAttrs } = attrs as HTMLAttributes
+      return (
+        <Primitive
+          {...elementAttrs}
+          as="div"
+          asChild={props.asChild ?? false}
+          data-interactive
+          data-title-bar-chrome-region="interactive"
+          data-title-bar-scroll-region=""
+          class={cn('title-bar-scroll-region', classValue)}
+        >
+          {slots.default?.()}
+        </Primitive>
+      )
+    }
+  },
+})
+
+export const TitleBarNoDragRegion = defineComponent<TitleBarInteractiveRegionProps>({
+  name: 'TitleBarNoDragRegion',
+  props: ['asChild'],
+  inheritAttrs: false,
+
+  setup(props, { attrs, slots }) {
+    return () => (
+      <Primitive {...attrs} as="div" asChild={props.asChild ?? false} data-title-bar-chrome-region="no-drag">
+        {slots.default?.()}
+      </Primitive>
+    )
+  },
+})

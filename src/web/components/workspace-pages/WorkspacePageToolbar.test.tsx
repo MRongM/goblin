@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { describe, expect, test, vi } from 'vitest'
-import { LayoutDashboard } from 'lucide-react'
+import { LayoutDashboard } from '@lucide/vue'
 import { renderInJsdom } from '#/test-utils/render.tsx'
 import { WorkspacePageToolbar } from '#/web/components/workspace-pages/WorkspacePageToolbar.tsx'
 

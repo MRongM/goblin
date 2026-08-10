@@ -26,7 +26,7 @@ import {
   recordWorkspacePaneTabOpener,
   workspacePaneTabOpener,
 } from '#/web/workspace-pane/workspace-pane-tab-opener.ts'
-import { useWorkspacesStore } from '#/web/stores/workspaces/store.ts'
+import { workspacesStore } from '#/web/stores/workspaces/store.ts'
 import { workspacePaneTabsTargetFromRuntime } from '#/shared/workspace-pane-tabs-target.ts'
 import {
   beginAppNavigation,
@@ -66,16 +66,14 @@ describe('workspace pane runtime tab command actions', () => {
     document.body.replaceChildren()
   })
 
-  test('preserves the ordinary workspace root opener while pane tabs are still pending', () => {
+  test('preserves the ordinary workspace root opener while pane tabs are still pending', async () => {
     const repo = seedRepoWithReadModelForTest({
       id: terminalCoordinates.workspaceId,
       workspaceRuntimeId: terminalCoordinates.workspaceRuntimeId,
       branches: [],
       currentBranchName: null,
     })
-    useWorkspacesStore
-      .getState()
-      .setWorkspacePaneTabForTarget({ kind: 'workspace-root', workspaceId: repo.id }, 'files')
+    workspacesStore.getState().setWorkspacePaneTabForTarget({ kind: 'workspace-root', workspaceId: repo.id }, 'files')
 
     expect(
       captureWorkspacePaneActiveTabIdentity({ kind: 'workspace-root', workspaceId: repo.id }, repo.workspaceRuntimeId, {
