@@ -110,8 +110,8 @@ export const SplitPane = defineComponent<SplitPaneProps>({
 
       if (commit.animate) {
         // The transition marker is now committed. Resolve its initial style
-        // before asking Reka to change the flex layout, matching React's
-        // render-then-effect ordering without relying on microtask timing.
+        // before asking Reka to change the flex layout, preserving the required
+        // render-then-post-update ordering without relying on microtask timing.
         splitPaneRef.value?.getBoundingClientRect()
       }
       if (commit.kind === 'pane') applyLayout(commit.collapsed, commit.afterSize)

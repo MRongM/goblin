@@ -458,10 +458,36 @@ describe('BranchRow', () => {
 
     const rowText = container.textContent ?? ''
     const summaryTitle = container.querySelector('[title*="feature/a"]')?.getAttribute('title') ?? ''
+    const commitTime = container.querySelector('[title="2 小时前"]')
     expect(rowText).toContain('2 小时前')
     expect(rowText).not.toContain('Example Author')
     expect(summaryTitle).toContain('2 小时前')
     expect(summaryTitle).not.toContain('Example Author')
+    expect(commitTime?.className).toContain('text-muted-foreground/85')
+  })
+
+  test('uses selected secondary text for the relative commit time on the selected row', async () => {
+    useFakeTimers()
+    vi.setSystemTime(new Date('2026-06-05T12:00:00.000Z'))
+    const repo = branchRowRepo()
+    const branch = createRepoBranch('feature/a', {
+      lastCommitDate: '2026-06-05T10:00:00.000Z',
+    })
+
+    const { container } = renderInJsdom(
+      <ul>
+        <BranchRow
+          repo={repo}
+          branch={branch}
+          selected="feature/a"
+          onSelectBranch={vi.fn()}
+          onOpenBranchStatus={vi.fn()}
+          selectedRef={shallowRef<HTMLLIElement | null>(null)}
+        />
+      </ul>,
+    )
+
+    expect(container.querySelector('[title="2 小时前"]')?.className).toContain('text-selected-muted-foreground/90')
   })
 
   test('hides the actions wrapper by default and reveals it on row hover in non-compact mode', () => {

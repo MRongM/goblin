@@ -397,7 +397,7 @@ export const BranchStatus = defineComponent<Props>({
                 </span>
                 {commitMeta && (
                   <span
-                    class="shrink-0 whitespace-nowrap text-xs leading-tight text-muted-foreground"
+                    class="shrink-0 whitespace-nowrap text-xs leading-tight text-muted-foreground/85"
                     title={commitMeta}
                   >
                     {commitMeta}

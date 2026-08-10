@@ -659,6 +659,7 @@ describe('GitWorkspacePaneContent status-history', () => {
     expect(container.textContent).toContain('feature/no-worktree')
     expect(container.textContent).toContain('branch-status.worktree.none')
     expect(container.textContent).not.toContain('workspace-pane-tabs.empty')
+    expect(container.querySelector('[title^="Example Author · "]')?.className).toContain('text-muted-foreground/85')
   })
 
   test('renders branch history as a linear commit graph', async () => {

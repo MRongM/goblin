@@ -111,9 +111,9 @@ function useZenModeSidebarPanelTransition(
 ): Readonly<Ref<RevealPanelState>> {
   const panelState = ref<RevealPanelState>(open() ? 'open' : 'closed')
 
-  // React commits the controlled `open` value before its effect creates the
-  // CSS transition state. Preserve that boundary in Vue, then commit and
-  // resolve the `opening` styles before advancing to `open` on the next frame.
+  // Commit the controlled `open` value before creating the CSS transition
+  // state, then resolve the `opening` styles before advancing to `open` on the
+  // next frame.
   watch(
     open,
     (nextOpen, _previousOpen, onCleanup) => {

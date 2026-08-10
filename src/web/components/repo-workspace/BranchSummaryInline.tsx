@@ -184,7 +184,7 @@ export const BranchSummaryMeta = defineComponent<Pick<BranchSummaryInlineProps, 
             <span
               class={cn(
                 'min-w-0 truncate whitespace-nowrap text-[11px] leading-none',
-                selected ? 'text-selected-foreground' : 'text-muted-foreground',
+                selected ? 'text-selected-muted-foreground/90' : 'text-muted-foreground/85',
               )}
               title={commitMeta}
             >
