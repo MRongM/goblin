@@ -1,4 +1,4 @@
-import { ArrowRight, FolderTree, LayoutDashboard } from '@lucide/vue'
+import { FolderTree, LayoutDashboard } from '@lucide/vue'
 import { computed, defineComponent } from 'vue'
 import type { FunctionalComponent, VNodeChild } from 'vue'
 import { workspaceNameFromLocator } from '#/shared/workspace-display-location.ts'
@@ -323,7 +323,6 @@ const DirectoryDashboard: FunctionalComponent<DirectoryDashboardProps> = (props)
             </span>
             <span class="block truncate text-xs text-muted-foreground">{t('dashboard.directory.open-files')}</span>
           </span>
-          <ArrowRight size={15} class="shrink-0 text-muted-foreground" />
         </button>
       </DashboardSection>
     </>
