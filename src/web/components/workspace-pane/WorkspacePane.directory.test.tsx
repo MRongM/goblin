@@ -65,6 +65,12 @@ describe('WorkspacePane directory workspaces', () => {
       currentBranchName: null,
       workspaceProbe: directoryWorkspaceProbe(),
     })
+    setWorkspacePaneTabsForTargetQueryData({
+      kind: 'workspace-root',
+      workspaceId,
+      workspaceRuntimeId: repo.workspaceRuntimeId,
+      tabs: [workspacePaneStaticTabEntry('status'), workspacePaneStaticTabEntry('files')],
+    })
     terminalProjectionHydrationStore.getState().markProjectionReady(workspaceId, repo.workspaceRuntimeId)
     const commitWorkspaceRootTerminalSession = vi.fn(async () => true)
     const terminalCreate = Promise.withResolvers<string>()
@@ -184,7 +190,7 @@ describe('WorkspacePane directory workspaces', () => {
       </VueQueryClientScope>,
     )
 
-    expect(screen.getByText('tab.files')).toBeTruthy()
+    expect(screen.getByText('tab.status')).toBeTruthy()
     await flushTestUpdates(() => {
       workspacesStore.setState((state) => {
         const repo = state.workspaces[workspaceId]
@@ -209,7 +215,7 @@ describe('WorkspacePane directory workspaces', () => {
       })
     })
 
-    await waitFor(() => expect(screen.getByText('tab.files')).toBeTruthy())
+    await waitFor(() => expect(screen.getByText('tab.status')).toBeTruthy())
     expect(screen.queryByText('branches.empty')).toBeNull()
   })
 
@@ -388,13 +394,12 @@ describe('WorkspacePane directory workspaces', () => {
 
   test('renders directory overview data in the non-Git Status tab without a Git projection', async () => {
     const workspaceId = workspaceIdForTest('goblin+file:///tmp/plain-status-workspace')
-    seedRepoWithReadModelForTest({
+    const repo = seedRepoWithReadModelForTest({
       id: workspaceId,
       branches: [],
       currentBranchName: null,
       workspaceProbe: directoryWorkspaceProbe(),
     })
-    const repo = workspacesStore.getState().workspaces[workspaceId]!
     workspacesStore
       .getState()
       .setWorkspacePaneTabForTarget({ kind: 'workspace-root', workspaceId: workspaceId }, 'status')
@@ -484,11 +489,17 @@ describe('WorkspacePane directory workspaces', () => {
 
   test('uses the workspace-root route as presentation authority and persists its valid static tab', async () => {
     const workspaceId = workspaceIdForTest('goblin+file:///tmp/plain-routed-workspace')
-    seedRepoWithReadModelForTest({
+    const repo = seedRepoWithReadModelForTest({
       id: workspaceId,
       branches: [],
       currentBranchName: null,
       workspaceProbe: directoryWorkspaceProbe(),
+    })
+    setWorkspacePaneTabsForTargetQueryData({
+      kind: 'workspace-root',
+      workspaceId,
+      workspaceRuntimeId: repo.workspaceRuntimeId,
+      tabs: [workspacePaneStaticTabEntry('status'), workspacePaneStaticTabEntry('files')],
     })
     workspacesStore.getState().setWorkspacePaneTabForTarget({ kind: 'workspace-root', workspaceId }, 'status')
 
@@ -578,7 +589,7 @@ describe('WorkspacePane directory workspaces', () => {
       </VueQueryClientScope>,
     )
 
-    expect(screen.getByText('tab.files')).toBeTruthy()
+    expect(screen.getByText('tab.status')).toBeTruthy()
     expect(screen.queryByText('tab.terminal')).toBeNull()
   })
 })

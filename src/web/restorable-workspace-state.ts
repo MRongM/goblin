@@ -246,7 +246,7 @@ function preferredWorkspacePaneTabsForClientWorkspace(
       if (tab !== null && target.kind === 'branch' && workspacePaneTabRequiresWorktree(tab)) continue
       const targetTabs =
         workspacePaneTabsByTargetByWorkspace[id]?.[targetKey] ??
-        defaultWorkspacePaneTabs(target.kind === 'workspace-root' ? 'workspace-root' : 'git')
+        defaultWorkspacePaneTabs()
       if (
         tab !== null &&
         isWorkspacePaneStaticTabType(tab) &&

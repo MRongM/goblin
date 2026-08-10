@@ -289,7 +289,6 @@ describe('workspace pane tabs coordinator admission queues', () => {
               target: projection.target,
               tabs: [
                 workspacePaneStaticTabEntry('status'),
-                workspacePaneStaticTabEntry('files'),
                 workspacePaneRuntimeTabEntry('terminal', 'term-workspaceworkspace001'),
               ],
             },
@@ -393,7 +392,6 @@ describe('workspace pane tabs coordinator admission queues', () => {
               target: projection.target,
               tabs: [
                 workspacePaneStaticTabEntry('status'),
-                workspacePaneStaticTabEntry('files'),
                 workspacePaneRuntimeTabEntry('terminal', 'term-workspaceworkspace002'),
               ],
             },

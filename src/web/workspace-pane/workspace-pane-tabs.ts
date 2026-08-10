@@ -9,8 +9,8 @@ import {
   workspacePaneTabRequiresWorktree,
 } from '#/shared/workspace-pane.ts'
 
-export function defaultWorkspacePaneTabs(kind: 'git' | 'workspace-root' = 'git'): WorkspacePaneTabEntry[] {
-  return defaultWorkspacePaneTabEntries(kind)
+export function defaultWorkspacePaneTabs(): WorkspacePaneTabEntry[] {
+  return defaultWorkspacePaneTabEntries()
 }
 
 export function workspacePaneStaticTabsFromEntries(

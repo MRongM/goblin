@@ -103,7 +103,7 @@ export function workspacePaneTabsForTargetFromQueryData(
   if (!resolvedTarget) return []
   const entry = workspacePaneTabsEntryForTarget(data.entries, resolvedTarget)
   return [
-    ...(entry?.tabs ?? defaultWorkspacePaneTabs(resolvedTarget.kind === 'workspace-root' ? 'workspace-root' : 'git')),
+    ...(entry?.tabs ?? defaultWorkspacePaneTabs()),
   ]
 }
 
