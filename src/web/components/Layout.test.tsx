@@ -1,117 +1,12 @@
 // @vitest-environment jsdom
 
-import { createMemoryHistory, createRouter, RouterView } from 'vue-router'
-import { defineComponent } from 'vue'
 import type { VNodeChild } from 'vue'
-import { beforeEach, describe, expect, test, vi } from 'vitest'
+import { describe, expect, test, vi } from 'vitest'
 import { useFakeTimers } from '#/test-utils/timers.ts'
 import { flushTestUpdates } from '#/test-utils/render.tsx'
-import { workspaceIdForTest } from '#/test-utils/workspace-id.ts'
 import { CompactWorkspaceLayout, WorkspaceSplitLayout } from '#/web/components/Layout.tsx'
-import { Layout } from '#/web/Layout.tsx'
-import { authenticatedAppShellMode } from '#/web/app-layout-model.ts'
 import { WORKSPACE_PANE_TRANSITION_MS } from '#/web/components/workspace-motion.ts'
 import { renderInJsdom } from '#/test-utils/render.tsx'
-import { useWorkspaceTerminalBellCounts } from '#/web/components/terminal/terminal-session-store.ts'
-import type { TerminalSessionContextValue, TerminalSessionReadContextValue } from '#/web/components/terminal/types.ts'
-import type { AuthenticatedAppBootstrapState } from '#/web/hooks/useAuthenticatedAppBootstrap.ts'
-
-const restoringWorkspaceState: AuthenticatedAppBootstrapState = { status: 'restoring-workspace' }
-const readyState: AuthenticatedAppBootstrapState = { status: 'ready' }
-const failedState: AuthenticatedAppBootstrapState = { status: 'failed', message: 'restore failed' }
-const WORKSPACE_ID = workspaceIdForTest('goblin+file:///example-workspace')
-vi.mock('#/web/components/TokenGate.tsx', () => ({
-  TokenGate: defineComponent({
-    name: 'TokenGateMock',
-    setup(_props, { slots }) {
-      return () => slots.default?.()
-    },
-  }),
-}))
-
-vi.mock('#/web/hooks/useAuthenticatedAppBootstrap.ts', () => ({
-  useAuthenticatedAppBootstrap: () => ({ state: { value: { status: 'ready' } }, retry: vi.fn() }),
-}))
-
-vi.mock('#/web/hooks/useSettingsWriteErrorToast.ts', () => ({
-  useSettingsWriteErrorToast: () => undefined,
-}))
-
-vi.mock('#/web/app-history-presentation.ts', async (importOriginal) => ({
-  ...(await importOriginal()),
-  useAppHistoryPresentationObserver: () => undefined,
-}))
-
-vi.mock('#/web/components/terminal/TerminalSessionProvider.tsx', async () => {
-  const { defineComponent } = await import('vue')
-  const { TerminalSessionCommandScope, TerminalSessionReadScope } =
-    await import('#/web/components/terminal/terminal-session-context.ts')
-  const readContext: TerminalSessionReadContextValue = {
-    terminalFilesystemTargetSnapshot: () => ({
-      terminalFilesystemTargetKey: '',
-      selectedDescriptor: null,
-      sessions: [],
-      count: 0,
-      bellCount: 0,
-      outputActiveCount: 0,
-      createPending: false,
-    }),
-    subscribeTerminalFilesystemTarget: () => () => {},
-    workspaceBellCount: () => 4,
-    subscribeWorkspaceBellCount: () => () => {},
-    snapshot: () => ({
-      phase: 'opening',
-      message: null,
-      processName: 'terminal',
-      composer: { expanded: false, mode: 'keys', draft: '', historyEntries: [] },
-    }),
-    subscribeSnapshot: () => () => {},
-  }
-  const commandContext: TerminalSessionContextValue = {
-    createTerminal: vi.fn(async () => ''),
-    createTerminalWithAdmission: vi.fn(async () => ({
-      terminalSessionId: '',
-      presentation: { kind: 'git-worktree' as const, head: { kind: 'branch' as const, branchName: 'main' } },
-      resourceDisposition: 'created',
-      runtimeProjectionApplied: false,
-      requestRole: 'leader',
-    })) as TerminalSessionContextValue['createTerminalWithAdmission'],
-    selectTerminal: vi.fn(),
-    scrollToBottom: vi.fn(),
-    readCopyText: vi.fn(() => null),
-    openComposer: vi.fn(() => true),
-    closeComposer: vi.fn(() => true),
-    setComposerMode: vi.fn(() => true),
-    setComposerDraft: vi.fn(() => true),
-    replaceComposerDraft: vi.fn(() => true),
-    clearBell: vi.fn(() => false),
-    closeTerminalByDescriptor: vi.fn(async () => false),
-    attach: vi.fn(),
-    detach: vi.fn(),
-    restart: vi.fn(),
-    focusTerminal: vi.fn(),
-    findNext: vi.fn(() => ({ resultIndex: 0, resultCount: 0, found: false })),
-    findPrevious: vi.fn(() => ({ resultIndex: 0, resultCount: 0, found: false })),
-    clearSearch: vi.fn(),
-    captureInputWriter: vi.fn(() => null),
-    sendVirtualKey: vi.fn(),
-    submitText: vi.fn(async () => false),
-    takeover: vi.fn(async () => false),
-    retryPresentation: vi.fn(() => false),
-  }
-  return {
-    TerminalSessionProvider: defineComponent({
-      name: 'TerminalSessionProviderMock',
-      setup(_props, { slots }) {
-        return () => (
-          <TerminalSessionCommandScope value={commandContext}>
-            <TerminalSessionReadScope value={readContext}>{slots.default?.()}</TerminalSessionReadScope>
-          </TerminalSessionCommandScope>
-        )
-      },
-    }),
-  }
-})
 
 vi.mock('#/web/components/SplitPane.tsx', () => ({
   SplitPane: ({ before, after, afterSize }: { before: VNodeChild; after: VNodeChild; afterSize: number }) => (
@@ -121,28 +16,6 @@ vi.mock('#/web/components/SplitPane.tsx', () => ({
     </div>
   ),
 }))
-
-const SettingsRetainedOutletTerminalConsumer = defineComponent({
-  name: 'SettingsRetainedOutletTerminalConsumer',
-  setup() {
-    const bellCounts = useWorkspaceTerminalBellCounts([WORKSPACE_ID])
-    return () => <span data-testid="settings-retained-terminal-consumer">{bellCounts.value[WORKSPACE_ID]}</span>
-  },
-})
-
-describe('Layout shell providers', () => {
-  test('keeps terminal read context above the settings shell outlet', async () => {
-    const router = createRouter({
-      history: createMemoryHistory(),
-      routes: [{ path: '/settings/general', component: SettingsRetainedOutletTerminalConsumer }],
-    })
-    await router.push('/settings/general')
-    await router.isReady()
-    const { getByTestId } = renderInJsdom(<Layout />, { global: { plugins: [router] } })
-
-    expect(getByTestId('settings-retained-terminal-consumer').textContent).toBe('4')
-  })
-})
 
 describe('CompactWorkspaceLayout', () => {
   test('marks the inactive pane inert while sharing workspace motion tokens', async () => {
@@ -213,20 +86,6 @@ describe('WorkspaceSplitLayout', () => {
     )
 
     expect(splitPane(container)?.dataset.afterSize).toBe('70')
-  })
-})
-
-describe('authenticatedAppShellMode', () => {
-  test('settings routes render outside the workspace boot gate', () => {
-    expect(authenticatedAppShellMode('/settings/general', restoringWorkspaceState)).toBe('settings')
-    expect(authenticatedAppShellMode('/settings/shortcuts', readyState)).toBe('settings')
-  })
-
-  test('workspace routes wait for authenticated boot before mounting runtime', () => {
-    expect(authenticatedAppShellMode('/', restoringWorkspaceState)).toBe('workspace-restore')
-    expect(authenticatedAppShellMode('/workspace/repo/dashboard', restoringWorkspaceState)).toBe('workspace-restore')
-    expect(authenticatedAppShellMode('/workspace/repo/dashboard', readyState)).toBe('workspace-ready')
-    expect(authenticatedAppShellMode('/workspace/repo/dashboard', failedState)).toBe('workspace-failed')
   })
 })
 

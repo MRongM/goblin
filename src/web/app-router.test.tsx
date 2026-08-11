@@ -60,7 +60,6 @@ import { workspaceSlugFromId, worktreeSlugFromPath } from '#/web/workspace-route
 import { emptyWorkspace } from '#/web/stores/workspaces/workspace-state-factory.ts'
 import { acceptWorkspaceProbeState } from '#/web/stores/workspaces/workspace-guards.ts'
 import {
-  authenticatedAppShellMode,
   currentWorkspacePaneRouteFromContext,
   appLayoutRouteCallbacks,
   workspaceRouteContextFromMatches,
@@ -73,7 +72,6 @@ import {
   appNavigationIsCurrent,
   resetAppNavigationForTest,
 } from '#/web/app-navigation-lifecycle.ts'
-import type { AuthenticatedAppBootstrapState } from '#/web/hooks/useAuthenticatedAppBootstrap.ts'
 import { resetWorkspacesStore } from '#/web/test-utils/repo-store.ts'
 import { workspacesStore } from '#/web/stores/workspaces/store.ts'
 import { workspaceIdForTest } from '#/test-utils/workspace-id.ts'
@@ -528,12 +526,8 @@ describe('app route callback facades', () => {
     })
   })
 
-  test.each([
-    ['/settings/general', { status: 'ready' as const }],
-    ['/', { status: 'restoring-workspace' as const }],
-  ])('browser traversal supersedes independently of conditional shell mode at %s', (pathname, bootstrapState) => {
+  test('browser traversal supersedes the current app navigation', () => {
     resetAppNavigationForTest()
-    authenticatedAppShellMode(pathname, bootstrapState as AuthenticatedAppBootstrapState)
     const generation = beginAppNavigation()
 
     observeAppHistoryNavigation({ href: '/', state: {}, action: { type: 'BACK' } })

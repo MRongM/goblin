@@ -2,12 +2,9 @@ import { isWorkspacePaneStaticTabType } from '#/shared/workspace-pane.ts'
 import type { ParsedWorkspacePaneRoute } from '#/web/App.tsx'
 import type { AppRouteNavigation } from '#/web/app-route-navigation.ts'
 import { returnToFromHref } from '#/web/app-route-href.ts'
-import type { AuthenticatedAppBootstrapState } from '#/web/hooks/useAuthenticatedAppBootstrap.ts'
 import type { WorkspaceNavigationRouteContext } from '#/web/workspace-navigation-history.ts'
 import { branchNameFromSlug, workspaceIdFromSlug, worktreePathFromSlug } from '#/web/workspace-route-slugs.ts'
 import type { RouteLocationNormalizedLoaded } from 'vue-router'
-
-export type AuthenticatedAppShellMode = 'settings' | 'workspace-restore' | 'workspace-failed' | 'workspace-ready'
 
 export type WorkspaceRouteContext =
   | { kind: 'empty' | 'dashboard' | 'newWorktree'; workspaceSlug: string }
@@ -30,15 +27,6 @@ export function appLayoutRouteCallbacks(routeActions: AppLayoutRouteActions) {
     navigateToSettingsShortcuts: () => routeActions.openSettings('shortcuts'),
     navigateToIndex: () => routeActions.openHome(),
   }
-}
-
-export function authenticatedAppShellMode(
-  pathname: string,
-  bootstrapState: AuthenticatedAppBootstrapState,
-): AuthenticatedAppShellMode {
-  if (pathname.startsWith('/settings')) return 'settings'
-  if (bootstrapState.status === 'restoring-workspace') return 'workspace-restore'
-  return bootstrapState.status === 'failed' ? 'workspace-failed' : 'workspace-ready'
 }
 
 export function currentWorkspacePaneRouteFromContext(

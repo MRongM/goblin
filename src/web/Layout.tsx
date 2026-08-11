@@ -1,4 +1,5 @@
 import { computed, defineComponent } from 'vue'
+import type { VNode } from 'vue'
 import { RouterView, useRoute } from 'vue-router'
 import { useQueryClient } from '@tanstack/vue-query'
 import { ErrorBoundary } from '#/web/components/ErrorBoundary.tsx'
@@ -22,7 +23,6 @@ import { useAppHistoryPresentationObserver } from '#/web/app-history-presentatio
 import { workspacePaneCommandTargetFromQueryCache } from '#/web/workspace-pane/workspace-pane-command-target.ts'
 import {
   appLayoutRouteCallbacks,
-  authenticatedAppShellMode,
   currentWorkspacePaneRouteFromContext,
   workspaceNavigationRouteContext,
   workspaceRouteContextFromVueRoute,
@@ -64,23 +64,22 @@ const AuthenticatedAppShell = defineComponent({
     })
     const bootstrap = useAuthenticatedAppBootstrap({ activeWorkspaceId })
 
-    return () => {
+    const renderShellContent = (): VNode => {
+      if (route.name === 'settings') return <AuthenticatedSettingsShell />
+
       const bootstrapState = bootstrap.state.value
-      const shellMode = authenticatedAppShellMode(route.path, bootstrapState)
-      return (
-        <TerminalSessionProvider>
-          {shellMode === 'settings' ? (
-            <AuthenticatedSettingsShell />
-          ) : shellMode === 'workspace-restore' ? (
-            <WorkspaceSessionRestorePlaceholder />
-          ) : shellMode === 'workspace-failed' && bootstrapState.status === 'failed' ? (
-            <WorkspaceSessionRestoreError state={bootstrapState} retry={bootstrap.retry} />
-          ) : (
-            <AuthenticatedWorkspaceShell />
-          )}
-        </TerminalSessionProvider>
-      )
+
+      switch (bootstrapState.status) {
+        case 'restoring-workspace':
+          return <WorkspaceSessionRestorePlaceholder />
+        case 'failed':
+          return <WorkspaceSessionRestoreError state={bootstrapState} retry={bootstrap.retry} />
+        case 'ready':
+          return <AuthenticatedWorkspaceShell />
+      }
     }
+
+    return () => <TerminalSessionProvider>{renderShellContent()}</TerminalSessionProvider>
   },
 })
 
