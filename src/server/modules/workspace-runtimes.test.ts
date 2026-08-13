@@ -2,11 +2,10 @@ import { beforeEach, describe, expect, test, vi } from 'vitest'
 import {
   acquireWorkspaceRuntime,
   acquireWorkspaceRuntimeLease,
+  captureWorkspaceRuntimeMembershipCapability,
   captureWorkspaceRuntimeMembershipLease,
   clearWorkspaceRuntimesForUser,
   closeWorkspaceRuntimesForDurableRemoval,
-  commitOrReadInitialWorkspaceProbeState,
-  commitWorkspaceProbeState,
   expireWorkspaceRuntimeMembershipLease,
   isCurrentWorkspaceRuntime,
   isCurrentWorkspaceRuntimeMembership,
@@ -17,15 +16,28 @@ import {
   releaseWorkspaceRuntimeMembershipLease,
   retainWorkspaceRuntimeResource,
   replaceWorkspaceRuntimeMembershipsForClient,
+  runSerializedInitialWorkspaceProbe,
   runSerializedWorkspaceRefresh,
   runRemoteWorkspaceLifecycle,
   workspaceRuntimeHasGitCapability,
+  withWorkspaceRuntimeAdmission,
+  WorkspaceRuntimeStaleError,
 } from '#/server/modules/workspace-runtimes.ts'
 import { waitForNextMacrotask } from '#/test-utils/microtasks.ts'
 import { workspaceIdForTest } from '#/test-utils/workspace-id.ts'
+import type { WorkspaceSettledProbeState } from '#/shared/workspace-runtime.ts'
 
 const USER_ID = 'user_repo_runtime'
 const REPO_ROOT = workspaceIdForTest('goblin+file:///workspace-runtimes/repo')
+
+async function settleInitialProbe(workspaceRuntimeId: string, probe: WorkspaceSettledProbeState) {
+  return await runSerializedInitialWorkspaceProbe({
+    userId: USER_ID,
+    workspaceId: REPO_ROOT,
+    workspaceRuntimeId,
+    probe: async () => probe,
+  })
+}
 
 describe('workspace runtimes', () => {
   beforeEach(() => {
@@ -85,6 +97,12 @@ describe('workspace runtimes', () => {
     expect(isCurrentWorkspaceRuntime(USER_ID, REPO_ROOT, runtimeId)).toBe(false)
   })
 
+  test('rejects resource retention for a stale runtime with the canonical error', () => {
+    expect(() => retainWorkspaceRuntimeResource(USER_ID, REPO_ROOT, 'runtime-stale', 'terminal-a')).toThrow(
+      WorkspaceRuntimeStaleError,
+    )
+  })
+
   test('does not let a stale resource retention release affect a later epoch', () => {
     const oldRuntimeId = acquireWorkspaceRuntime(USER_ID, REPO_ROOT, 'client-a')
     const staleRetention = retainWorkspaceRuntimeResource(USER_ID, REPO_ROOT, oldRuntimeId, 'terminal-a')
@@ -119,7 +137,39 @@ describe('workspace runtimes', () => {
     }
   })
 
-  test('commits probe state only to the current runtime epoch', () => {
+  test('reports canonical stale when durable removal interrupts an initial probe commit', async () => {
+    const runtimeId = acquireWorkspaceRuntime(USER_ID, REPO_ROOT, 'client-a')
+    const beforeCommitStarted = Promise.withResolvers<void>()
+    const finishBeforeCommit = Promise.withResolvers<void>()
+    const probe = {
+      status: 'ready' as const,
+      capabilities: {
+        files: { read: true as const, write: true },
+        terminal: { available: true },
+        git: { status: 'unavailable' as const },
+      },
+      diagnostics: [],
+    }
+    const work = runSerializedInitialWorkspaceProbe({
+      userId: USER_ID,
+      workspaceId: REPO_ROOT,
+      workspaceRuntimeId: runtimeId,
+      probe: async () => probe,
+      beforeCommit: async () => {
+        beforeCommitStarted.resolve()
+        await finishBeforeCommit.promise
+        throw new Error('late capability transition failure')
+      },
+    })
+    await beforeCommitStarted.promise
+
+    expect(closeWorkspaceRuntimesForDurableRemoval(REPO_ROOT)).toBe(1)
+    finishBeforeCommit.resolve()
+
+    await expect(work).rejects.toBeInstanceOf(WorkspaceRuntimeStaleError)
+  })
+
+  test('commits probe state only to the current runtime epoch', async () => {
     const runtimeId = acquireWorkspaceRuntime(USER_ID, REPO_ROOT, 'client-a')
     const probe = {
       status: 'ready' as const,
@@ -131,18 +181,16 @@ describe('workspace runtimes', () => {
       diagnostics: [],
     }
 
-    expect(
-      commitWorkspaceProbeState({ userId: USER_ID, workspaceId: REPO_ROOT, workspaceRuntimeId: runtimeId, probe }),
-    ).toBe(true)
+    await settleInitialProbe(runtimeId, probe)
     expect(listWorkspaceRuntimes(USER_ID)[0]?.workspaceProbe).toEqual(probe)
-    expect(
-      commitWorkspaceProbeState({
+    await expect(
+      runSerializedInitialWorkspaceProbe({
         userId: USER_ID,
         workspaceId: REPO_ROOT,
         workspaceRuntimeId: 'workspace-runtime-stale',
-        probe,
+        probe: async () => probe,
       }),
-    ).toBe(false)
+    ).rejects.toBeInstanceOf(WorkspaceRuntimeStaleError)
 
     releaseWorkspaceRuntime(USER_ID, REPO_ROOT, runtimeId, 'client-a')
     const reopened = acquireWorkspaceRuntime(USER_ID, REPO_ROOT, 'client-a')
@@ -150,7 +198,7 @@ describe('workspace runtimes', () => {
     expect(listWorkspaceRuntimes(USER_ID)[0]?.workspaceProbe).toEqual({ status: 'probing' })
   })
 
-  test('keeps the first committed initial probe as the shared runtime authority', () => {
+  test('keeps the first committed initial probe as the shared runtime authority', async () => {
     const runtimeId = acquireWorkspaceRuntime(USER_ID, REPO_ROOT, 'client-a')
     acquireWorkspaceRuntime(USER_ID, REPO_ROOT, 'client-b')
     const first = {
@@ -167,22 +215,8 @@ describe('workspace runtimes', () => {
       capabilities: { ...first.capabilities, terminal: { available: false } },
     }
 
-    expect(
-      commitOrReadInitialWorkspaceProbeState({
-        userId: USER_ID,
-        workspaceId: REPO_ROOT,
-        workspaceRuntimeId: runtimeId,
-        probe: first,
-      }),
-    ).toEqual(first)
-    expect(
-      commitOrReadInitialWorkspaceProbeState({
-        userId: USER_ID,
-        workspaceId: REPO_ROOT,
-        workspaceRuntimeId: runtimeId,
-        probe: later,
-      }),
-    ).toEqual(first)
+    await expect(settleInitialProbe(runtimeId, first)).resolves.toEqual(first)
+    await expect(settleInitialProbe(runtimeId, later)).resolves.toEqual(first)
   })
 
   test('serializes refresh and preserves the committed probe after an inconclusive result', async () => {
@@ -196,12 +230,7 @@ describe('workspace runtimes', () => {
       },
       diagnostics: [],
     }
-    commitWorkspaceProbeState({
-      userId: USER_ID,
-      workspaceId: REPO_ROOT,
-      workspaceRuntimeId: runtimeId,
-      probe: initial,
-    })
+    await settleInitialProbe(runtimeId, initial)
     const firstStarted = Promise.withResolvers<void>()
     const firstGate = Promise.withResolvers<void>()
     const calls: string[] = []
@@ -252,12 +281,7 @@ describe('workspace runtimes', () => {
       },
       diagnostics: [],
     }
-    commitWorkspaceProbeState({
-      userId: USER_ID,
-      workspaceId: REPO_ROOT,
-      workspaceRuntimeId: runtimeId,
-      probe: available,
-    })
+    await settleInitialProbe(runtimeId, available)
     const unavailable = {
       ...available,
       capabilities: { ...available.capabilities, git: { status: 'unavailable' as const } },
@@ -288,12 +312,7 @@ describe('workspace runtimes', () => {
       },
       diagnostics: [],
     }
-    commitWorkspaceProbeState({
-      userId: USER_ID,
-      workspaceId: REPO_ROOT,
-      workspaceRuntimeId: runtimeId,
-      probe: available,
-    })
+    await settleInitialProbe(runtimeId, available)
     const cleanupStarted = Promise.withResolvers<void>()
     const cleanupGate = Promise.withResolvers<void>()
     let durableCleanupCommitted = false
@@ -416,7 +435,7 @@ describe('workspace runtimes', () => {
     expect(isCurrentWorkspaceRuntimeMembership(USER_ID, REPO_ROOT, runtimeId, 'client-a')).toBe(false)
   })
 
-  test('expires only memberships captured when a client went offline', () => {
+  test('expires only memberships captured when a client went offline', async () => {
     const runtimeId = acquireWorkspaceRuntime(USER_ID, REPO_ROOT, 'client-a')
     acquireWorkspaceRuntime(USER_ID, REPO_ROOT, 'client-b')
     const lease = captureWorkspaceRuntimeMembershipLease(USER_ID, 'client-a')
@@ -433,7 +452,7 @@ describe('workspace runtimes', () => {
     })
   })
 
-  test('does not let an old disconnect lease remove a renewed membership', () => {
+  test('does not let an old disconnect lease remove a renewed membership', async () => {
     const runtimeId = acquireWorkspaceRuntime(USER_ID, REPO_ROOT, 'client-a')
     const staleLease = captureWorkspaceRuntimeMembershipLease(USER_ID, 'client-a')
     expect(acquireWorkspaceRuntime(USER_ID, REPO_ROOT, 'client-a')).toBe(runtimeId)
@@ -458,6 +477,15 @@ describe('workspace runtimes', () => {
       released: true,
       runtimeClosed: true,
     })
+  })
+
+  test('invalidates a captured membership capability when the client renews its generation', () => {
+    const runtimeId = acquireWorkspaceRuntime(USER_ID, REPO_ROOT, 'client-a')
+    const capability = captureWorkspaceRuntimeMembershipCapability(USER_ID, REPO_ROOT, runtimeId, 'client-a')
+
+    expect(() => capability.assertCurrent()).not.toThrow()
+    expect(acquireWorkspaceRuntime(USER_ID, REPO_ROOT, 'client-a')).toBe(runtimeId)
+    expect(() => capability.assertCurrent()).toThrow('error.workspace-runtime-stale')
   })
 
   test('ensure retries a failed remote lifecycle and joins the ready state', async () => {
@@ -532,6 +560,96 @@ describe('workspace runtimes', () => {
       released: true,
       runtimeClosed: true,
     })
+  })
+
+  test('invalidates every admission accepted before a complete membership declaration', async () => {
+    const firstStarted = Promise.withResolvers<void>()
+    const finishFirst = Promise.withResolvers<void>()
+    const first = withWorkspaceRuntimeAdmission(USER_ID, REPO_ROOT, 'client-a', async () => {
+      firstStarted.resolve()
+      await finishFirst.promise
+      return 'first'
+    })
+    await firstStarted.promise
+
+    const runQueuedAdmission = vi.fn(async () => 'queued')
+    const queued = withWorkspaceRuntimeAdmission(USER_ID, REPO_ROOT, 'client-a', runQueuedAdmission)
+
+    expect(replaceWorkspaceRuntimeMembershipsForClient(USER_ID, 'client-a', [])).toEqual([])
+    finishFirst.resolve()
+
+    await expect(first).rejects.toThrow('error.workspace-runtime-stale')
+    await expect(queued).rejects.toThrow('error.workspace-runtime-stale')
+    expect(runQueuedAdmission).not.toHaveBeenCalled()
+    expect(listWorkspaceRuntimes(USER_ID)).toEqual([])
+
+    await expect(
+      withWorkspaceRuntimeAdmission(
+        USER_ID,
+        REPO_ROOT,
+        'client-a',
+        async ({ workspaceRuntimeId }) => workspaceRuntimeId,
+      ),
+    ).resolves.toMatch(/^workspace-runtime-/)
+    expect(listWorkspaceRuntimes(USER_ID)).toHaveLength(1)
+  })
+
+  test('invalidates an accepted admission before it can create runtime state', async () => {
+    const runAdmission = vi.fn(async () => 'opened')
+    const admission = withWorkspaceRuntimeAdmission(USER_ID, REPO_ROOT, 'client-a', runAdmission)
+
+    expect(replaceWorkspaceRuntimeMembershipsForClient(USER_ID, 'client-a', [])).toEqual([])
+
+    await expect(admission).rejects.toThrow('error.workspace-runtime-stale')
+    expect(runAdmission).not.toHaveBeenCalled()
+    expect(listWorkspaceRuntimes(USER_ID)).toEqual([])
+  })
+
+  test('invalidates queued admissions when the client releases the runtime', async () => {
+    const firstStarted = Promise.withResolvers<void>()
+    const finishFirst = Promise.withResolvers<void>()
+    const first = withWorkspaceRuntimeAdmission(USER_ID, REPO_ROOT, 'client-a', async ({ workspaceRuntimeId }) => {
+      firstStarted.resolve()
+      await finishFirst.promise
+      return workspaceRuntimeId
+    })
+    await firstStarted.promise
+    const workspaceRuntimeId = listWorkspaceRuntimes(USER_ID)[0]?.workspaceRuntimeId
+    if (!workspaceRuntimeId) throw new Error('missing pending admission runtime')
+    const runQueuedAdmission = vi.fn(async () => 'queued')
+    const queued = withWorkspaceRuntimeAdmission(USER_ID, REPO_ROOT, 'client-a', runQueuedAdmission)
+
+    expect(releaseWorkspaceRuntime(USER_ID, REPO_ROOT, workspaceRuntimeId, 'client-a')).toEqual({
+      released: true,
+      runtimeClosed: true,
+    })
+    finishFirst.resolve()
+
+    await expect(first).rejects.toThrow('error.workspace-runtime-stale')
+    await expect(queued).rejects.toThrow('error.workspace-runtime-stale')
+    expect(runQueuedAdmission).not.toHaveBeenCalled()
+    expect(listWorkspaceRuntimes(USER_ID)).toEqual([])
+  })
+
+  test('invalidates queued admissions when durable membership is removed', async () => {
+    const firstStarted = Promise.withResolvers<void>()
+    const finishFirst = Promise.withResolvers<void>()
+    const first = withWorkspaceRuntimeAdmission(USER_ID, REPO_ROOT, 'client-a', async () => {
+      firstStarted.resolve()
+      await finishFirst.promise
+      return 'first'
+    })
+    await firstStarted.promise
+    const runQueuedAdmission = vi.fn(async () => 'queued')
+    const queued = withWorkspaceRuntimeAdmission(USER_ID, REPO_ROOT, 'client-a', runQueuedAdmission)
+
+    expect(closeWorkspaceRuntimesForDurableRemoval(REPO_ROOT)).toBe(1)
+    finishFirst.resolve()
+
+    await expect(first).rejects.toThrow('error.workspace-runtime-stale')
+    await expect(queued).rejects.toThrow('error.workspace-runtime-stale')
+    expect(runQueuedAdmission).not.toHaveBeenCalled()
+    expect(listWorkspaceRuntimes(USER_ID)).toEqual([])
   })
 
   test('publishes close events only after the replacement snapshot is complete', () => {
