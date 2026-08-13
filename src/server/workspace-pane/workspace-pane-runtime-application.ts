@@ -35,7 +35,23 @@ import type { WorkspacePaneTabsSnapshot } from '#/shared/workspace-pane-tabs.ts'
 import type { TerminalCloseOutcome } from '#/server/terminal/terminal-session-close.ts'
 
 type MaybePromise<T> = T | Promise<T>
+type SuccessfulTerminalCloseOutcome = Exclude<TerminalCloseOutcome, { kind: 'failed' }>
+type TerminalCloseRuntime = Extract<WorkspacePaneRuntimeCloseResult, { ok: true }>['runtime']
 const workspacePaneRuntimeApplicationLogger = serverNodeLog.child({ module: 'workspace-pane-runtime-application' })
+
+function terminalCloseRuntime(
+  terminalSessionId: string,
+  session: TerminalSessionSummary | undefined,
+  close: SuccessfulTerminalCloseOutcome,
+): TerminalCloseRuntime {
+  if (!session || close.kind === 'already-closed') return { action: 'already-closed', terminalSessionId }
+  return {
+    action: 'closed',
+    terminalSessionId,
+    terminalRuntimeSessionId: session.terminalRuntimeSessionId,
+    terminalRuntimeGeneration: session.terminalRuntimeGeneration,
+  }
+}
 
 interface WorkspacePaneRuntimeApplicationDependencies {
   workspaceTabsCoordinator: WorkspacePaneRuntimeTabsCoordinator
@@ -319,25 +335,13 @@ export class WorkspacePaneRuntimeApplication {
     ) {
       return runtimeFailure('terminal', 'error.workspace-runtime-stale')
     }
-    let runtime: Extract<WorkspacePaneRuntimeCloseResult, { ok: true }>['runtime']
-    if (session) {
-      const close = await this.deps.terminal.close(clientId, userId, {
-        terminalRuntimeSessionId: session.terminalRuntimeSessionId,
-      })
-      if (close.kind === 'failed') return runtimeFailure('terminal', 'error.unavailable')
-      if (close.kind === 'already-closed') {
-        runtime = { action: 'already-closed', terminalSessionId }
-      } else {
-        runtime = {
-          action: 'closed',
-          terminalSessionId,
+    const close: TerminalCloseOutcome = session
+      ? await this.deps.terminal.close(clientId, userId, {
           terminalRuntimeSessionId: session.terminalRuntimeSessionId,
-          terminalRuntimeGeneration: session.terminalRuntimeGeneration,
-        }
-      }
-    } else {
-      runtime = { action: 'already-closed', terminalSessionId }
-    }
+        })
+      : { kind: 'already-closed' }
+    if (close.kind === 'failed') return runtimeFailure('terminal', 'error.unavailable')
+    const runtime = terminalCloseRuntime(terminalSessionId, session, close)
 
     let paneTabsSnapshot: WorkspacePaneTabsSnapshot | null
     try {
