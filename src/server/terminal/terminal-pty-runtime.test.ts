@@ -151,6 +151,27 @@ describe('spawnTerminalPtyRuntime', () => {
     expect(userInfo).not.toHaveBeenCalled()
   })
 
+  test('uses bundled ConPTY on Windows so scroll-region output reaches xterm unchanged', () => {
+    const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
+    try {
+      spawnMock.mockReturnValue(ptyStub('powershell.exe'))
+
+      spawnTerminalPtyRuntime({
+        cwd: 'C:\\workspace',
+        cols: 80,
+        rows: 24,
+      })
+
+      expect(spawnMock).toHaveBeenCalledWith(
+        'powershell.exe',
+        ['-NoLogo'],
+        expect.objectContaining({ useConptyDll: true }),
+      )
+    } finally {
+      platformSpy.mockRestore()
+    }
+  })
+
   test('uses the inherited SHELL on Unix when it is set, with -l for login mode', () => {
     vi.mocked(userInfo).mockReturnValue({ shell: '/bin/zsh' } as ReturnType<typeof userInfo>)
 

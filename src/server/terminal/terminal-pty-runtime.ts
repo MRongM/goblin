@@ -64,6 +64,7 @@ export function spawnTerminalPtyRuntime(
       rows: input.rows,
       cwd: input.cwd,
       env,
+      ...(process.platform === 'win32' ? { useConptyDll: true } : {}),
     })
     const runtime = new NodePtyTerminalRuntime(term)
     // Native event ownership is installed before the control capability can
