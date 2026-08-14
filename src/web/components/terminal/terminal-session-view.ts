@@ -46,6 +46,7 @@ export class TerminalSessionView {
   private disposables: Array<{ dispose: () => void }> = []
   private disposeThemeObserver: (() => void) | null = null
   private disposeFontObserver: (() => void) | null = null
+  private fontFitFrame: number | null = null
   private host: HTMLElement | null = null
   private presentationState: 'pending' | 'presented' = 'pending'
   private pendingFocusRequest: TerminalFocusRequest | null = null
@@ -441,7 +442,13 @@ export class TerminalSessionView {
     const fonts = document.fonts
     if (!fonts) return
     const refit = () => {
-      if (this.term === term) this.handlers.onLayout()
+      if (this.term !== term) return
+      if (this.fontFitFrame !== null) cancelScheduledAnimationFrame(this.fontFitFrame)
+      this.handlers.onLayout()
+      this.fontFitFrame = requestAnimationFrame(() => {
+        this.fontFitFrame = null
+        if (this.term === term) this.handlers.onLayout()
+      })
     }
     fonts.ready.then(refit).catch(() => {})
     fonts.addEventListener?.('loadingdone', refit)
@@ -451,6 +458,10 @@ export class TerminalSessionView {
   }
 
   private stopObservingFonts(): void {
+    if (this.fontFitFrame !== null) {
+      cancelScheduledAnimationFrame(this.fontFitFrame)
+      this.fontFitFrame = null
+    }
     this.disposeFontObserver?.()
     this.disposeFontObserver = null
   }
@@ -476,6 +487,11 @@ export class TerminalSessionView {
       pending.onSettled?.()
     }
   }
+}
+
+function cancelScheduledAnimationFrame(frame: number): void {
+  if (typeof cancelAnimationFrame === 'function') cancelAnimationFrame(frame)
+  else clearTimeout(frame)
 }
 
 function waitForFullViewportRender(term: XTermTerminal, signal: AbortSignal): Promise<boolean> {

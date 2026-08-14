@@ -848,7 +848,7 @@ export async function flushTerminalStart(): Promise<void> {
 }
 
 export async function flushFontRefit(): Promise<void> {
-  // FONT_REMEASURE_DEBOUNCE_MS in the source is 80. Advance past it.
+  // Drain next-frame font geometry work and its queued microtasks.
   await vi.advanceTimersByTimeAsync(100)
 }
 

@@ -694,7 +694,7 @@ describe('TerminalSession attachment and presentation', () => {
     mockFonts.resolveReady()
     await flushFontRefit()
 
-    expect(fitAddon.proposeDimensions).toHaveBeenCalled()
+    expect(fitAddon.proposeDimensions).toHaveBeenCalledTimes(2)
     expect(term.refresh).not.toHaveBeenCalled()
     expect(term.scrollToBottom).not.toHaveBeenCalled()
 
@@ -703,9 +703,86 @@ describe('TerminalSession attachment and presentation', () => {
     mockFonts.emitLoadingDone()
     await flushFontRefit()
 
-    expect(fitAddon.proposeDimensions).toHaveBeenCalled()
+    expect(fitAddon.proposeDimensions).toHaveBeenCalledTimes(2)
     expect(term.refresh).not.toHaveBeenCalled()
     expect(term.scrollToBottom).not.toHaveBeenCalled()
+  })
+
+  test('converges loaded font geometry before publishing the final PTY resize', async () => {
+    const { term } = await startOpenControllerSession()
+    const fitAddon = xtermMocks.fitAddons[0]!
+    terminalCalls.resize.mockClear()
+    fitAddon.proposeDimensions
+      .mockReset()
+      .mockReturnValueOnce({ cols: 92, rows: 34 })
+      .mockReturnValueOnce({ cols: 77, rows: 29 })
+
+    mockFonts.emitLoadingDone()
+    await flushFontRefit()
+
+    expect(fitAddon.proposeDimensions).toHaveBeenCalledTimes(2)
+    expect(term.cols).toBe(77)
+    expect(term.rows).toBe(29)
+    expect(terminalCalls.resize).toHaveBeenLastCalledWith({
+      terminalRuntimeSessionId: 'pty_session_1_aaaaaaaaa',
+      terminalRuntimeGeneration: 1,
+      cols: 77,
+      rows: 29,
+    })
+  })
+
+  test('cancels a superseded deferred font geometry measurement', async () => {
+    const { term } = await startOpenControllerSession()
+    const fitAddon = xtermMocks.fitAddons[0]!
+    term.refresh.mockClear()
+    term.scrollToBottom.mockClear()
+    fitAddon.proposeDimensions.mockClear()
+
+    mockFonts.emitLoadingDone()
+    mockFonts.emitLoadingDone()
+
+    expect(fitAddon.proposeDimensions).toHaveBeenCalledTimes(2)
+
+    await flushFontRefit()
+
+    expect(fitAddon.proposeDimensions).toHaveBeenCalledTimes(3)
+    expect(term.refresh).not.toHaveBeenCalled()
+    expect(term.scrollToBottom).not.toHaveBeenCalled()
+  })
+
+  test('cancels deferred font geometry work when the terminal view is disposed', async () => {
+    const { session } = await startOpenControllerSession()
+    const fitAddon = xtermMocks.fitAddons[0]!
+    const cancelAnimationFrameSpy = vi.spyOn(globalThis, 'cancelAnimationFrame')
+    const requestAnimationFrameSpy = vi.spyOn(globalThis, 'requestAnimationFrame')
+    try {
+      cancelAnimationFrameSpy.mockClear()
+      requestAnimationFrameSpy.mockClear()
+      terminalCalls.resize.mockClear()
+      fitAddon.proposeDimensions
+        .mockReset()
+        .mockReturnValueOnce({ cols: 92, rows: 34 })
+        .mockReturnValueOnce({ cols: 77, rows: 29 })
+
+      mockFonts.emitLoadingDone()
+      const fontFitFrame = requestAnimationFrameSpy.mock.results.at(-1)?.value
+
+      expect(fitAddon.proposeDimensions).toHaveBeenCalledOnce()
+      expect(fontFitFrame).toBeDefined()
+
+      session.dispose()
+
+      expect(cancelAnimationFrameSpy).toHaveBeenCalledOnce()
+      expect(cancelAnimationFrameSpy).toHaveBeenCalledWith(fontFitFrame)
+
+      await flushFontRefit()
+
+      expect(fitAddon.proposeDimensions).toHaveBeenCalledOnce()
+      expect(terminalCalls.resize).not.toHaveBeenCalled()
+    } finally {
+      requestAnimationFrameSpy.mockRestore()
+      cancelAnimationFrameSpy.mockRestore()
+    }
   })
 
   test('does not resize or scroll the discarded xterm when attach resolves as viewer', async () => {
