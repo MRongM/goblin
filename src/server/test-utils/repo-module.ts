@@ -1,19 +1,25 @@
+import path from 'node:path'
 import { afterEach, beforeEach, expect, vi } from 'vitest'
 import type { PullRequestInfo, WorktreeInfo } from '#/shared/git-types.ts'
 import type { RepoSnapshot } from '#/shared/api-types.ts'
 import { normalizeRemoteWorkspaceId } from '#/shared/remote-workspace.ts'
 import type { WorkspaceId } from '#/shared/workspace-locator.ts'
 import type { RepoWorktreeRemovalLifecycle } from '#/server/modules/repo-worktree-removal-lifecycle.ts'
-import { workspaceIdForTest } from '#/test-utils/workspace-id.ts'
+import { localWorkspaceIdForTest, nativePathForTest } from '#/test-utils/workspace-id.ts'
 import type * as RepoWritePaths from '#/server/modules/repo-write-paths.ts'
 import { commandOutcomeForTest } from '#/test-utils/command-outcome.ts'
 import { testWorkspaceRuntimeEpochCapability } from '#/server/test-utils/workspace-runtime-capability.ts'
 
 // No library fixture spans Git, SSH, settings, invalidation, and write-coordination boundaries.
 // Keep those module mocks shared while each suite owns one observable repository behavior.
-export const REPO_ID = workspaceIdForTest('goblin+file:///tmp/repo')
-export const LINKED_REPO_ID = workspaceIdForTest('goblin+file:///tmp/repo-linked')
-export const WORKTREE_REPO_ID = workspaceIdForTest('goblin+file:///tmp/repo-worktree')
+export const REPO_PATH = nativePathForTest('/tmp/repo')
+export const LINKED_REPO_PATH = nativePathForTest('/tmp/repo-linked')
+export const WORKTREE_REPO_PATH = nativePathForTest('/tmp/repo-worktree')
+export const REPO_COMMON_DIR = nativePathForTest('/tmp/repo/.git')
+export const REPO_OBJECTS_DIR = nativePathForTest('/tmp/repo/.git/objects')
+export const REPO_ID = localWorkspaceIdForTest('/tmp/repo')
+export const LINKED_REPO_ID = localWorkspaceIdForTest('/tmp/repo-linked')
+export const WORKTREE_REPO_ID = localWorkspaceIdForTest('/tmp/repo-worktree')
 export const WORKTREE_BOOTSTRAP_CONFIG_HASH = 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
 
 export function repoRuntimeCapabilityForTest(workspaceId: WorkspaceId, workspaceRuntimeId: string) {
@@ -86,7 +92,7 @@ export function removeLocalRepoWorktreeForTest(
 ) {
   return removeRepoWorktreeForTest(
     REPO_ID,
-    { branch: 'feature/a', worktreePath: '/tmp/repo-worktree', ...options },
+    { branch: 'feature/a', worktreePath: WORKTREE_REPO_PATH, ...options },
     lifecycle,
     signal,
   )
@@ -99,7 +105,7 @@ export function createLocalRepoWorktreeWithBootstrap(
   return createRepoWorktree(
     REPO_ID,
     {
-      worktreePath: '/tmp/repo-worktree',
+      worktreePath: WORKTREE_REPO_PATH,
       mode: { kind: 'newBranch', newBranch: 'feature/a', baseRef: 'main' },
     },
     repoRuntimeCapabilityForTest(REPO_ID, 'test-runtime'),
@@ -309,7 +315,7 @@ beforeEach(async () => {
   hoistedMocks.fetchAll.mockResolvedValue(commandOutcomeForTest({ ok: true, message: 'fetched' }))
   hoistedMocks.pullBranch.mockResolvedValue(commandOutcomeForTest({ ok: true, message: 'ok' }))
   hoistedMocks.pushBranch.mockResolvedValue(commandOutcomeForTest({ ok: true, message: 'ok' }))
-  hoistedMocks.cloneGitRepo.mockResolvedValue({ ok: true, message: 'ok', path: '/tmp/repo' })
+  hoistedMocks.cloneGitRepo.mockResolvedValue({ ok: true, message: 'ok', path: REPO_PATH })
   hoistedMocks.createWorktree.mockResolvedValue(commandOutcomeForTest({ ok: true, message: 'ok' }))
   hoistedMocks.createRemoteWorktree.mockResolvedValue(commandOutcomeForTest({ ok: true, message: 'ok' }))
   hoistedMocks.bootstrapWorktreeAfterCreate.mockResolvedValue({ ok: true, message: '' })
@@ -369,10 +375,10 @@ beforeEach(async () => {
   hoistedMocks.resolveRemoteWorktreePath.mockImplementation(async (_target, worktreePath: string) => worktreePath)
   hoistedMocks.getCurrentBranch.mockResolvedValue('main')
   hoistedMocks.resolveRepoCommonDir.mockImplementation(async (cwd: string) =>
-    cwd.startsWith('/tmp/repo') ? '/tmp/repo/.git' : `${cwd}/.git`,
+    cwd.startsWith(REPO_PATH) ? REPO_COMMON_DIR : path.join(cwd, '.git'),
   )
   hoistedMocks.resolveRepoObjectsDir.mockImplementation(async (cwd: string) =>
-    cwd.startsWith('/tmp/repo') ? '/tmp/repo/.git/objects' : `${cwd}/.git/objects`,
+    cwd.startsWith(REPO_PATH) ? REPO_OBJECTS_DIR : path.join(cwd, '.git', 'objects'),
   )
   hoistedMocks.getRepoName.mockResolvedValue('repo')
   hoistedMocks.getRepoRoot.mockImplementation(async (cwd: string) => cwd)

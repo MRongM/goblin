@@ -10,12 +10,13 @@ import {
 } from '#/server/modules/workspace-runtimes.ts'
 import { createWorkspacePaneTabsActions } from '#/server/workspace-pane/workspace-pane-tabs-actions.ts'
 import { workspacePaneStaticTabEntry } from '#/shared/workspace-pane.ts'
-import { formatWorkspaceLocator, type WorkspaceId } from '#/shared/workspace-locator.ts'
+import type { WorkspaceId } from '#/shared/workspace-locator.ts'
+import { localWorkspaceIdForTest } from '#/test-utils/workspace-id.ts'
 
 const CLIENT_ID = 'client_workspace_pane_tabs_actions'
 const USER_ID = 'user_workspace_pane_tabs_actions'
-const WORKSPACE_ID = formatWorkspaceLocator({ transport: 'file', platform: 'posix', path: '/repo' }, 'posix')!
-const OTHER_WORKSPACE_ID = formatWorkspaceLocator({ transport: 'file', platform: 'posix', path: '/other' }, 'posix')!
+const WORKSPACE_ID = localWorkspaceIdForTest('/repo')
+const OTHER_WORKSPACE_ID = localWorkspaceIdForTest('/other')
 const REPO_ROOT = WORKSPACE_ID
 let WORKSPACE_RUNTIME_ID = ''
 

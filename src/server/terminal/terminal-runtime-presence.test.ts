@@ -7,6 +7,7 @@ import {
 import { advanceTimersAndFlush, useFakeTimers } from '#/test-utils/timers.ts'
 import {
   CLIENT_STATE_GRACE_MS,
+  LINKED_REPO_PATH,
   REPO_ROOT,
   USER_1,
   USER_2,
@@ -143,7 +144,7 @@ describe('server terminal runtime user presence', () => {
       repoRoot: REPO_ROOT,
       workspaceRuntimeId: USER_2_WORKSPACE_RUNTIME_ID,
       branch: 'feature',
-      worktreePath: '/repo-linked',
+      worktreePath: LINKED_REPO_PATH,
       kind: 'additional',
     })
     expect(userBCreate.ok).toBe(true)

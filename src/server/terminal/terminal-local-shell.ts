@@ -20,9 +20,9 @@ export interface ResolvedLocalShell {
  *  4. `/bin/sh` — last-resort POSIX guarantee; `-l` keeps the shell in login
  *     mode so it sources the user's profile.
  *
- * On Windows there is no login-shell concept; fall back to `COMSPEC` (which
- * the Windows kernel always sets) or `cmd.exe`. No login-mode flag — cmd.exe
- * does not have an equivalent.
+ * Windows PowerShell is the canonical shell on Windows. It is part of the
+ * supported Windows 11 platform, and `-NoLogo` keeps the interactive prompt
+ * while avoiding a startup banner.
  *
  * Pure platform policy — no node-pty dependency — so this lives in its own
  * file rather than inside terminal-pty-runtime.
@@ -30,12 +30,11 @@ export interface ResolvedLocalShell {
 export function resolveLocalShell(
   input: { command?: string; args?: string[] },
   env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
 ): ResolvedLocalShell {
   const explicit = input.command?.trim()
   if (explicit) return { command: explicit, args: input.args ?? [] }
-  if (process.platform === 'win32') {
-    return { command: env.COMSPEC?.trim() || 'cmd.exe', args: [] }
-  }
+  if (platform === 'win32') return { command: 'powershell.exe', args: ['-NoLogo'] }
   const fromEnv = env.SHELL?.trim()
   if (fromEnv) return { command: fromEnv, args: input.args ?? ['-l'] }
   const fromUserInfo = readUserLoginShell()
@@ -46,11 +45,14 @@ export function resolveLocalShell(
 export function resolveLocalShellWithStartupShellCommand(
   startupShellCommand: string | undefined,
   env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
 ): ResolvedLocalShell {
   const commandLine = normalizeStartupShellCommand(startupShellCommand)
-  if (!commandLine) return resolveLocalShell({}, env)
-  if (process.platform === 'win32') return { command: env.COMSPEC?.trim() || 'cmd.exe', args: ['/K', commandLine] }
-  const shell = resolveLocalShell({}, env).command
+  if (!commandLine) return resolveLocalShell({}, env, platform)
+  if (platform === 'win32') {
+    return { command: 'powershell.exe', args: ['-NoLogo', '-NoExit', '-Command', commandLine] }
+  }
+  const shell = resolveLocalShell({}, env, platform).command
   // The PTY is spawned only after the mounted client xterm has fitted its host,
   // so width-sensitive startup output begins at canonical geometry.
   return { command: shell, args: ['-ilc', `${commandLine}\nexec ${quotePosixShellArg(shell)} -l`] }

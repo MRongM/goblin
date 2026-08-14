@@ -2,16 +2,12 @@ import { describe, expect, test, vi } from 'vitest'
 import { createTerminalSessionCreateProvider } from '#/server/terminal/terminal-session-create-provider.ts'
 import { createPhysicalWorktreeOperationCoordinator } from '#/server/worktree-removal/physical-worktree-operation-coordinator.ts'
 import { testPhysicalWorktreeExecutionCapability } from '#/server/test-utils/physical-worktree-identity.ts'
-import { canonicalWorkspaceLocator } from '#/shared/workspace-locator.ts'
+import { localWorkspaceIdForTest, nativePathForTest } from '#/test-utils/workspace-id.ts'
 
-const workspaceId = requiredWorkspaceLocator('goblin+file:///repo')
-const worktreeRoot = requiredWorkspaceLocator('goblin+file:///repo/expected')
-
-function requiredWorkspaceLocator(input: string) {
-  const locator = canonicalWorkspaceLocator(input)
-  if (!locator) throw new Error('invalid workspace locator fixture')
-  return locator
-}
+const workspaceId = localWorkspaceIdForTest('/repo')
+const worktreeRoot = localWorkspaceIdForTest('/repo/expected')
+const expectedPath = nativePathForTest('/repo/expected')
+const wrongPath = nativePathForTest('/repo/wrong')
 
 describe('terminal session create provider', () => {
   test('forwards an admitted create with its validated capability and operation signal', async () => {
@@ -22,7 +18,7 @@ describe('terminal session create provider', () => {
       sessionService: { createAdmitted },
       worktreeOperations,
     })
-    const capability = testPhysicalWorktreeExecutionCapability('/repo/expected', {
+    const capability = testPhysicalWorktreeExecutionCapability(expectedPath, {
       userId: 'user-test',
       workspaceId,
       workspaceRuntimeId: 'repo-runtime-test',
@@ -53,12 +49,12 @@ describe('terminal session create provider', () => {
       sessionService: { createAdmitted },
       worktreeOperations,
     })
-    const expectedIdentity = testPhysicalWorktreeExecutionCapability('/repo/expected', {
+    const expectedIdentity = testPhysicalWorktreeExecutionCapability(expectedPath, {
       userId: 'user-test',
       workspaceId: workspaceId,
       workspaceRuntimeId: 'repo-runtime-test',
     })
-    const wrongIdentity = testPhysicalWorktreeExecutionCapability('/repo/wrong')
+    const wrongIdentity = testPhysicalWorktreeExecutionCapability(wrongPath)
 
     await worktreeOperations.runOperation(wrongIdentity, async (permit) => {
       await expect(

@@ -9,9 +9,9 @@ import type {
 } from '#/server/worktree-removal/physical-worktree-capability.ts'
 import type { PhysicalWorktreeIdentity } from '#/server/worktree-removal/physical-worktree-identity.ts'
 import type { WorkspaceId } from '#/shared/workspace-locator.ts'
-import { workspaceIdForTest } from '#/test-utils/workspace-id.ts'
+import { localWorkspaceIdForTest } from '#/test-utils/workspace-id.ts'
 
-const DEFAULT_WORKSPACE_ID = workspaceIdForTest('goblin+file:///test-workspace')
+const DEFAULT_WORKSPACE_ID = localWorkspaceIdForTest('/test-workspace')
 
 export function testPhysicalWorktreeIdentity(endpoint: string): PhysicalWorktreeIdentity {
   return { kind: 'local', executionNamespaceId: 'local', endpoint: path.resolve(endpoint) }

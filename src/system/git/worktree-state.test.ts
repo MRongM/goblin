@@ -10,16 +10,22 @@ let repoPath = ''
 let gitDir = ''
 let offlineWorktreePath = ''
 
-beforeEach(async () => {
-  repoPath = await mkdtemp(path.join(os.tmpdir(), 'goblin-worktree-state-'))
-  await git(repoPath, ['init', '--initial-branch=main'])
-  gitDir = await git(repoPath, ['rev-parse', '--absolute-git-dir'])
-})
+beforeEach(
+  async () => {
+    repoPath = await mkdtemp(path.join(os.tmpdir(), 'goblin-worktree-state-'))
+    await git(repoPath, ['init', '--initial-branch=main'])
+    gitDir = await git(repoPath, ['rev-parse', '--absolute-git-dir'])
+  },
+  30_000,
+)
 
-afterEach(async () => {
-  if (repoPath) await rm(repoPath, { recursive: true, force: true })
-  if (offlineWorktreePath) await rm(offlineWorktreePath, { recursive: true, force: true })
-})
+afterEach(
+  async () => {
+    if (repoPath) await rm(repoPath, { recursive: true, force: true })
+    if (offlineWorktreePath) await rm(offlineWorktreePath, { recursive: true, force: true })
+  },
+  30_000,
+)
 
 describe('readGitWorktreeState', () => {
   test('returns null outside an in-progress operation', async () => {

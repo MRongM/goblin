@@ -19,6 +19,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { parseArgs } from 'node:util'
 import { closeRunningApp } from '#scripts/close-app.ts'
+import { defaultSkipElectronDependencyRebuild } from '#scripts/electron-packaging.ts'
 import { prepareNodePtyDarwinRuntime, validateNodePtyDarwinRuntime } from '#/system/node-pty-runtime.ts'
 
 const repoRoot = path.resolve(import.meta.dirname, '..')
@@ -67,7 +68,7 @@ function resolveOptions(mode: string, cli: CliFlags): BuildOptions {
   const defaults: BuildOptions = {
     clean: false,
     skipTypecheck: shouldInstall,
-    skipRebuild: shouldInstall,
+    skipRebuild: defaultSkipElectronDependencyRebuild(process.platform, shouldInstall),
     // prewarm is opt-in: download-electron-cache.ts writes the Electron zip
     // to a flat path that electron-builder does not read (it uses a
     // SHA1-hashed subdirectory). ELECTRON_MIRROR alone reroutes

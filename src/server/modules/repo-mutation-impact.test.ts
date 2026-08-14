@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest'
 import type { RemoteWorkspaceTarget } from '#/shared/remote-workspace.ts'
-import { workspaceIdForTest } from '#/test-utils/workspace-id.ts'
+import { nativePathForTest, workspaceIdForTest } from '#/test-utils/workspace-id.ts'
 import {
   appendRepoMutationRecoveryMessageKey,
   localWorktreeRepoIds,
@@ -23,13 +23,14 @@ describe('repo mutation impact', () => {
   })
 
   test('projects non-bare local worktrees to canonical workspace ids', () => {
-    const workspaceId = workspaceIdForLocalWorktreePath('/workspace/main')
+    const mainPath = nativePathForTest('/workspace/main')
+    const workspaceId = workspaceIdForLocalWorktreePath(mainPath)
     if (!workspaceId) throw new Error('expected local workspace id')
 
     expect(
       localWorktreeRepoIds([
-        { path: '/workspace/main', branch: 'main', isBare: false, isPrimary: true },
-        { path: '/workspace/bare.git', isBare: true, isPrimary: false },
+        { path: mainPath, branch: 'main', isBare: false, isPrimary: true },
+        { path: nativePathForTest('/workspace/bare.git'), isBare: true, isPrimary: false },
       ]),
     ).toEqual([workspaceId])
   })

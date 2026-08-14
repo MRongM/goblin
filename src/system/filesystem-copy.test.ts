@@ -32,11 +32,12 @@ test('restores a partial destination directory to the source mode after failure'
   await mkdir(sourcePath)
   await writeFile(path.join(sourcePath, 'file.txt'), 'source')
   await chmod(sourcePath, 0o500)
+  const sourceMode = (await stat(sourcePath)).mode & 0o777
   mocks.pipeline.mockRejectedValueOnce(new Error('copy failed'))
 
   try {
     await expect(copyPath(sourcePath, destinationPath)).rejects.toThrow('copy failed')
-    expect((await stat(destinationPath)).mode & 0o777).toBe(0o500)
+    expect((await stat(destinationPath)).mode & 0o777).toBe(sourceMode)
   } finally {
     await chmod(sourcePath, 0o700)
     await chmod(destinationPath, 0o700).catch(() => {})

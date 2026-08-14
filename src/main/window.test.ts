@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import type { BrowserWindowConstructorOptions } from 'electron'
 import { defaultSettingsSnapshot } from '#/shared/settings-defaults.ts'
@@ -39,7 +40,7 @@ const mocks = vi.hoisted(() => {
       accessToken: 'secret',
     })),
     readFileSync: vi.fn((filePath: string) =>
-      filePath.endsWith('/dist/web/index.html')
+      filePath.replaceAll('\\', '/').endsWith('/dist/web/index.html')
         ? clientIndexHtml
         : JSON.stringify({ file: 'preload-0.1.0-testhash.cjs' }),
     ),
@@ -165,7 +166,7 @@ describe('primary window navigation boundaries', () => {
     mocks.ipcMainOn.mockReset()
     mocks.readFileSync.mockReset()
     mocks.readFileSync.mockImplementation((filePath: string) =>
-      filePath.endsWith('/dist/web/index.html')
+      filePath.replaceAll('\\', '/').endsWith('/dist/web/index.html')
         ? mocks.clientIndexHtml
         : JSON.stringify({ file: 'preload-0.1.0-testhash.cjs' }),
     )
@@ -577,7 +578,7 @@ describe('primary window navigation boundaries', () => {
     expect(loadedUrl.searchParams.get('appBuild')).toBe(expectedBuild)
     expect(loadedUrl.searchParams.get('theme')).toBe('light')
     expect(loadedUrl.searchParams.get('colorTheme')).toBe('macos')
-    expect(mocks.readFileSync).toHaveBeenCalledWith('/app/dist/web/index.html')
+    expect(mocks.readFileSync).toHaveBeenCalledWith(path.join('/app', 'dist/web/index.html'))
   })
 
   test('passes the concrete Vite dev URL when planting the host-scoped auth cookie', async () => {
@@ -621,7 +622,7 @@ describe('primary window navigation boundaries', () => {
 
     await getOrCreatePrimaryWindow()
 
-    expect(mocks.windowOptions[0]?.webPreferences?.preload).toBe('/app/src/preload/preload.cjs')
+    expect(mocks.windowOptions[0]?.webPreferences?.preload).toBe(path.join('/app', 'src/preload/preload.cjs'))
   })
 
   test('uses the hashed preload artifact from the packaged manifest', async () => {
@@ -630,8 +631,10 @@ describe('primary window navigation boundaries', () => {
 
     await getOrCreatePrimaryWindow()
 
-    expect(mocks.readFileSync).toHaveBeenCalledWith('/app/dist/preload/manifest.json', 'utf8')
-    expect(mocks.windowOptions[0]?.webPreferences?.preload).toBe('/app/dist/preload/preload-0.1.0-testhash.cjs')
+    expect(mocks.readFileSync).toHaveBeenCalledWith(path.join('/app', 'dist/preload/manifest.json'), 'utf8')
+    expect(mocks.windowOptions[0]?.webPreferences?.preload).toBe(
+      path.join('/app', 'dist/preload/preload-0.1.0-testhash.cjs'),
+    )
   })
 
   test('fails window creation when no client base URL is available', async () => {

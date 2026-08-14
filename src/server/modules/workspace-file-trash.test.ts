@@ -36,15 +36,20 @@ import { trashWorkspaceFile } from '#/server/modules/workspace-file-trash.ts'
 import { normalizeRemoteWorkspaceId } from '#/shared/remote-workspace.ts'
 import { gitWorktreeFilesystemExecutionTarget } from '#/shared/workspace-runtime.ts'
 import type { WorkspaceId } from '#/shared/workspace-locator.ts'
-import { workspaceIdForTest } from '#/test-utils/workspace-id.ts'
+import { localWorkspaceIdForTest, nativePathForTest } from '#/test-utils/workspace-id.ts'
 
 const WORKSPACE_RUNTIME_ID = 'workspace-runtime-trash-test'
+const REPO_PATH = nativePathForTest('/tmp/repo')
+const FEATURE_PATH = nativePathForTest('/tmp/repo-feature')
+const OUTSIDE_PATH = nativePathForTest('/tmp/outside')
+const PLAIN_WORKSPACE_PATH = nativePathForTest('/tmp/plain-workspace')
+const REPO_ID = localWorkspaceIdForTest('/tmp/repo')
 
 beforeEach(() => {
   vi.clearAllMocks()
   mocks.readWorktreeMembership.mockResolvedValue([
-    { path: '/tmp/repo', branch: 'main', isBare: false, isPrimary: true },
-    { path: '/tmp/repo-feature', branch: 'feature', isBare: false, isPrimary: false },
+    { path: REPO_PATH, branch: 'main', isBare: false, isPrimary: true },
+    { path: FEATURE_PATH, branch: 'feature', isBare: false, isPrimary: false },
   ])
   mocks.lstat.mockResolvedValue({ isDirectory: () => false })
   mocks.movePathToTrash.mockResolvedValue({ ok: true, message: 'ok' })
@@ -60,30 +65,30 @@ beforeEach(() => {
 describe('workspace file trash write layer', () => {
   test('resolves a local workspace locator without requiring Git worktree membership', async () => {
     const result = await trashWorkspaceFile(
-      rootTarget(workspaceIdForTest('goblin+file:///tmp/plain-workspace')),
+      rootTarget(localWorkspaceIdForTest('/tmp/plain-workspace')),
       'notes.txt',
     )
 
     expect(result.ok).toBe(true)
     expect(mocks.readWorktreeMembership).not.toHaveBeenCalled()
-    expect(mocks.lstat).toHaveBeenCalledWith('/tmp/plain-workspace/notes.txt')
+    expect(mocks.lstat).toHaveBeenCalledWith(nativePathForTest('/tmp/plain-workspace/notes.txt'))
   })
 
   test('moves a local worktree file to the system trash', async () => {
     const result = await trashWorkspaceFile(
-      worktreeTarget(workspaceIdForTest('goblin+file:///tmp/repo'), '/tmp/repo-feature'),
+      worktreeTarget(REPO_ID, FEATURE_PATH),
       'src/index.ts',
     )
 
     expect(result).toEqual({ ok: true, message: 'ok' })
-    expect(mocks.readWorktreeMembership).toHaveBeenCalledWith('/tmp/repo', undefined)
-    expect(mocks.lstat).toHaveBeenCalledWith('/tmp/repo-feature/src/index.ts')
-    expect(mocks.movePathToTrash).toHaveBeenCalledWith('/tmp/repo-feature/src/index.ts', undefined)
+    expect(mocks.readWorktreeMembership).toHaveBeenCalledWith(REPO_PATH, undefined)
+    expect(mocks.lstat).toHaveBeenCalledWith(nativePathForTest('/tmp/repo-feature/src/index.ts'))
+    expect(mocks.movePathToTrash).toHaveBeenCalledWith(nativePathForTest('/tmp/repo-feature/src/index.ts'), undefined)
   })
 
   test('rejects an unknown local worktree before touching the file', async () => {
     await expect(
-      trashWorkspaceFile(worktreeTarget(workspaceIdForTest('goblin+file:///tmp/repo'), '/tmp/outside'), 'src/index.ts'),
+      trashWorkspaceFile(worktreeTarget(REPO_ID, OUTSIDE_PATH), 'src/index.ts'),
     ).rejects.toThrow('unknown worktree path')
     expect(mocks.lstat).not.toHaveBeenCalled()
     expect(mocks.movePathToTrash).not.toHaveBeenCalled()
@@ -93,7 +98,7 @@ describe('workspace file trash write layer', () => {
     mocks.lstat.mockResolvedValueOnce({ isDirectory: () => true })
 
     const result = await trashWorkspaceFile(
-      worktreeTarget(workspaceIdForTest('goblin+file:///tmp/repo'), '/tmp/repo-feature'),
+      worktreeTarget(REPO_ID, FEATURE_PATH),
       'src',
     )
 

@@ -11,20 +11,14 @@ import { createTerminalRuntimeActions } from '#/server/terminal/terminal-runtime
 import { createPhysicalWorktreeOperationCoordinator } from '#/server/worktree-removal/physical-worktree-operation-coordinator.ts'
 import { testPhysicalWorktreeExecutionCapability } from '#/server/test-utils/physical-worktree-identity.ts'
 import type { TerminalSessionCloseOutcome } from '#/server/terminal/terminal-session-close.ts'
-import { canonicalWorkspaceLocator } from '#/shared/workspace-locator.ts'
 import { flushMicrotasks } from '#/test-utils/microtasks.ts'
+import { localWorkspaceIdForTest, nativePathForTest } from '#/test-utils/workspace-id.ts'
 
 const CLIENT_ID = 'client_terminal_actions'
 const USER_ID = 'user_terminal_actions'
-const REPO_ROOT = 'goblin+file:///repo'
+const REPO_PATH = nativePathForTest('/repo')
 let WORKSPACE_RUNTIME_ID = ''
-const WORKSPACE_ID = requiredWorkspaceLocator(REPO_ROOT)
-
-function requiredWorkspaceLocator(input: string) {
-  const locator = canonicalWorkspaceLocator(input)
-  if (!locator) throw new Error('invalid workspace locator fixture')
-  return locator
-}
+const WORKSPACE_ID = localWorkspaceIdForTest('/repo')
 
 function worktreeTarget(workspaceRuntimeId: string) {
   return {
@@ -72,7 +66,7 @@ function makeActions(
   const broadcasts = vi.fn()
   const closeSessionForUserOutcome = options.closeSessionForUserOutcome ?? (() => ({ kind: 'already-closed' as const }))
   const physicalWorktreeCapability =
-    options.physicalWorktreeCapability ?? testPhysicalWorktreeExecutionCapability(REPO_ROOT)
+    options.physicalWorktreeCapability ?? testPhysicalWorktreeExecutionCapability(REPO_PATH)
   const worktreeOperations = options.worktreeOperations ?? createPhysicalWorktreeOperationCoordinator()
   const manager = {
     closeSessionForUserOutcome: vi.fn(
@@ -350,7 +344,7 @@ describe('terminal-runtime-actions mutation admission', () => {
   })
 
   test('restart cannot spawn a replacement PTY while physical worktree removal is admitted', async () => {
-    const physicalWorktreeCapability = testPhysicalWorktreeExecutionCapability(REPO_ROOT)
+    const physicalWorktreeCapability = testPhysicalWorktreeExecutionCapability(REPO_PATH)
     const worktreeOperations = createPhysicalWorktreeOperationCoordinator()
     const { actions, manager } = makeActions({
       physicalWorktreeCapability,
@@ -397,7 +391,7 @@ describe('terminal-runtime-actions mutation admission', () => {
   })
 
   test('removal waits for an admitted restart operation to settle', async () => {
-    const physicalWorktreeCapability = testPhysicalWorktreeExecutionCapability(REPO_ROOT)
+    const physicalWorktreeCapability = testPhysicalWorktreeExecutionCapability(REPO_PATH)
     const worktreeOperations = createPhysicalWorktreeOperationCoordinator()
     const { actions, manager } = makeActions({
       physicalWorktreeCapability,

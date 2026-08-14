@@ -12,6 +12,15 @@ import {
   resolveGitWorkspacePath,
 } from '#/system/git/branches.ts'
 import { git, gitCommandResultWithOptions } from '#/system/git/git-exec.ts'
+import { nativePathForTest } from '#/test-utils/workspace-id.ts'
+
+const REPO_PATH = nativePathForTest('/repo')
+const REPO_WORKTREE_PATH = nativePathForTest('/repo/worktree')
+const PHYSICAL_REPO_WORKTREE_PATH = nativePathForTest('/physical/repo/worktree')
+const BARE_REPO_PATH = nativePathForTest('/repo.git')
+const PHYSICAL_BARE_REPO_PATH = nativePathForTest('/physical/repo.git')
+const PHYSICAL_COMMON_DIR = nativePathForTest('/physical/repo/.git')
+const PHYSICAL_OBJECTS_DIR = nativePathForTest('/physical/object-store')
 
 vi.mock('#/system/git/git-exec.ts', () => ({
   git: vi.fn(),
@@ -203,37 +212,39 @@ describe('authoritative snapshot reads', () => {
 
 describe('repository common directory', () => {
   test('resolves a non-bare workspace through its physical top level', async () => {
-    vi.mocked(git).mockResolvedValueOnce('false').mockResolvedValueOnce('/repo/worktree')
-    vi.mocked(realpath).mockResolvedValueOnce('/physical/repo/worktree')
+    vi.mocked(git).mockResolvedValueOnce('false').mockResolvedValueOnce(REPO_WORKTREE_PATH)
+    vi.mocked(realpath).mockResolvedValueOnce(PHYSICAL_REPO_WORKTREE_PATH)
 
-    await expect(resolveGitWorkspacePath('/repo/worktree/subdir')).resolves.toBe('/physical/repo/worktree')
+    await expect(resolveGitWorkspacePath(nativePathForTest('/repo/worktree/subdir'))).resolves.toBe(
+      PHYSICAL_REPO_WORKTREE_PATH,
+    )
   })
 
   test('uses the physical common directory for a bare workspace', async () => {
     vi.mocked(git).mockResolvedValueOnce('true').mockResolvedValueOnce('.')
-    vi.mocked(realpath).mockResolvedValueOnce('/physical/repo.git')
+    vi.mocked(realpath).mockResolvedValueOnce(PHYSICAL_BARE_REPO_PATH)
 
-    await expect(resolveGitWorkspacePath('/repo.git')).resolves.toBe('/physical/repo.git')
+    await expect(resolveGitWorkspacePath(BARE_REPO_PATH)).resolves.toBe(PHYSICAL_BARE_REPO_PATH)
   })
 
   test('normalizes a confirmed common directory', async () => {
     vi.mocked(git).mockResolvedValueOnce('../.git')
-    vi.mocked(realpath).mockResolvedValueOnce('/physical/repo/.git')
+    vi.mocked(realpath).mockResolvedValueOnce(PHYSICAL_COMMON_DIR)
 
-    await expect(resolveRepoCommonDir('/repo/worktree')).resolves.toBe('/physical/repo/.git')
-    expect(realpath).toHaveBeenCalledWith('/repo/.git')
+    await expect(resolveRepoCommonDir(REPO_WORKTREE_PATH)).resolves.toBe(PHYSICAL_COMMON_DIR)
+    expect(realpath).toHaveBeenCalledWith(nativePathForTest('/repo/.git'))
   })
 
   test('collapses filesystem aliases onto one physical common directory', async () => {
     vi.mocked(git).mockResolvedValue('.git')
-    vi.mocked(realpath).mockResolvedValue('/physical/repo/.git')
+    vi.mocked(realpath).mockResolvedValue(PHYSICAL_COMMON_DIR)
 
-    const direct = await resolveRepoCommonDir('/repo')
-    const alias = await resolveRepoCommonDir('/alias')
+    const direct = await resolveRepoCommonDir(REPO_PATH)
+    const alias = await resolveRepoCommonDir(nativePathForTest('/alias'))
 
     expect(direct).toBe(alias)
-    expect(realpath).toHaveBeenNthCalledWith(1, '/repo/.git')
-    expect(realpath).toHaveBeenNthCalledWith(2, '/alias/.git')
+    expect(realpath).toHaveBeenNthCalledWith(1, nativePathForTest('/repo/.git'))
+    expect(realpath).toHaveBeenNthCalledWith(2, nativePathForTest('/alias/.git'))
   })
 
   test('preserves authority read failures for strict callers', async () => {
@@ -246,10 +257,10 @@ describe('repository common directory', () => {
 describe('repository objects directory', () => {
   test('resolves the effective object store through Git', async () => {
     vi.mocked(git).mockResolvedValueOnce('../../object-store')
-    vi.mocked(realpath).mockResolvedValueOnce('/physical/object-store')
+    vi.mocked(realpath).mockResolvedValueOnce(PHYSICAL_OBJECTS_DIR)
 
-    await expect(resolveRepoObjectsDir('/repo/worktree')).resolves.toBe('/physical/object-store')
-    expect(git).toHaveBeenCalledWith('/repo/worktree', ['rev-parse', '--git-path', 'objects'], { signal: undefined })
-    expect(realpath).toHaveBeenCalledWith('/object-store')
+    await expect(resolveRepoObjectsDir(REPO_WORKTREE_PATH)).resolves.toBe(PHYSICAL_OBJECTS_DIR)
+    expect(git).toHaveBeenCalledWith(REPO_WORKTREE_PATH, ['rev-parse', '--git-path', 'objects'], { signal: undefined })
+    expect(realpath).toHaveBeenCalledWith(nativePathForTest('/object-store'))
   })
 })

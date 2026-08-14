@@ -122,6 +122,7 @@ async function copyRegularFile(
 }
 
 function isSparseFile(stat: Stats): boolean {
+  if (process.platform === 'win32') return false
   if (stat.size === 0) return false
   return stat.blocks * 512 < stat.size
 }

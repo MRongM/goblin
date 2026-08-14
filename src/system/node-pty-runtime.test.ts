@@ -1,3 +1,4 @@
+import path from 'node:path'
 import { describe, expect, test, vi } from 'vitest'
 import { prepareNodePtyDarwinRuntime, validateNodePtyDarwinRuntime } from '#/system/node-pty-runtime.ts'
 
@@ -11,7 +12,10 @@ describe('prepareNodePtyDarwinRuntime', () => {
       stat: vi.fn(() => ({ mode: 0o644 })) as never,
       chmod: chmod as never,
     })
-    expect(chmod).toHaveBeenCalledWith('/runtime/node_modules/node-pty/prebuilds/darwin-arm64/spawn-helper', 0o755)
+    expect(chmod).toHaveBeenCalledWith(
+      path.join('/runtime/node_modules/node-pty', 'prebuilds/darwin-arm64/spawn-helper'),
+      0o755,
+    )
   })
 
   test('fails validation instead of modifying a packaged runtime', () => {

@@ -3,14 +3,17 @@ import type { WorktreeInfo } from '#/shared/git-types.ts'
 import { normalizeRemoteWorkspaceId } from '#/shared/remote-workspace.ts'
 import { WorkspaceRuntimeStaleError, type WorkspaceRuntimeClosedEvent } from '#/server/modules/workspace-runtimes.ts'
 import { PhysicalWorktreeIdentityResolver } from '#/server/worktree-removal/physical-worktree-identity-resolver.ts'
-import { workspaceIdForTest } from '#/test-utils/workspace-id.ts'
+import { localWorkspaceIdForTest, nativePathForTest } from '#/test-utils/workspace-id.ts'
 import { OperationCancelledError } from '#/shared/operation-cancelled.ts'
 
+const LOCAL_WORKSPACE_PATH = nativePathForTest('/repos/main')
+const LOCAL_WORKTREE_PATH = nativePathForTest('/worktrees/alias')
+const LOCAL_RESOLVED_WORKTREE_PATH = nativePathForTest('/volumes/repo/worktrees/feature')
 const LOCAL_INPUT = {
   userId: 'user-1',
-  workspaceId: workspaceIdForTest('goblin+file:///repos/main'),
+  workspaceId: localWorkspaceIdForTest('/repos/main'),
   workspaceRuntimeId: 'repo-runtime-1',
-  worktreePath: '/worktrees/alias',
+  worktreePath: LOCAL_WORKTREE_PATH,
 }
 describe('PhysicalWorktreeIdentityResolver', () => {
   test('captures the local workspace root without requiring Git worktree membership', async () => {
@@ -24,8 +27,8 @@ describe('PhysicalWorktreeIdentityResolver', () => {
       onWorkspaceRuntimeClosed: () => () => undefined,
     })
 
-    await expect(resolver.capture({ ...LOCAL_INPUT, worktreePath: '/repos/main' })).resolves.toMatchObject({
-      identity: { kind: 'local', endpoint: '/repos/main' },
+    await expect(resolver.capture({ ...LOCAL_INPUT, worktreePath: LOCAL_WORKSPACE_PATH })).resolves.toMatchObject({
+      identity: { kind: 'local', endpoint: LOCAL_WORKSPACE_PATH },
     })
     expect(getLocalWorktrees).not.toHaveBeenCalled()
     resolver.dispose()
@@ -40,7 +43,7 @@ describe('PhysicalWorktreeIdentityResolver', () => {
     const resolver = new PhysicalWorktreeIdentityResolver({
       getLocalWorktrees,
       async nativeRealpath() {
-        return '/volumes/repo/worktrees/feature'
+        return LOCAL_RESOLVED_WORKTREE_PATH
       },
       isCurrentWorkspaceRuntime: () => true,
       onWorkspaceRuntimeClosed: () => () => undefined,
@@ -50,14 +53,14 @@ describe('PhysicalWorktreeIdentityResolver', () => {
       identity: {
         kind: 'local',
         executionNamespaceId: 'local',
-        endpoint: '/volumes/repo/worktrees/feature',
+        endpoint: LOCAL_RESOLVED_WORKTREE_PATH,
       },
     })
     await expect(resolver.capture(LOCAL_INPUT)).resolves.toMatchObject({
-      identity: { endpoint: '/volumes/repo/worktrees/feature' },
+      identity: { endpoint: LOCAL_RESOLVED_WORKTREE_PATH },
     })
     expect(worktreeReads).toBe(2)
-    expect(getLocalWorktrees).toHaveBeenCalledWith('/repos/main', expect.any(AbortSignal))
+    expect(getLocalWorktrees).toHaveBeenCalledWith(LOCAL_WORKSPACE_PATH, expect.any(AbortSignal))
     resolver.dispose()
   })
 
@@ -68,7 +71,7 @@ describe('PhysicalWorktreeIdentityResolver', () => {
         return present ? [{ path: LOCAL_INPUT.worktreePath } as WorktreeInfo] : []
       },
       async nativeRealpath() {
-        return '/volumes/repo/worktrees/feature'
+        return LOCAL_RESOLVED_WORKTREE_PATH
       },
       isCurrentWorkspaceRuntime: () => true,
       onWorkspaceRuntimeClosed: () => () => undefined,
@@ -79,7 +82,7 @@ describe('PhysicalWorktreeIdentityResolver', () => {
     await expect(resolver.capture(LOCAL_INPUT)).rejects.toThrow('error.invalid-worktree-path')
     present = true
     await expect(resolver.capture(LOCAL_INPUT)).resolves.toMatchObject({
-      identity: { endpoint: '/volumes/repo/worktrees/feature' },
+      identity: { endpoint: LOCAL_RESOLVED_WORKTREE_PATH },
     })
     resolver.dispose()
   })
@@ -296,7 +299,7 @@ describe('PhysicalWorktreeIdentityResolver', () => {
   test('rejects a local path outside the validated worktree list', async () => {
     const resolver = new PhysicalWorktreeIdentityResolver({
       async getLocalWorktrees() {
-        return [{ path: '/worktrees/known' } as WorktreeInfo]
+        return [{ path: nativePathForTest('/worktrees/known') } as WorktreeInfo]
       },
       async nativeRealpath(input) {
         return input
@@ -305,7 +308,9 @@ describe('PhysicalWorktreeIdentityResolver', () => {
       onWorkspaceRuntimeClosed: () => () => undefined,
     })
 
-    await expect(resolver.capture({ ...LOCAL_INPUT, worktreePath: '/worktrees/unknown' })).rejects.toThrow(
+    await expect(
+      resolver.capture({ ...LOCAL_INPUT, worktreePath: nativePathForTest('/worktrees/unknown') }),
+    ).rejects.toThrow(
       'error.invalid-worktree-path',
     )
     resolver.dispose()

@@ -13,6 +13,7 @@ import {
 } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { execFileSync } from 'node:child_process'
 import { execa } from 'execa'
 import { afterEach, describe, expect, test } from 'vitest'
 import {
@@ -30,11 +31,28 @@ const originalPath = process.env.PATH
 const originalPathExt = process.env.PATHEXT
 const tempDirs: string[] = []
 const testPosix = process.platform === 'win32' ? test.skip : test
+const bashCommand = resolveBashCommand()
+
+function resolveBashCommand(): string {
+  if (process.platform !== 'win32') return 'bash'
+  const gitPath = execFileSync('where.exe', ['git.exe'], { encoding: 'utf8' })
+    .split(/\r?\n/u)
+    .find(Boolean)
+  if (!gitPath) throw new Error('Git for Windows is required for Bash integration tests')
+  return path.join(path.dirname(path.dirname(gitPath)), 'bin', 'bash.exe')
+}
 
 function linuxStatEnv(): NodeJS.ProcessEnv {
   const root = mkdtempSync(path.join(os.tmpdir(), 'goblin-linux-stat-'))
   tempDirs.push(root)
   return installLinuxStatShim(root)
+}
+
+function executeBashScript(
+  script: string,
+  options: { env?: NodeJS.ProcessEnv; reject?: boolean } = {},
+) {
+  return execa(bashCommand, ['-s'], { ...options, input: script })
 }
 
 afterEach(() => {
@@ -421,7 +439,7 @@ describe('remote ssh command builders', () => {
       exclude: ['config dir/*.log'],
     })
 
-    const result = await execa('bash', ['-c', invocation.script], { env: linuxStatEnv() })
+    const result = await executeBashScript(invocation.script, { env: linuxStatEnv() })
 
     expect(result.stdout).toBe(
       encodeRemoteWorktreeBootstrapRecord('copy', 'foo bar.txt') +
@@ -606,7 +624,7 @@ describe('remote ssh command builders', () => {
       setup,
     })
 
-    const result = await execa('bash', ['-lc', invocation.script], { env: { SHELL: '/bin/sh' } })
+    const result = await executeBashScript(invocation.script, { env: { SHELL: '/bin/sh' } })
 
     expect(result.stdout).toBe(encodeRemoteWorktreeBootstrapRecord('setup', setup))
     expect(result.stderr).toBe('')
@@ -631,7 +649,7 @@ describe('remote ssh command builders', () => {
       exclude: [],
     })
 
-    const result = await execa('bash', ['-lc', invocation.script], { reject: false })
+    const result = await executeBashScript(invocation.script, { reject: false })
 
     expect(result.exitCode).toBe(1)
     expect(result.stderr).toContain('path matches multiple materialization modes: shared.local')
@@ -658,7 +676,7 @@ describe('remote ssh command builders', () => {
       exclude: [],
     })
 
-    const result = await execa('bash', ['-lc', invocation.script])
+    const result = await executeBashScript(invocation.script)
 
     expect(result.stdout).toBe(encodeRemoteWorktreeBootstrapRecord('copy', 'config/app.json'))
     expect(readFileSync(path.join(targetRoot, 'config', 'app.json'), 'utf8')).toBe('ok\n')

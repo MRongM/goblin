@@ -153,15 +153,10 @@ describe('spawnTerminalPtyRuntime', () => {
 
   test('uses the inherited SHELL on Unix when it is set, with -l for login mode', () => {
     vi.mocked(userInfo).mockReturnValue({ shell: '/bin/zsh' } as ReturnType<typeof userInfo>)
-    spawnMock.mockReturnValue(ptyStub())
 
-    spawnTerminalPtyRuntime({
-      cwd: '/repo',
-      cols: 80,
-      rows: 24,
-    })
+    const resolved = resolveLocalShell({}, { SHELL: '/bin/zsh' }, 'linux')
 
-    expect(spawnMock).toHaveBeenCalledWith('/bin/zsh', ['-l'], expect.objectContaining({ cwd: '/repo' }))
+    expect(resolved).toEqual({ command: '/bin/zsh', args: ['-l'] })
     // Explicit env.SHELL must win — passwd fallback is only consulted when
     // the inherited env is silent (CI / devcontainer scenarios).
     expect(userInfo).not.toHaveBeenCalled()
@@ -170,7 +165,11 @@ describe('spawnTerminalPtyRuntime', () => {
   test('runs a startup shell command through the login shell and returns to an interactive shell', () => {
     vi.mocked(userInfo).mockReturnValue({ shell: '/bin/zsh' } as ReturnType<typeof userInfo>)
 
-    const resolved = resolveLocalShellWithStartupShellCommand("  bat '/repo/README.md'\r", { SHELL: '/bin/zsh' })
+    const resolved = resolveLocalShellWithStartupShellCommand(
+      "  bat '/repo/README.md'\r",
+      { SHELL: '/bin/zsh' },
+      'linux',
+    )
 
     expect(resolved).toEqual({
       command: '/bin/zsh',
@@ -182,10 +181,26 @@ describe('spawnTerminalPtyRuntime', () => {
   test('startup shell command resolution falls back to normal shell resolution for blank commands', () => {
     vi.mocked(userInfo).mockReturnValue({ shell: '/bin/zsh' } as ReturnType<typeof userInfo>)
 
-    expect(resolveLocalShellWithStartupShellCommand(' \r\n ', { SHELL: '/bin/zsh' })).toEqual({
+    expect(resolveLocalShellWithStartupShellCommand(' \r\n ', { SHELL: '/bin/zsh' }, 'linux')).toEqual({
       command: '/bin/zsh',
       args: ['-l'],
     })
+  })
+
+  test('uses Windows PowerShell as the Windows default shell', () => {
+    expect(resolveLocalShell({}, { COMSPEC: 'C:\\Windows\\System32\\cmd.exe' }, 'win32')).toEqual({
+      command: 'powershell.exe',
+      args: ['-NoLogo'],
+    })
+    expect(userInfo).not.toHaveBeenCalled()
+  })
+
+  test('runs a Windows startup command and keeps PowerShell interactive', () => {
+    expect(resolveLocalShellWithStartupShellCommand('codex\r', {}, 'win32')).toEqual({
+      command: 'powershell.exe',
+      args: ['-NoLogo', '-NoExit', '-Command', 'codex'],
+    })
+    expect(userInfo).not.toHaveBeenCalled()
   })
 
   test('rejects mixing startup shell command with explicit process command', () => {
@@ -251,6 +266,8 @@ describe('spawnTerminalPtyRuntime', () => {
     spawnMock.mockReturnValue(ptyStub())
 
     spawnTerminalPtyRuntime({
+      command: '/bin/zsh',
+      args: ['-l'],
       cwd: '/repo',
       cols: 80,
       rows: 24,
@@ -282,7 +299,7 @@ describe('spawnTerminalPtyRuntime', () => {
   test('falls back to os.userInfo().shell when SHELL is not set (CI / devcontainer)', () => {
     vi.mocked(userInfo).mockReturnValue({ shell: '/usr/bin/zsh' } as ReturnType<typeof userInfo>)
 
-    const resolved = resolveLocalShell({}, { PATH: '/usr/bin' })
+    const resolved = resolveLocalShell({}, { PATH: '/usr/bin' }, 'linux')
 
     expect(resolved).toEqual({ command: '/usr/bin/zsh', args: ['-l'] })
     expect(userInfo).toHaveBeenCalledTimes(1)
@@ -291,7 +308,7 @@ describe('spawnTerminalPtyRuntime', () => {
   test('treats whitespace-only SHELL as unset and falls through to userInfo', () => {
     vi.mocked(userInfo).mockReturnValue({ shell: '/usr/bin/zsh' } as ReturnType<typeof userInfo>)
 
-    const resolved = resolveLocalShell({}, { SHELL: '   ' })
+    const resolved = resolveLocalShell({}, { SHELL: '   ' }, 'linux')
 
     expect(resolved).toEqual({ command: '/usr/bin/zsh', args: ['-l'] })
   })
@@ -299,7 +316,7 @@ describe('spawnTerminalPtyRuntime', () => {
   test('treats whitespace-only userInfo().shell as unset and falls back to /bin/sh', () => {
     vi.mocked(userInfo).mockReturnValue({ shell: '   ' } as ReturnType<typeof userInfo>)
 
-    const resolved = resolveLocalShell({}, {})
+    const resolved = resolveLocalShell({}, {}, 'linux')
 
     expect(resolved).toEqual({ command: '/bin/sh', args: ['-l'] })
   })
@@ -309,7 +326,7 @@ describe('spawnTerminalPtyRuntime', () => {
       throw new Error('userInfo unavailable')
     })
 
-    const resolved = resolveLocalShell({}, {})
+    const resolved = resolveLocalShell({}, {}, 'linux')
 
     expect(resolved).toEqual({ command: '/bin/sh', args: ['-l'] })
   })

@@ -6,18 +6,22 @@ import { workspacePaneTabsTargetIdentityKey } from '#/shared/workspace-pane-tabs
 import type { ServerWorkspaceState } from '#/shared/api-types.ts'
 import type { WorkspaceSessionEntry } from '#/shared/remote-workspace.ts'
 import { createTestWorkspacePaneTabsHost } from '#/server/test-utils/workspace-pane-tabs-host.ts'
-import { workspaceIdForTest } from '#/test-utils/workspace-id.ts'
+import { localWorkspaceIdForTest, workspaceIdForTest } from '#/test-utils/workspace-id.ts'
 import { RestoredWorkspaceRuntimeSchema } from '#/shared/settings-response-schema.ts'
 
-const ACTIVE_WORKSPACE_ID = workspaceIdForTest('goblin+file:///repo-active')
-const STUB_WORKSPACE_ID = workspaceIdForTest('goblin+file:///repo-stub')
-const NESTED_STUB_WORKSPACE_ID = workspaceIdForTest('goblin+file:///repo-stub/src')
-const REPO_A_ID = workspaceIdForTest('goblin+file:///repo-a')
-const REPO_B_ID = workspaceIdForTest('goblin+file:///repo-b')
-const LOCAL_WORKSPACE_ID = workspaceIdForTest('goblin+file:///repo')
+const ACTIVE_WORKSPACE_ID = localWorkspaceIdForTest('/repo-active')
+const STUB_WORKSPACE_ID = localWorkspaceIdForTest('/repo-stub')
+const NESTED_STUB_WORKSPACE_ID = localWorkspaceIdForTest('/repo-stub/src')
+const REPO_A_ID = localWorkspaceIdForTest('/repo-a')
+const REPO_B_ID = localWorkspaceIdForTest('/repo-b')
+const LOCAL_WORKSPACE_ID = localWorkspaceIdForTest('/repo')
 const REMOTE_WORKSPACE_ID = workspaceIdForTest('goblin+ssh://prod/srv/repo')
 const USER_ID = 'user-test'
 const CLIENT_ID = 'client_test000000000000'
+
+function runtimeIdFor(workspaceId: string): string {
+  return `runtime-${workspaceId.replace(/[^a-z0-9]/gi, '_')}`
+}
 
 const mocks = vi.hoisted(() => ({
   WorkspaceRuntimeStaleError: class WorkspaceRuntimeStaleError extends Error {
@@ -86,7 +90,7 @@ describe('restoreServerWorkspace — active-only restore', () => {
     mocks.workspaceProbes.clear()
     mocks.acquireWorkspaceRuntimeLease.mockImplementation((_userId: string, workspaceId: string) => ({
       workspaceId,
-      workspaceRuntimeId: `runtime-${workspaceId.replace(/[^a-z0-9]/gi, '_')}`,
+      workspaceRuntimeId: runtimeIdFor(workspaceId),
       generation: 1,
     }))
     mocks.captureWorkspaceRuntimeMembershipCapability.mockImplementation(
@@ -165,33 +169,33 @@ describe('restoreServerWorkspace — active-only restore', () => {
     expect(result.status).toBe('restored')
     // Every local Workspace is capability-probed; only the active Git Workspace is projected.
     expect(mocks.probeWorkspace).toHaveBeenCalledTimes(2)
-    expect(mocks.probeWorkspace).toHaveBeenCalledWith('goblin+file:///repo-active', expect.any(String), {
+    expect(mocks.probeWorkspace).toHaveBeenCalledWith(ACTIVE_WORKSPACE_ID, expect.any(String), {
       signal: undefined,
     })
-    expect(mocks.probeWorkspace).toHaveBeenCalledWith('goblin+file:///repo-stub', expect.any(String), {
+    expect(mocks.probeWorkspace).toHaveBeenCalledWith(STUB_WORKSPACE_ID, expect.any(String), {
       signal: undefined,
     })
     expect(mocks.readRepoSnapshot).toHaveBeenCalledTimes(1)
     const repos = result.runtime.workspaces
-    const active = repos.find((r) => r.workspaceId === 'goblin+file:///repo-active')!
-    const stub = repos.find((r) => r.workspaceId === 'goblin+file:///repo-stub')!
+    const active = repos.find((r) => r.workspaceId === ACTIVE_WORKSPACE_ID)!
+    const stub = repos.find((r) => r.workspaceId === STUB_WORKSPACE_ID)!
     // Keep the deferred-stub producer and its HTTP consumer contract
     // connected. This state is easy to omit from hand-built schema fixtures.
     expect(decodeWith(RestoredWorkspaceRuntimeSchema)(stub)).toEqual(stub)
     expect(active.repoSnapshot).not.toBeNull()
     expect(stub.repoSnapshot).toBeNull()
-    expect(stub.workspaceRuntimeId).toBe('runtime-goblin_file____repo_stub')
+    expect(stub.workspaceRuntimeId).toBe(runtimeIdFor(STUB_WORKSPACE_ID))
     // Git targets remain deferred until lazy projection, but workspace-root
     // layout is capability-invariant and can bind immediately.
     expect(result.runtime.workspacePaneTabs).toEqual([
       {
-        workspaceId: 'goblin+file:///repo-active',
-        workspaceRuntimeId: 'runtime-goblin_file____repo_active',
+        workspaceId: ACTIVE_WORKSPACE_ID,
+        workspaceRuntimeId: runtimeIdFor(ACTIVE_WORKSPACE_ID),
         snapshot: { revision: 0, entries: [] },
       },
       {
-        workspaceId: 'goblin+file:///repo-stub',
-        workspaceRuntimeId: 'runtime-goblin_file____repo_stub',
+        workspaceId: STUB_WORKSPACE_ID,
+        workspaceRuntimeId: runtimeIdFor(STUB_WORKSPACE_ID),
         snapshot: { revision: 0, entries: [] },
       },
     ])
@@ -220,8 +224,8 @@ describe('restoreServerWorkspace — active-only restore', () => {
 
     expect(result.openWorkspaceEntries).toEqual([repoA, repoB])
     expect(mocks.acquireWorkspaceRuntimeLease).toHaveBeenCalledTimes(2)
-    expect(mocks.acquireWorkspaceRuntimeLease).toHaveBeenCalledWith(USER_ID, 'goblin+file:///repo-a', CLIENT_ID)
-    expect(mocks.acquireWorkspaceRuntimeLease).toHaveBeenCalledWith(USER_ID, 'goblin+file:///repo-b', CLIENT_ID)
+    expect(mocks.acquireWorkspaceRuntimeLease).toHaveBeenCalledWith(USER_ID, REPO_A_ID, CLIENT_ID)
+    expect(mocks.acquireWorkspaceRuntimeLease).toHaveBeenCalledWith(USER_ID, REPO_B_ID, CLIENT_ID)
     expect(mocks.releaseWorkspaceRuntimeMembershipLease).not.toHaveBeenCalled()
   })
 
@@ -251,7 +255,7 @@ describe('restoreServerWorkspace — active-only restore', () => {
     expect(mocks.releaseWorkspaceRuntimeMembershipLease).toHaveBeenCalledWith(
       USER_ID,
       CLIENT_ID,
-      expect.objectContaining({ workspaceId: 'goblin+file:///repo-a' }),
+      expect.objectContaining({ workspaceId: REPO_A_ID }),
     )
   })
 
@@ -322,17 +326,15 @@ describe('restoreServerWorkspace — active-only restore', () => {
     })
 
     expect(mocks.probeWorkspace).toHaveBeenCalledTimes(2)
-    expect(mocks.probeWorkspace).toHaveBeenCalledWith('goblin+file:///repo-a', expect.any(String), {
+    expect(mocks.probeWorkspace).toHaveBeenCalledWith(REPO_A_ID, expect.any(String), {
       signal: undefined,
     })
-    expect(mocks.probeWorkspace).toHaveBeenCalledWith('goblin+file:///repo-b', expect.any(String), {
+    expect(mocks.probeWorkspace).toHaveBeenCalledWith(REPO_B_ID, expect.any(String), {
       signal: undefined,
     })
     expect(mocks.readRepoSnapshot).toHaveBeenCalledTimes(1)
-    expect(result.runtime.workspaces.find((r) => r.workspaceId === 'goblin+file:///repo-a')?.repoSnapshot).toBeNull()
-    expect(
-      result.runtime.workspaces.find((r) => r.workspaceId === 'goblin+file:///repo-b')?.repoSnapshot,
-    ).not.toBeNull()
+    expect(result.runtime.workspaces.find((r) => r.workspaceId === REPO_A_ID)?.repoSnapshot).toBeNull()
+    expect(result.runtime.workspaces.find((r) => r.workspaceId === REPO_B_ID)?.repoSnapshot).not.toBeNull()
   })
 
   test('restores a non-active nested directory as a plain Workspace', async () => {
@@ -358,15 +360,15 @@ describe('restoreServerWorkspace — active-only restore', () => {
     expect(result.openWorkspaceEntries).toEqual(workspace.openWorkspaceEntries)
     expect(result.runtime.workspaces).toHaveLength(2)
     expect(result.runtime.workspaces[1]).toMatchObject({
-      workspaceId: 'goblin+file:///repo-stub/src',
+      workspaceId: NESTED_STUB_WORKSPACE_ID,
       repoSnapshot: null,
       workspaceProbe: { capabilities: { git: { status: 'unavailable' } } },
     })
     expect(TEST_WORKSPACE_CAPABILITY_TRANSITION_HOST.commitGitCapabilityRemoval).toHaveBeenCalledWith({
       runtimeCapability: expect.objectContaining({
         userId: USER_ID,
-        workspaceId: 'goblin+file:///repo-stub/src',
-        workspaceRuntimeId: 'runtime-goblin_file____repo_stub_src',
+        workspaceId: NESTED_STUB_WORKSPACE_ID,
+        workspaceRuntimeId: runtimeIdFor(NESTED_STUB_WORKSPACE_ID),
       }),
     })
     expect(TEST_WORKSPACE_CAPABILITY_TRANSITION_HOST.commitGitCapabilityRemoval).toHaveBeenCalledOnce()
@@ -411,7 +413,7 @@ describe('restoreServerWorkspace — active-only restore', () => {
       workspacePaneTabsByTargetByWorkspace: {
         // The Git target cannot be validated without the deferred projection;
         // workspace-level tabs can still be restored independently.
-        'goblin+file:///repo-stub': { [staleTargetKey]: [workspacePaneStaticTabEntry('history')] },
+        [STUB_WORKSPACE_ID]: { [staleTargetKey]: [workspacePaneStaticTabEntry('history')] },
       },
     }
     mocks.getServerWorkspaceState.mockResolvedValue(workspace)
@@ -429,7 +431,7 @@ describe('restoreServerWorkspace — active-only restore', () => {
   })
 
   test('restores workspace-root layout while Git enrichment remains deferred after an operational diagnostic', async () => {
-    const workspaceId = 'goblin+file:///repo'
+    const workspaceId = LOCAL_WORKSPACE_ID
     const workspace = {
       ...defaultServerWorkspaceState(),
       openWorkspaceEntries: [{ id: workspaceId }],

@@ -4,12 +4,19 @@ import type { CommandOutcome } from '#/system/command-execution.ts'
 import { commandOutcomeForTest } from '#/test-utils/command-outcome.ts'
 import {
   LINKED_REPO_ID,
+  LINKED_REPO_PATH,
+  REPO_COMMON_DIR,
   REPO_ID,
+  REPO_PATH,
+  WORKTREE_REPO_PATH,
   expectNoRepoMetadataInvalidations,
   mocks,
   removeLocalRepoWorktreeForTest,
   repoRuntimeCapabilityForTest,
 } from '#/server/test-utils/repo-module.ts'
+import { nativePathForTest } from '#/test-utils/workspace-id.ts'
+
+const OTHER_REPO_COMMON_DIR = nativePathForTest('/tmp/other-repo/.git')
 
 describe('fetchRepo canonical boundaries', () => {
   test('does not execute fetch when affected-worktree discovery fails', async () => {
@@ -51,7 +58,7 @@ describe('fetchRepo canonical boundaries', () => {
     )
 
     expect(result).toEqual({ ok: true, message: 'fetched', repoIdsToInvalidate: [REPO_ID] })
-    expect(mocks.fetchAll).toHaveBeenCalledWith('/tmp/repo', expect.any(AbortSignal))
+    expect(mocks.fetchAll).toHaveBeenCalledWith(REPO_PATH, expect.any(AbortSignal))
     expectNoRepoMetadataInvalidations()
   })
 
@@ -128,10 +135,10 @@ describe('fetchRepo canonical boundaries', () => {
   })
 
   test('shares successful fetch time across worktrees with one write boundary', async () => {
-    mocks.resolveRepoCommonDir.mockResolvedValue('/tmp/repo/.git')
+    mocks.resolveRepoCommonDir.mockResolvedValue(REPO_COMMON_DIR)
     mocks.readWorktreeMembership.mockResolvedValueOnce([
-      { path: '/tmp/repo', branch: 'main', isBare: false, isPrimary: true },
-      { path: '/tmp/repo-linked', branch: 'feature/a', isBare: false, isPrimary: false },
+      { path: REPO_PATH, branch: 'main', isBare: false, isPrimary: true },
+      { path: LINKED_REPO_PATH, branch: 'feature/a', isBare: false, isPrimary: false },
     ])
     mocks.fetchAll.mockResolvedValueOnce(commandOutcomeForTest({ ok: true, message: 'fetched' }))
     const { fetchRepo } = await import('#/server/modules/repo-write-paths.ts')
@@ -149,8 +156,8 @@ describe('fetchRepo canonical boundaries', () => {
 
   test('publishes sibling worktree snapshot invalidations after a successful sync', async () => {
     mocks.readWorktreeMembership.mockResolvedValueOnce([
-      { path: '/tmp/repo', branch: 'main', isBare: false, isPrimary: true },
-      { path: '/tmp/repo-linked', branch: 'feature/a', isBare: false, isPrimary: false },
+      { path: REPO_PATH, branch: 'main', isBare: false, isPrimary: true },
+      { path: LINKED_REPO_PATH, branch: 'feature/a', isBare: false, isPrimary: false },
     ])
     mocks.fetchAll.mockResolvedValueOnce(commandOutcomeForTest({ ok: true, message: 'fetched' }))
 
@@ -167,11 +174,11 @@ describe('fetchRepo canonical boundaries', () => {
 
   test('user sync waits for an active sibling worktree background sync before fetching', async () => {
     mocks.resolveRepoCommonDir.mockImplementation(async (cwd: string) =>
-      cwd === '/tmp/repo' || cwd === '/tmp/repo-linked' ? '/tmp/repo/.git' : `${cwd}/.git`,
+      cwd === REPO_PATH || cwd === LINKED_REPO_PATH ? REPO_COMMON_DIR : OTHER_REPO_COMMON_DIR,
     )
     mocks.readWorktreeMembership.mockResolvedValue([
-      { path: '/tmp/repo', branch: 'main', isBare: false, isPrimary: true },
-      { path: '/tmp/repo-linked', branch: 'feature/a', isBare: false, isPrimary: false },
+      { path: REPO_PATH, branch: 'main', isBare: false, isPrimary: true },
+      { path: LINKED_REPO_PATH, branch: 'feature/a', isBare: false, isPrimary: false },
     ])
     const fetch = Promise.withResolvers<CommandOutcome>()
     mocks.fetchAll.mockImplementationOnce(() => fetch.promise)
@@ -280,15 +287,15 @@ describe('fetchRepo canonical boundaries', () => {
       import('#/server/worktree-removal/physical-worktree-capability.ts'),
     ])
     const physicalWorktreeCapability = issuePhysicalWorktreeExecutionCapability(
-      { kind: 'local', executionNamespaceId: 'local', endpoint: '/tmp/repo-worktree' },
+      { kind: 'local', executionNamespaceId: 'local', endpoint: WORKTREE_REPO_PATH },
       {
         userId: 'test-user',
         workspaceId: REPO_ID,
         workspaceRuntimeId: 'test-runtime',
-        worktreePath: '/tmp/repo-worktree',
+        worktreePath: WORKTREE_REPO_PATH,
         execution: {
           kind: 'local',
-          canonicalWorktreePath: '/tmp/repo-worktree',
+          canonicalWorktreePath: WORKTREE_REPO_PATH,
         },
         runtimeSignal: new AbortController().signal,
       },
@@ -297,7 +304,7 @@ describe('fetchRepo canonical boundaries', () => {
     await expect(
       removeCapturedRepoWorktree(
         REPO_ID,
-        { branch: 'feature/a', worktreePath: '/tmp/repo-worktree', deleteBranch: true },
+        { branch: 'feature/a', worktreePath: WORKTREE_REPO_PATH, deleteBranch: true },
         lifecycle,
         physicalWorktreeCapability,
         repoRuntimeCapabilityForTest(REPO_ID, 'test-runtime'),
@@ -309,7 +316,7 @@ describe('fetchRepo canonical boundaries', () => {
 
   test('does not register a captured removal when locator and physical repository initially disagree', async () => {
     mocks.resolveRepoCommonDir.mockImplementation(async (cwd: string) =>
-      cwd === '/tmp/repo' ? '/tmp/repo/.git' : '/tmp/other-repo/.git',
+      cwd === REPO_PATH ? REPO_COMMON_DIR : OTHER_REPO_COMMON_DIR,
     )
     const beforeRemove = vi.fn(async () => ({ ok: true as const, message: '' }))
     const { repoWriteOperationCoordinatorStatsForTests } =
@@ -347,7 +354,7 @@ describe('fetchRepo canonical boundaries', () => {
         captureStarted.resolve()
         await releaseCapture.promise
       }
-      return '/tmp/repo/.git'
+      return REPO_COMMON_DIR
     })
     const beforeRemove = vi.fn(async () => ({ ok: true as const, message: '' }))
     const [writePaths, capabilityModule, workspaceRuntimes, coordinator] = await Promise.all([
@@ -359,15 +366,15 @@ describe('fetchRepo canonical boundaries', () => {
     workspaceRuntimes.clearWorkspaceRuntimesForUser(userId)
     const lease = workspaceRuntimes.acquireWorkspaceRuntimeLease(userId, REPO_ID, clientId)
     const physicalWorktreeCapability = capabilityModule.issuePhysicalWorktreeExecutionCapability(
-      { kind: 'local', executionNamespaceId: 'local', endpoint: '/tmp/repo-worktree' },
+      { kind: 'local', executionNamespaceId: 'local', endpoint: WORKTREE_REPO_PATH },
       {
         userId,
         workspaceId: REPO_ID,
         workspaceRuntimeId: lease.workspaceRuntimeId,
-        worktreePath: '/tmp/repo-worktree',
+        worktreePath: WORKTREE_REPO_PATH,
         execution: {
           kind: 'local',
-          canonicalWorktreePath: '/tmp/repo-worktree',
+          canonicalWorktreePath: WORKTREE_REPO_PATH,
         },
         runtimeSignal: new AbortController().signal,
       },
@@ -375,7 +382,7 @@ describe('fetchRepo canonical boundaries', () => {
 
     const removal = writePaths.removeCapturedRepoWorktree(
       REPO_ID,
-      { branch: 'feature/a', worktreePath: '/tmp/repo-worktree', deleteBranch: true },
+      { branch: 'feature/a', worktreePath: WORKTREE_REPO_PATH, deleteBranch: true },
       {
         beforeRemove,
         afterWorktreeRemoved: vi.fn(async () => ({ ok: true as const, message: '' })),

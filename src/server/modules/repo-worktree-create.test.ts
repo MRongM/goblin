@@ -7,17 +7,25 @@ import { flushMicrotasks } from '#/test-utils/microtasks.ts'
 import { useFakeTimers } from '#/test-utils/timers.ts'
 import {
   LINKED_REPO_ID,
+  LINKED_REPO_PATH,
+  REPO_COMMON_DIR,
   REPO_ID,
+  REPO_PATH,
   WORKTREE_BOOTSTRAP_CONFIG_HASH,
   WORKTREE_REPO_ID,
+  WORKTREE_REPO_PATH,
   createLocalRepoWorktreeWithBootstrap,
   mocks,
   removeRepoWorktreeForTest,
   successfulRemovalLifecycle,
 } from '#/server/test-utils/repo-module.ts'
 import { repoRuntimeCapabilityForTest } from '#/server/test-utils/repo-module.ts'
+import { nativePathForTest } from '#/test-utils/workspace-id.ts'
 
 const SKIP_WORKTREE_BOOTSTRAP = { kind: 'skip' as const }
+const REQUESTED_WORKTREE_PATH = nativePathForTest('/tmp/nested/../repo-worktree')
+const WORKTREE_A_PATH = nativePathForTest('/tmp/repo-worktree-a')
+const WORKTREE_B_PATH = nativePathForTest('/tmp/repo-worktree-b')
 
 describe('repo worktree creation', () => {
   test.each([
@@ -42,15 +50,15 @@ describe('repo worktree creation', () => {
 
   test('createRepoWorktree publishes snapshot invalidations for existing siblings and the new worktree', async () => {
     mocks.readWorktreeMembership.mockResolvedValueOnce([
-      { path: '/tmp/repo', branch: 'main', isBare: false, isPrimary: true },
-      { path: '/tmp/repo-linked', branch: 'feature/b', isBare: false, isPrimary: false },
+      { path: REPO_PATH, branch: 'main', isBare: false, isPrimary: true },
+      { path: LINKED_REPO_PATH, branch: 'feature/b', isBare: false, isPrimary: false },
     ])
     const { createRepoWorktree } = await import('#/server/modules/repo-write-paths.ts')
 
     const result = await createRepoWorktree(
       REPO_ID,
       {
-        worktreePath: '/tmp/repo-worktree',
+        worktreePath: WORKTREE_REPO_PATH,
         mode: { kind: 'newBranch', newBranch: 'feature/a', baseRef: 'main' },
       },
       repoRuntimeCapabilityForTest(REPO_ID, 'test-runtime'),
@@ -58,34 +66,34 @@ describe('repo worktree creation', () => {
     )
 
     expect(result).toMatchObject({ ok: true, message: 'ok' })
-    expect(result.createdWorktreePath).toBe('/tmp/repo-worktree')
+    expect(result.createdWorktreePath).toBe(WORKTREE_REPO_PATH)
     expect(result.repoIdsToInvalidate).toEqual([REPO_ID, LINKED_REPO_ID, WORKTREE_REPO_ID])
   })
 
   test('returns the physical created path rather than the requested spelling', async () => {
     mocks.getRepoRoot.mockImplementation(async (input: string) =>
-      input === '/tmp/nested/../repo-worktree' ? '/tmp/repo-worktree' : input,
+      input === REQUESTED_WORKTREE_PATH ? WORKTREE_REPO_PATH : input,
     )
     const { createRepoWorktree } = await import('#/server/modules/repo-write-paths.ts')
 
     const result = await createRepoWorktree(
       REPO_ID,
       {
-        worktreePath: '/tmp/nested/../repo-worktree',
+        worktreePath: REQUESTED_WORKTREE_PATH,
         mode: { kind: 'newBranch', newBranch: 'feature/a', baseRef: 'main' },
       },
       repoRuntimeCapabilityForTest(REPO_ID, 'test-runtime'),
       SKIP_WORKTREE_BOOTSTRAP,
     )
 
-    expect(result).toMatchObject({ ok: true, createdWorktreePath: '/tmp/repo-worktree' })
-    expect(mocks.getRepoRoot).toHaveBeenCalledWith('/tmp/nested/../repo-worktree', { signal: undefined })
+    expect(result).toMatchObject({ ok: true, createdWorktreePath: WORKTREE_REPO_PATH })
+    expect(mocks.getRepoRoot).toHaveBeenCalledWith(REQUESTED_WORKTREE_PATH, { signal: undefined })
     expect(result.repoIdsToInvalidate).toEqual([REPO_ID, WORKTREE_REPO_ID])
   })
 
   test('reports recovery when the created local target cannot be resolved', async () => {
     mocks.getRepoRoot.mockImplementation(async (input: string) => {
-      if (input === '/tmp/repo-worktree') return ''
+      if (input === WORKTREE_REPO_PATH) return ''
       return input
     })
     const { createRepoWorktree } = await import('#/server/modules/repo-write-paths.ts')
@@ -93,7 +101,7 @@ describe('repo worktree creation', () => {
     const result = await createRepoWorktree(
       REPO_ID,
       {
-        worktreePath: '/tmp/repo-worktree',
+        worktreePath: WORKTREE_REPO_PATH,
         mode: { kind: 'newBranch', newBranch: 'feature/a', baseRef: 'main' },
       },
       repoRuntimeCapabilityForTest(REPO_ID, 'test-runtime'),
@@ -114,7 +122,7 @@ describe('repo worktree creation', () => {
     const result = await createRepoWorktree(
       REPO_ID,
       {
-        worktreePath: '/tmp/repo-worktree',
+        worktreePath: WORKTREE_REPO_PATH,
         mode: { kind: 'newBranch', newBranch: 'feature/a', baseRef: 'main' },
       },
       repoRuntimeCapabilityForTest(REPO_ID, 'test-runtime'),
@@ -130,8 +138,8 @@ describe('repo worktree creation', () => {
 
   test('createRepoWorktree returns timeout failure and invalidates the complete possible impact scope', async () => {
     mocks.readWorktreeMembership.mockResolvedValueOnce([
-      { path: '/tmp/repo', branch: 'main', isBare: false, isPrimary: true },
-      { path: '/tmp/repo-linked', branch: 'feature/b', isBare: false, isPrimary: false },
+      { path: REPO_PATH, branch: 'main', isBare: false, isPrimary: true },
+      { path: LINKED_REPO_PATH, branch: 'feature/b', isBare: false, isPrimary: false },
     ])
     mocks.createWorktree.mockResolvedValueOnce(
       commandOutcomeForTest({ ok: false, message: 'error.worktree-create-timeout-check-state' }, 'timed-out'),
@@ -141,7 +149,7 @@ describe('repo worktree creation', () => {
     const result = await createRepoWorktree(
       REPO_ID,
       {
-        worktreePath: '/tmp/repo-worktree',
+        worktreePath: WORKTREE_REPO_PATH,
         mode: { kind: 'newBranch', newBranch: 'feature/a', baseRef: 'main' },
       },
       repoRuntimeCapabilityForTest(REPO_ID, 'test-runtime'),
@@ -162,7 +170,7 @@ describe('repo worktree creation', () => {
     const result = await createRepoWorktree(
       REPO_ID,
       {
-        worktreePath: '/tmp/repo-worktree',
+        worktreePath: WORKTREE_REPO_PATH,
         mode: { kind: 'newBranch', newBranch: 'feature/a', baseRef: 'main' },
       },
       repoRuntimeCapabilityForTest(REPO_ID, 'test-runtime'),
@@ -180,7 +188,7 @@ describe('repo worktree creation', () => {
     const result = await createRepoWorktree(
       REPO_ID,
       {
-        worktreePath: '/tmp/repo-worktree',
+        worktreePath: WORKTREE_REPO_PATH,
         mode: { kind: 'newBranch', newBranch: 'feature/a', baseRef: 'main' },
       },
       repoRuntimeCapabilityForTest(REPO_ID, 'test-runtime'),
@@ -197,7 +205,7 @@ describe('repo worktree creation', () => {
     const result = await createRepoWorktree(
       REPO_ID,
       {
-        worktreePath: '/tmp/repo-worktree',
+        worktreePath: WORKTREE_REPO_PATH,
         mode: { kind: 'newBranch', newBranch: 'feature/a', baseRef: 'main' },
       },
       repoRuntimeCapabilityForTest(REPO_ID, 'test-runtime'),
@@ -214,9 +222,9 @@ describe('repo worktree creation', () => {
 
     expect(() =>
       parseHttpInput(REPO_PROCEDURE_SCHEMAS.createWorktree, {
-        cwd: '/tmp/repo',
+        cwd: REPO_PATH,
         workspaceRuntimeId: 'runtime-test',
-        worktreePath: '/tmp/repo-worktree',
+        worktreePath: WORKTREE_REPO_PATH,
         mode: { kind: 'newBranch', newBranch: 'feature/a', baseRef: 'main' },
         worktreeBootstrap: {
           kind: 'run',
@@ -234,7 +242,7 @@ describe('repo worktree creation', () => {
 
     expect(result).toMatchObject({ ok: true, message: 'ok' })
     expect(mocks.createWorktree).toHaveBeenCalled()
-    expect(mocks.bootstrapWorktreeAfterCreate).toHaveBeenCalledWith('/tmp/repo', '/tmp/repo-worktree', {
+    expect(mocks.bootstrapWorktreeAfterCreate).toHaveBeenCalledWith(REPO_PATH, WORKTREE_REPO_PATH, {
       signal: undefined,
       expectedConfigHash: WORKTREE_BOOTSTRAP_CONFIG_HASH,
     })
@@ -279,7 +287,7 @@ describe('repo worktree creation', () => {
     const result = await createLocalRepoWorktreeWithBootstrap(createRepoWorktree, { configTrusted: false })
 
     expect(result).toMatchObject({ ok: true, message: 'ok' })
-    expect(mocks.bootstrapWorktreeAfterCreate).toHaveBeenCalledWith('/tmp/repo', '/tmp/repo-worktree', {
+    expect(mocks.bootstrapWorktreeAfterCreate).toHaveBeenCalledWith(REPO_PATH, WORKTREE_REPO_PATH, {
       signal: undefined,
       expectedConfigHash: WORKTREE_BOOTSTRAP_CONFIG_HASH,
     })
@@ -317,7 +325,7 @@ describe('repo worktree creation', () => {
 
     expect(result).toMatchObject({ ok: true, message: 'ok' })
     expect(mocks.createWorktree).toHaveBeenCalled()
-    expect(mocks.bootstrapWorktreeAfterCreate).toHaveBeenCalledWith('/tmp/repo', '/tmp/repo-worktree', {
+    expect(mocks.bootstrapWorktreeAfterCreate).toHaveBeenCalledWith(REPO_PATH, WORKTREE_REPO_PATH, {
       signal: undefined,
       expectedConfigHash: WORKTREE_BOOTSTRAP_CONFIG_HASH,
     })
@@ -345,7 +353,7 @@ describe('repo worktree creation', () => {
     const first = createRepoWorktree(
       REPO_ID,
       {
-        worktreePath: '/tmp/repo-worktree-a',
+        worktreePath: WORKTREE_A_PATH,
         mode: { kind: 'newBranch', newBranch: 'feature/a', baseRef: 'main' },
       },
       repoRuntimeCapabilityForTest(REPO_ID, 'test-runtime'),
@@ -366,13 +374,13 @@ describe('repo worktree creation', () => {
     ).toMatchObject({
       kind: 'create-worktree',
       phase: 'running',
-      target: { branch: 'feature/a', worktreePath: '/tmp/repo-worktree-a' },
+      target: { branch: 'feature/a', worktreePath: WORKTREE_A_PATH },
     })
 
     const second = createRepoWorktree(
       REPO_ID,
       {
-        worktreePath: '/tmp/repo-worktree-b',
+        worktreePath: WORKTREE_B_PATH,
         mode: { kind: 'newBranch', newBranch: 'feature/b', baseRef: 'main' },
       },
       repoRuntimeCapabilityForTest(REPO_ID, 'test-runtime'),
@@ -398,7 +406,7 @@ describe('repo worktree creation', () => {
     ).toMatchObject({
       kind: 'create-worktree',
       phase: 'queued',
-      target: { branch: 'feature/b', worktreePath: '/tmp/repo-worktree-b' },
+      target: { branch: 'feature/b', worktreePath: WORKTREE_B_PATH },
     })
 
     firstCreate.resolve(commandOutcomeForTest({ ok: true, message: 'first created' }))
@@ -415,8 +423,8 @@ describe('repo worktree creation', () => {
       ),
     ).toHaveLength(2)
 
-    expect(mocks.createWorktree.mock.calls[0]?.[1]).toMatchObject({ worktreePath: '/tmp/repo-worktree-a' })
-    expect(mocks.createWorktree.mock.calls[1]?.[1]).toMatchObject({ worktreePath: '/tmp/repo-worktree-b' })
+    expect(mocks.createWorktree.mock.calls[0]?.[1]).toMatchObject({ worktreePath: WORKTREE_A_PATH })
+    expect(mocks.createWorktree.mock.calls[1]?.[1]).toMatchObject({ worktreePath: WORKTREE_B_PATH })
     expect(mocks.setServerWorkspaceWorktreeBootstrapConfigTrust).toHaveBeenCalledWith({
       workspaceId: REPO_ID,
       configHash,
@@ -438,11 +446,11 @@ describe('repo worktree creation', () => {
   test('repo write service operations serialize across mutation kinds for the same repo', async () => {
     const firstDelete = Promise.withResolvers<CommandOutcome>()
     const secondRemove = Promise.withResolvers<CommandOutcome>()
-    mocks.resolveRepoCommonDir.mockResolvedValue('/tmp/repo/.git')
+    mocks.resolveRepoCommonDir.mockResolvedValue(REPO_COMMON_DIR)
     mocks.readWorktreeMembership.mockResolvedValueOnce([]).mockResolvedValueOnce([
-      { path: '/tmp/repo', branch: 'main', isBare: false, isPrimary: true },
+      { path: REPO_PATH, branch: 'main', isBare: false, isPrimary: true },
       {
-        path: '/tmp/repo-worktree',
+        path: WORKTREE_REPO_PATH,
         branch: 'feature/b',
         isBare: false,
         isPrimary: false,
@@ -469,7 +477,7 @@ describe('repo worktree creation', () => {
       REPO_ID,
       {
         branch: 'feature/b',
-        worktreePath: '/tmp/repo-worktree',
+        worktreePath: WORKTREE_REPO_PATH,
         deleteBranch: false,
       },
       successfulRemovalLifecycle,
@@ -483,7 +491,7 @@ describe('repo worktree creation', () => {
       ).toMatchObject({
         kind: 'remove-worktree',
         phase: 'queued',
-        target: { branch: 'feature/b', worktreePath: '/tmp/repo-worktree' },
+        target: { branch: 'feature/b', worktreePath: WORKTREE_REPO_PATH },
       })
     })
 
@@ -502,12 +510,12 @@ describe('repo worktree creation', () => {
     const firstDelete = Promise.withResolvers<CommandOutcome>()
     const secondRemove = Promise.withResolvers<CommandOutcome>()
     mocks.resolveRepoCommonDir.mockImplementation(async (cwd: string) =>
-      cwd === '/tmp/repo' || cwd === '/tmp/repo-linked' ? '/tmp/repo/.git' : `${cwd}/.git`,
+      cwd === REPO_PATH || cwd === LINKED_REPO_PATH ? REPO_COMMON_DIR : `${cwd}/.git`,
     )
     mocks.readWorktreeMembership.mockResolvedValueOnce([]).mockResolvedValueOnce([
-      { path: '/tmp/repo', branch: 'main', isBare: false, isPrimary: true },
+      { path: REPO_PATH, branch: 'main', isBare: false, isPrimary: true },
       {
-        path: '/tmp/repo-linked',
+        path: LINKED_REPO_PATH,
         branch: 'feature/b',
         isBare: false,
         isPrimary: false,
@@ -539,7 +547,7 @@ describe('repo worktree creation', () => {
       LINKED_REPO_ID,
       {
         branch: 'feature/b',
-        worktreePath: '/tmp/repo-linked',
+        worktreePath: LINKED_REPO_PATH,
         deleteBranch: false,
       },
       successfulRemovalLifecycle,
@@ -553,7 +561,7 @@ describe('repo worktree creation', () => {
       ).toMatchObject({
         kind: 'remove-worktree',
         phase: 'queued',
-        target: { branch: 'feature/b', worktreePath: '/tmp/repo-linked' },
+        target: { branch: 'feature/b', worktreePath: LINKED_REPO_PATH },
       })
     })
 
@@ -563,7 +571,7 @@ describe('repo worktree creation', () => {
       expect(mocks.removeWorktree).toHaveBeenCalledTimes(1)
     })
 
-    expect(mocks.removeWorktree).toHaveBeenCalledWith('/tmp/repo', '/tmp/repo-linked', undefined)
+    expect(mocks.removeWorktree).toHaveBeenCalledWith(REPO_PATH, LINKED_REPO_PATH, undefined)
     secondRemove.resolve(commandOutcomeForTest({ ok: true, message: 'removed' }))
     await expect(second).resolves.toMatchObject({ ok: true, message: 'removed' })
   })
@@ -572,7 +580,7 @@ describe('repo worktree creation', () => {
     const firstDelete = Promise.withResolvers<CommandOutcome>()
     const secondPull = Promise.withResolvers<CommandOutcome>()
     mocks.resolveRepoCommonDir.mockImplementation(async (cwd: string) =>
-      cwd === '/tmp/repo' || cwd === '/tmp/repo-linked' ? '/tmp/repo/.git' : `${cwd}/.git`,
+      cwd === REPO_PATH || cwd === LINKED_REPO_PATH ? REPO_COMMON_DIR : `${cwd}/.git`,
     )
     mocks.deleteBranch.mockImplementationOnce(async () => await firstDelete.promise)
     mocks.pullBranch.mockImplementationOnce(async () => await secondPull.promise)
@@ -614,7 +622,7 @@ describe('repo worktree creation', () => {
       recoveryMessageKeys: ['error.worktree-created-followup-failed'],
     })
     expect(mocks.createWorktree).toHaveBeenCalled()
-    expect(mocks.bootstrapWorktreeAfterCreate).toHaveBeenCalledWith('/tmp/repo', '/tmp/repo-worktree', {
+    expect(mocks.bootstrapWorktreeAfterCreate).toHaveBeenCalledWith(REPO_PATH, WORKTREE_REPO_PATH, {
       signal: undefined,
       expectedConfigHash: WORKTREE_BOOTSTRAP_CONFIG_HASH,
     })

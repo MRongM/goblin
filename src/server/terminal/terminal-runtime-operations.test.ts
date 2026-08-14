@@ -3,6 +3,7 @@ import type { WorkspacePaneTargetProjectionProvider } from '#/server/workspace-p
 import { WORKSPACE_PANE_TABS_REALTIME_EVENTS } from '#/shared/workspace-pane-tabs.ts'
 import { WORKSPACE_PANE_RUNTIME_SOCKET_ACTIONS } from '#/shared/workspace-pane-runtime.ts'
 import {
+  LINKED_REPO_PATH,
   LINKED_REPO_ROOT,
   REPO_ROOT,
   USER_1,
@@ -413,7 +414,7 @@ describe('server terminal runtime operations', () => {
             workspaceRuntimeId: scope.slice(scope.lastIndexOf('\0') + 1),
             root: LINKED_REPO_ROOT,
           },
-          nativeWorktreePath: '/repo-linked',
+          nativeWorktreePath: LINKED_REPO_PATH,
         },
       ]
     }
@@ -471,7 +472,7 @@ describe('server terminal runtime operations', () => {
       repoRoot: REPO_ROOT,
       workspaceRuntimeId: WORKSPACE_RUNTIME_ID,
       branch: 'feature',
-      worktreePath: '/repo-linked',
+      worktreePath: LINKED_REPO_PATH,
       kind: 'primary',
     })
     expect(result.ok).toBe(false)

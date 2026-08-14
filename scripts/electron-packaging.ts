@@ -3,3 +3,10 @@ export const ELECTRON_SERVER_EXTRA_RESOURCES = [
   { from: 'dist/web', to: 'dist/web' },
   { from: 'node_modules/node-pty', to: 'node_modules/node-pty' },
 ] as const
+
+export function defaultSkipElectronDependencyRebuild(
+  platform: NodeJS.Platform,
+  installMode: boolean,
+): boolean {
+  return installMode || platform === 'win32'
+}

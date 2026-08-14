@@ -10,6 +10,7 @@ import {
 } from '#/shared/workspace-pane-tabs.ts'
 import { workspacePaneStaticTabEntry } from '#/shared/workspace-pane.ts'
 import {
+  LINKED_REPO_PATH,
   LINKED_REPO_ROOT,
   REPO_ROOT,
   SSH_WORKSPACE_RUNTIME_ID,
@@ -224,7 +225,7 @@ describe('server terminal runtime workspace panes', () => {
       repoRoot: REPO_ROOT,
       workspaceRuntimeId: nextWorkspaceRuntimeId,
       branch: 'feature',
-      worktreePath: '/repo-linked',
+      worktreePath: LINKED_REPO_PATH,
       kind: 'primary',
     })
     expect(second.ok).toBe(true)

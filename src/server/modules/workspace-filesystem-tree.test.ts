@@ -35,10 +35,16 @@ import { readWorkspaceFilesystemTree } from '#/server/modules/workspace-filesyst
 import { normalizeRemoteWorkspaceId } from '#/shared/remote-workspace.ts'
 import type { RemoteWorkspaceTarget } from '#/shared/remote-workspace.ts'
 import { canonicalRuntimeWorkspacePaneTarget } from '#/shared/workspace-pane-tabs-validators.ts'
-import { workspaceIdForTest } from '#/test-utils/workspace-id.ts'
+import { localWorkspaceIdForTest, nativePathForTest, workspaceIdForTest } from '#/test-utils/workspace-id.ts'
 import type { WorkspaceId } from '#/shared/workspace-locator.ts'
 
-const LOCAL_REPO_ID = workspaceIdForTest('goblin+file:///tmp/repo')
+const LOCAL_REPO_ID = localWorkspaceIdForTest('/tmp/repo')
+const LOCAL_REPO_PATH = nativePathForTest('/tmp/repo')
+const LOCAL_WORKTREE_ID = localWorkspaceIdForTest('/tmp/repo/.worktrees/feature')
+const LOCAL_WORKTREE_PATH = nativePathForTest('/tmp/repo/.worktrees/feature')
+const UNKNOWN_LOCAL_WORKTREE_ID = localWorkspaceIdForTest('/etc/passwd')
+const OTHER_PLATFORM_WORKTREE_ID =
+  process.platform === 'win32' ? 'goblin+file:///mock-worktree' : 'goblin+file:///C:/mock-worktree'
 const remoteRepoId = normalizeRemoteWorkspaceId({ alias: 'mybox', remotePath: '/srv/repos/myrepo' })
 const remoteWorkspaceId = workspaceIdForTest(remoteRepoId)
 const remoteTarget: RemoteWorkspaceTarget = {
@@ -81,7 +87,7 @@ function gitWorktreeTarget(workspaceId: WorkspaceId, root: string) {
 }
 
 function localWorktreeTarget() {
-  return gitWorktreeTarget(LOCAL_REPO_ID, 'goblin+file:///tmp/repo/.worktrees/feature')
+  return gitWorktreeTarget(LOCAL_REPO_ID, LOCAL_WORKTREE_ID)
 }
 
 function remoteWorktreeTarget() {
@@ -95,8 +101,8 @@ beforeEach(() => {
   vi.clearAllMocks()
   mocks.remoteRuntimeAwareGitRunner.mockReturnValue(async () => ({ ok: true, stdout: '', stderr: '', code: 0 }))
   mocks.readWorktreeMembership.mockResolvedValue([
-    { path: '/tmp/repo', branch: 'main', isBare: false, isPrimary: true },
-    { path: '/tmp/repo/.worktrees/feature', branch: 'feature', isBare: false, isPrimary: false },
+    { path: LOCAL_REPO_PATH, branch: 'main', isBare: false, isPrimary: true },
+    { path: LOCAL_WORKTREE_PATH, branch: 'feature', isBare: false, isPrimary: false },
   ])
   mocks.resolveRemoteWorktree.mockResolvedValue({
     path: '/srv/repos/myrepo/.worktrees/feature',
@@ -113,7 +119,11 @@ describe('workspace filesystem tree read layer', () => {
     await expect(readWorkspaceFilesystemTree(workspaceRootTarget(LOCAL_REPO_ID))).resolves.toEqual(emptyTree)
 
     expect(mocks.readWorktreeMembership).not.toHaveBeenCalled()
-    expect(mocks.readWorkspaceFilesystemSourceLocal).toHaveBeenCalledWith('/tmp/repo', expect.any(Object), undefined)
+    expect(mocks.readWorkspaceFilesystemSourceLocal).toHaveBeenCalledWith(
+      LOCAL_REPO_PATH,
+      expect.any(Object),
+      undefined,
+    )
   })
 
   test('validates a local worktree and forwards to the local source', async () => {
@@ -121,9 +131,9 @@ describe('workspace filesystem tree read layer', () => {
 
     const result = await readWorkspaceFilesystemTree(localWorktreeTarget(), { prefix: 'src' })
 
-    expect(mocks.readWorktreeMembership).toHaveBeenCalledWith('/tmp/repo', undefined)
+    expect(mocks.readWorktreeMembership).toHaveBeenCalledWith(LOCAL_REPO_PATH, undefined)
     expect(mocks.readGitWorktreeFilesystemSourceLocal).toHaveBeenCalledWith(
-      '/tmp/repo/.worktrees/feature',
+      LOCAL_WORKTREE_PATH,
       expect.objectContaining({ prefix: 'src' }),
       undefined,
     )
@@ -136,9 +146,9 @@ describe('workspace filesystem tree read layer', () => {
 
     await readWorkspaceFilesystemTree(localWorktreeTarget(), { signal })
 
-    expect(mocks.readWorktreeMembership).toHaveBeenCalledWith('/tmp/repo', signal)
+    expect(mocks.readWorktreeMembership).toHaveBeenCalledWith(LOCAL_REPO_PATH, signal)
     expect(mocks.readGitWorktreeFilesystemSourceLocal).toHaveBeenCalledWith(
-      '/tmp/repo/.worktrees/feature',
+      LOCAL_WORKTREE_PATH,
       expect.any(Object),
       signal,
     )
@@ -146,14 +156,14 @@ describe('workspace filesystem tree read layer', () => {
 
   test('rejects an unknown local worktree path before invoking the source', async () => {
     await expect(
-      readWorkspaceFilesystemTree(gitWorktreeTarget(LOCAL_REPO_ID, 'goblin+file:///etc/passwd')),
+      readWorkspaceFilesystemTree(gitWorktreeTarget(LOCAL_REPO_ID, UNKNOWN_LOCAL_WORKTREE_ID)),
     ).rejects.toThrow('unknown worktree path')
 
     expect(mocks.readGitWorktreeFilesystemSourceLocal).not.toHaveBeenCalled()
   })
 
   test('rejects a worktree locator from another local platform before I/O', async () => {
-    expect(() => gitWorktreeTarget(LOCAL_REPO_ID, 'goblin+file:///C:/mock-worktree')).toThrow(
+    expect(() => gitWorktreeTarget(LOCAL_REPO_ID, OTHER_PLATFORM_WORKTREE_ID)).toThrow(
       'error.workspace-target-transport-mismatch',
     )
 

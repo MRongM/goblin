@@ -25,9 +25,13 @@ describe('git', () => {
     tmp = mkdtempSync(path.join(os.tmpdir(), 'goblin-helper-test-'))
     const bin = path.join(tmp, 'bin')
     mkdirSync(bin)
-    const fakeGit = path.join(bin, 'git')
-    writeFileSync(fakeGit, '#!/bin/sh\ntrap "" TERM\nwhile :; do sleep 1; done\n')
-    chmodSync(fakeGit, 0o755)
+    const fakeGit = path.join(bin, process.platform === 'win32' ? 'git.cmd' : 'git')
+    const fakeGitSource =
+      process.platform === 'win32'
+        ? '@echo off\r\n:loop\r\ngoto loop\r\n'
+        : '#!/bin/sh\ntrap "" TERM\nwhile :; do sleep 1; done\n'
+    writeFileSync(fakeGit, fakeGitSource)
+    if (process.platform !== 'win32') chmodSync(fakeGit, 0o755)
     const originalPath = process.env.PATH
     process.env.PATH = `${bin}${path.delimiter}${originalPath ?? ''}`
 

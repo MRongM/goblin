@@ -3,14 +3,21 @@ import { normalizeRemoteWorkspaceId } from '#/shared/remote-workspace.ts'
 import { commandOutcomeForTest } from '#/test-utils/command-outcome.ts'
 import {
   LINKED_REPO_ID,
+  LINKED_REPO_PATH,
+  REPO_COMMON_DIR,
   REPO_ID,
+  REPO_PATH,
   WORKTREE_REPO_ID,
+  WORKTREE_REPO_PATH,
   mocks,
   removeLocalRepoWorktreeForTest,
   removeRepoWorktreeForTest,
   successfulRemovalLifecycle,
 } from '#/server/test-utils/repo-module.ts'
 import { repoRuntimeCapabilityForTest } from '#/server/test-utils/repo-module.ts'
+import { nativePathForTest } from '#/test-utils/workspace-id.ts'
+
+const REBASE_WORKTREE_PATH = nativePathForTest('/tmp/repo-rebase')
 
 describe('repo worktree removal', () => {
   async function removeRemoteWorktreeForTest() {
@@ -60,12 +67,12 @@ describe('repo worktree removal', () => {
   }
 
   test('removeRepoWorktree publishes snapshot invalidations for affected worktrees after removal success', async () => {
-    mocks.resolveRepoCommonDir.mockResolvedValue('/tmp/repo/.git')
+    mocks.resolveRepoCommonDir.mockResolvedValue(REPO_COMMON_DIR)
     mocks.removeWorktree.mockResolvedValueOnce(commandOutcomeForTest({ ok: true, message: 'ok' }))
     mocks.readWorktreeMembership.mockResolvedValueOnce([
-      { path: '/tmp/repo', branch: 'main', isBare: false, isPrimary: true },
+      { path: REPO_PATH, branch: 'main', isBare: false, isPrimary: true },
       {
-        path: '/tmp/repo-worktree',
+        path: WORKTREE_REPO_PATH,
         branch: 'feature/a',
         isBare: false,
         isPrimary: false,
@@ -92,19 +99,19 @@ describe('repo worktree removal', () => {
     expect((await readRepoOperationsSnapshot(REPO_ID, { includeSettled: true })).operations[0]).toMatchObject({
       kind: 'remove-worktree',
       phase: 'done',
-      target: { branch: 'feature/a', worktreePath: '/tmp/repo-worktree' },
+      target: { branch: 'feature/a', worktreePath: WORKTREE_REPO_PATH },
     })
     expect(result.repoIdsToInvalidate).toEqual([WORKTREE_REPO_ID, REPO_ID])
   })
 
   test('removeRepoWorktree refuses a detached rebase before status or mutation', async () => {
     mocks.readWorktreeMembership.mockResolvedValueOnce([
-      { path: '/tmp/repo', branch: 'main', isBare: false, isPrimary: true },
-      { path: '/tmp/repo-worktree', isBare: false, isPrimary: false },
+      { path: REPO_PATH, branch: 'main', isBare: false, isPrimary: true },
+      { path: WORKTREE_REPO_PATH, isBare: false, isPrimary: false },
     ])
     mocks.readRepoWorktreeSnapshots.mockResolvedValueOnce([
       {
-        path: '/tmp/repo',
+        path: REPO_PATH,
         head: { kind: 'branch', branchName: 'main' },
         headOid: '1111111111111111111111111111111111111111',
         operation: null,
@@ -113,7 +120,7 @@ describe('repo worktree removal', () => {
         isLocked: false,
       },
       {
-        path: '/tmp/repo-worktree',
+        path: WORKTREE_REPO_PATH,
         head: { kind: 'detached' },
         headOid: '2222222222222222222222222222222222222222',
         operation: { kind: 'rebase' },
@@ -132,12 +139,12 @@ describe('repo worktree removal', () => {
 
   test('removeRepoWorktree fails before status or lifecycle when branch ownership does not match', async () => {
     mocks.readWorktreeMembership.mockResolvedValueOnce([
-      { path: '/tmp/repo', branch: 'main', isBare: false, isPrimary: true },
-      { path: '/tmp/repo-worktree', isBare: false, isPrimary: false },
+      { path: REPO_PATH, branch: 'main', isBare: false, isPrimary: true },
+      { path: WORKTREE_REPO_PATH, isBare: false, isPrimary: false },
     ])
     mocks.readRepoWorktreeSnapshots.mockResolvedValueOnce([
       {
-        path: '/tmp/repo-worktree',
+        path: WORKTREE_REPO_PATH,
         head: { kind: 'detached' },
         headOid: '2222222222222222222222222222222222222222',
         operation: { kind: 'rebase' },
@@ -164,9 +171,9 @@ describe('repo worktree removal', () => {
       commandOutcomeForTest({ ok: false, message: 'git remove failed' }, 'failed'),
     )
     mocks.readWorktreeMembership.mockResolvedValueOnce([
-      { path: '/tmp/repo', branch: 'main', isBare: false, isPrimary: true },
+      { path: REPO_PATH, branch: 'main', isBare: false, isPrimary: true },
       {
-        path: '/tmp/repo-worktree',
+        path: WORKTREE_REPO_PATH,
         branch: 'feature/a',
         isBare: false,
         isPrimary: false,
@@ -190,8 +197,8 @@ describe('repo worktree removal', () => {
       commandOutcomeForTest({ ok: false, message: 'error.worktree-remove-timeout-check-state' }, 'timed-out'),
     )
     mocks.readWorktreeMembership.mockResolvedValueOnce([
-      { path: '/tmp/repo', branch: 'main', isBare: false, isPrimary: true },
-      { path: '/tmp/repo-worktree', branch: 'feature/a', isBare: false, isPrimary: false },
+      { path: REPO_PATH, branch: 'main', isBare: false, isPrimary: true },
+      { path: WORKTREE_REPO_PATH, branch: 'feature/a', isBare: false, isPrimary: false },
     ])
     const afterWorktreeRemoved = vi.fn(async () => ({ ok: true as const, message: '' }))
 
@@ -209,8 +216,8 @@ describe('repo worktree removal', () => {
   test('removeRepoWorktree reports uncertain state when cancellation happened after Git started', async () => {
     mocks.removeWorktree.mockResolvedValueOnce(commandOutcomeForTest({ ok: false, message: 'cancelled' }, 'cancelled'))
     mocks.readWorktreeMembership.mockResolvedValueOnce([
-      { path: '/tmp/repo', branch: 'main', isBare: false, isPrimary: true },
-      { path: '/tmp/repo-worktree', branch: 'feature/a', isBare: false, isPrimary: false },
+      { path: REPO_PATH, branch: 'main', isBare: false, isPrimary: true },
+      { path: WORKTREE_REPO_PATH, branch: 'feature/a', isBare: false, isPrimary: false },
     ])
 
     const result = await removeLocalRepoWorktreeForTest({ deleteBranch: false }, successfulRemovalLifecycle)
@@ -287,9 +294,9 @@ describe('repo worktree removal', () => {
 
   test('removeRepoWorktree prunes settings when application finalization fails after removal', async () => {
     mocks.readWorktreeMembership.mockResolvedValueOnce([
-      { path: '/tmp/repo', branch: 'main', isBare: false, isPrimary: true },
+      { path: REPO_PATH, branch: 'main', isBare: false, isPrimary: true },
       {
-        path: '/tmp/repo-worktree',
+        path: WORKTREE_REPO_PATH,
         branch: 'feature/a',
         isBare: false,
         isPrimary: false,
@@ -311,14 +318,14 @@ describe('repo worktree removal', () => {
     })
     expect(mocks.pruneServerWorkspaceSettingsForRemovedWorktree).toHaveBeenCalledWith({
       workspaceId: REPO_ID,
-      worktreePath: '/tmp/repo-worktree',
+      worktreePath: WORKTREE_REPO_PATH,
     })
   })
 
   test('removeRepoWorktree surfaces recovery when finalization is cancelled after removal', async () => {
     mocks.readWorktreeMembership.mockResolvedValueOnce([
-      { path: '/tmp/repo', branch: 'main', isBare: false, isPrimary: true },
-      { path: '/tmp/repo-worktree', branch: 'feature/a', isBare: false, isPrimary: false },
+      { path: REPO_PATH, branch: 'main', isBare: false, isPrimary: true },
+      { path: WORKTREE_REPO_PATH, branch: 'feature/a', isBare: false, isPrimary: false },
     ])
 
     const result = await removeLocalRepoWorktreeForTest(
@@ -336,15 +343,15 @@ describe('repo worktree removal', () => {
     })
     expect(mocks.pruneServerWorkspaceSettingsForRemovedWorktree).toHaveBeenCalledWith({
       workspaceId: REPO_ID,
-      worktreePath: '/tmp/repo-worktree',
+      worktreePath: WORKTREE_REPO_PATH,
     })
   })
 
   test('removeRepoWorktree publishes affected snapshot invalidations once after worktree and branch deletion success', async () => {
     mocks.readWorktreeMembership.mockResolvedValueOnce([
-      { path: '/tmp/repo', branch: 'main', isBare: false, isPrimary: true },
+      { path: REPO_PATH, branch: 'main', isBare: false, isPrimary: true },
       {
-        path: '/tmp/repo-worktree',
+        path: WORKTREE_REPO_PATH,
         branch: 'feature/a',
         isBare: false,
         isPrimary: false,
@@ -359,13 +366,13 @@ describe('repo worktree removal', () => {
 
   test('removeRepoWorktree rejects branch deletion retained by a sibling rebase before removing the target', async () => {
     mocks.readWorktreeMembership.mockResolvedValueOnce([
-      { path: '/tmp/repo', branch: 'main', isBare: false, isPrimary: true },
-      { path: '/tmp/repo-worktree', branch: 'feature/a', isBare: false, isPrimary: false },
-      { path: '/tmp/repo-rebase', isBare: false, isPrimary: false },
+      { path: REPO_PATH, branch: 'main', isBare: false, isPrimary: true },
+      { path: WORKTREE_REPO_PATH, branch: 'feature/a', isBare: false, isPrimary: false },
+      { path: REBASE_WORKTREE_PATH, isBare: false, isPrimary: false },
     ])
     mocks.readRepoWorktreeSnapshots.mockResolvedValueOnce([
       {
-        path: '/tmp/repo-worktree',
+        path: WORKTREE_REPO_PATH,
         head: { kind: 'branch', branchName: 'feature/a' },
         headOid: '1111111111111111111111111111111111111111',
         operation: null,
@@ -374,7 +381,7 @@ describe('repo worktree removal', () => {
         isLocked: false,
       },
       {
-        path: '/tmp/repo-rebase',
+        path: REBASE_WORKTREE_PATH,
         head: { kind: 'detached' },
         headOid: '2222222222222222222222222222222222222222',
         operation: { kind: 'rebase' },
@@ -398,9 +405,9 @@ describe('repo worktree removal', () => {
 
   test('removeRepoWorktree freezes one upstream read before worktree removal', async () => {
     mocks.readWorktreeMembership.mockResolvedValueOnce([
-      { path: '/tmp/repo', branch: 'main', isBare: false, isPrimary: true },
+      { path: REPO_PATH, branch: 'main', isBare: false, isPrimary: true },
       {
-        path: '/tmp/repo-worktree',
+        path: WORKTREE_REPO_PATH,
         branch: 'feature/a',
         isBare: false,
         isPrimary: false,
@@ -426,8 +433,8 @@ describe('repo worktree removal', () => {
 
     expect(result).toMatchObject({ ok: true, message: 'ok' })
     expect(mocks.getUpstream).toHaveBeenCalledTimes(1)
-    expect(mocks.isAncestor).toHaveBeenCalledWith('/tmp/repo', 'feature/a', 'refs/remotes/origin/feature/a', undefined)
-    expect(mocks.deleteUpstreamBranch).toHaveBeenCalledWith('/tmp/repo', 'origin', 'feature/a', undefined)
+    expect(mocks.isAncestor).toHaveBeenCalledWith(REPO_PATH, 'feature/a', 'refs/remotes/origin/feature/a', undefined)
+    expect(mocks.deleteUpstreamBranch).toHaveBeenCalledWith(REPO_PATH, 'origin', 'feature/a', undefined)
     expect(mocks.getUpstream.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.removeWorktree.mock.invocationCallOrder[0]!,
     )
@@ -435,8 +442,8 @@ describe('repo worktree removal', () => {
 
   test('reports confirmed local branch deletion when upstream deletion fails after worktree removal', async () => {
     mocks.readWorktreeMembership.mockResolvedValueOnce([
-      { path: '/tmp/repo', branch: 'main', isBare: false, isPrimary: true },
-      { path: '/tmp/repo-worktree', branch: 'feature/a', isBare: false, isPrimary: false },
+      { path: REPO_PATH, branch: 'main', isBare: false, isPrimary: true },
+      { path: WORKTREE_REPO_PATH, branch: 'feature/a', isBare: false, isPrimary: false },
     ])
     mocks.isAncestor.mockResolvedValue(true)
     mocks.getUpstream.mockResolvedValueOnce({
@@ -465,8 +472,8 @@ describe('repo worktree removal', () => {
 
   test('reports confirmed local branch deletion when upstream deletion is cancelled after worktree removal', async () => {
     mocks.readWorktreeMembership.mockResolvedValueOnce([
-      { path: '/tmp/repo', branch: 'main', isBare: false, isPrimary: true },
-      { path: '/tmp/repo-worktree', branch: 'feature/a', isBare: false, isPrimary: false },
+      { path: REPO_PATH, branch: 'main', isBare: false, isPrimary: true },
+      { path: WORKTREE_REPO_PATH, branch: 'feature/a', isBare: false, isPrimary: false },
     ])
     mocks.isAncestor.mockResolvedValue(true)
     mocks.getUpstream.mockResolvedValueOnce({
@@ -492,8 +499,8 @@ describe('repo worktree removal', () => {
 
   test('reports confirmed local branch deletion when upstream deletion times out after worktree removal', async () => {
     mocks.readWorktreeMembership.mockResolvedValueOnce([
-      { path: '/tmp/repo', branch: 'main', isBare: false, isPrimary: true },
-      { path: '/tmp/repo-worktree', branch: 'feature/a', isBare: false, isPrimary: false },
+      { path: REPO_PATH, branch: 'main', isBare: false, isPrimary: true },
+      { path: WORKTREE_REPO_PATH, branch: 'feature/a', isBare: false, isPrimary: false },
     ])
     mocks.isAncestor.mockResolvedValue(true)
     mocks.getUpstream.mockResolvedValueOnce({
@@ -519,9 +526,9 @@ describe('repo worktree removal', () => {
 
   test('removeRepoWorktree does not use a missing tracking ref for branch deletion admission', async () => {
     mocks.readWorktreeMembership.mockResolvedValueOnce([
-      { path: '/tmp/repo', branch: 'main', isBare: false, isPrimary: true },
+      { path: REPO_PATH, branch: 'main', isBare: false, isPrimary: true },
       {
-        path: '/tmp/repo-worktree',
+        path: WORKTREE_REPO_PATH,
         branch: 'feature/a',
         isBare: false,
         isPrimary: false,
@@ -542,7 +549,7 @@ describe('repo worktree removal', () => {
 
     expect(result).toMatchObject({ ok: false, message: 'error.cannot-remove-unpushed-worktree' })
     expect(mocks.isAncestor).toHaveBeenCalledOnce()
-    expect(mocks.isAncestor).toHaveBeenCalledWith('/tmp/repo', 'feature/a', 'main', undefined)
+    expect(mocks.isAncestor).toHaveBeenCalledWith(REPO_PATH, 'feature/a', 'main', undefined)
     expect(beforeRemove).not.toHaveBeenCalled()
     expect(mocks.removeWorktree).not.toHaveBeenCalled()
     expect(mocks.deleteBranch).not.toHaveBeenCalled()
@@ -551,9 +558,9 @@ describe('repo worktree removal', () => {
 
   test('removeRepoWorktree preserves an ordinary branch deletion failure after removal', async () => {
     const worktrees = [
-      { path: '/tmp/repo', branch: 'main', isBare: false, isPrimary: true },
+      { path: REPO_PATH, branch: 'main', isBare: false, isPrimary: true },
       {
-        path: '/tmp/repo-worktree',
+        path: WORKTREE_REPO_PATH,
         branch: 'feature/a',
         isBare: false,
         isPrimary: false,
@@ -571,18 +578,18 @@ describe('repo worktree removal', () => {
       message: 'fatal: delete failed',
       recoveryMessageKeys: ['error.worktree-removed-followup-failed'],
     })
-    expect(mocks.removeWorktree).toHaveBeenCalledWith('/tmp/repo', '/tmp/repo-worktree', undefined)
+    expect(mocks.removeWorktree).toHaveBeenCalledWith(REPO_PATH, WORKTREE_REPO_PATH, undefined)
     expect(mocks.pruneServerWorkspaceSettingsForRemovedWorktree).toHaveBeenCalledWith({
       workspaceId: REPO_ID,
-      worktreePath: '/tmp/repo-worktree',
+      worktreePath: WORKTREE_REPO_PATH,
     })
     expect(result.repoIdsToInvalidate).toEqual([WORKTREE_REPO_ID, REPO_ID])
   })
 
   test('removeRepoWorktree reports uncertain local branch deletion when it is cancelled after removal', async () => {
     const worktrees = [
-      { path: '/tmp/repo', branch: 'main', isBare: false, isPrimary: true },
-      { path: '/tmp/repo-worktree', branch: 'feature/a', isBare: false, isPrimary: false },
+      { path: REPO_PATH, branch: 'main', isBare: false, isPrimary: true },
+      { path: WORKTREE_REPO_PATH, branch: 'feature/a', isBare: false, isPrimary: false },
     ]
     mocks.readWorktreeMembership.mockResolvedValueOnce(worktrees).mockResolvedValueOnce(worktrees)
     mocks.deleteBranch.mockResolvedValueOnce(commandOutcomeForTest({ ok: false, message: 'cancelled' }, 'cancelled'))
@@ -602,8 +609,8 @@ describe('repo worktree removal', () => {
 
   test('removeRepoWorktree reports uncertain local branch deletion when it times out after removal', async () => {
     const worktrees = [
-      { path: '/tmp/repo', branch: 'main', isBare: false, isPrimary: true },
-      { path: '/tmp/repo-worktree', branch: 'feature/a', isBare: false, isPrimary: false },
+      { path: REPO_PATH, branch: 'main', isBare: false, isPrimary: true },
+      { path: WORKTREE_REPO_PATH, branch: 'feature/a', isBare: false, isPrimary: false },
     ]
     mocks.readWorktreeMembership.mockResolvedValueOnce(worktrees).mockResolvedValueOnce(worktrees)
     mocks.deleteBranch.mockResolvedValueOnce(
@@ -625,9 +632,9 @@ describe('repo worktree removal', () => {
 
   test('removeRepoWorktree can remove and delete the currently opened linked worktree', async () => {
     const worktrees = [
-      { path: '/tmp/repo', branch: 'main', isBare: false, isPrimary: true },
+      { path: REPO_PATH, branch: 'main', isBare: false, isPrimary: true },
       {
-        path: '/tmp/repo-linked',
+        path: LINKED_REPO_PATH,
         branch: 'feature/a',
         isBare: false,
         isPrimary: false,
@@ -639,29 +646,29 @@ describe('repo worktree removal', () => {
       LINKED_REPO_ID,
       {
         branch: 'feature/a',
-        worktreePath: '/tmp/repo-linked',
+        worktreePath: LINKED_REPO_PATH,
         deleteBranch: true,
       },
       successfulRemovalLifecycle,
     )
 
     expect(result).toMatchObject({ ok: true, message: 'ok' })
-    expect(mocks.getCurrentBranch).toHaveBeenCalledWith('/tmp/repo', { signal: undefined })
-    expect(mocks.removeWorktree).toHaveBeenCalledWith('/tmp/repo', '/tmp/repo-linked', undefined)
-    expect(mocks.deleteBranch).toHaveBeenCalledWith('/tmp/repo', 'feature/a', { force: undefined, signal: undefined })
+    expect(mocks.getCurrentBranch).toHaveBeenCalledWith(REPO_PATH, { signal: undefined })
+    expect(mocks.removeWorktree).toHaveBeenCalledWith(REPO_PATH, LINKED_REPO_PATH, undefined)
+    expect(mocks.deleteBranch).toHaveBeenCalledWith(REPO_PATH, 'feature/a', { force: undefined, signal: undefined })
     expect(result.repoIdsToInvalidate).toEqual([LINKED_REPO_ID, REPO_ID])
     expect(mocks.pruneServerWorkspaceSettingsForRemovedWorktree).toHaveBeenCalledWith({
       workspaceId: LINKED_REPO_ID,
-      worktreePath: '/tmp/repo-linked',
+      worktreePath: LINKED_REPO_PATH,
     })
     expect(mocks.publishSettingsInvalidation).not.toHaveBeenCalled()
   })
 
   test('removeRepoWorktree publishes settings invalidation when worktree-scoped settings are pruned', async () => {
     const worktrees = [
-      { path: '/tmp/repo', branch: 'main', isBare: false, isPrimary: true },
+      { path: REPO_PATH, branch: 'main', isBare: false, isPrimary: true },
       {
-        path: '/tmp/repo-worktree',
+        path: WORKTREE_REPO_PATH,
         branch: 'feature/a',
         isBare: false,
         isPrimary: false,
@@ -675,16 +682,16 @@ describe('repo worktree removal', () => {
     expect(result).toMatchObject({ ok: true, message: 'ok' })
     expect(mocks.pruneServerWorkspaceSettingsForRemovedWorktree).toHaveBeenCalledWith({
       workspaceId: REPO_ID,
-      worktreePath: '/tmp/repo-worktree',
+      worktreePath: WORKTREE_REPO_PATH,
     })
     expect(mocks.publishSettingsInvalidation).toHaveBeenCalledWith(['settings-snapshot'])
   })
 
   test('removeRepoWorktree reports settings failure after removing the worktree', async () => {
     mocks.readWorktreeMembership.mockResolvedValueOnce([
-      { path: '/tmp/repo', branch: 'main', isBare: false, isPrimary: true },
+      { path: REPO_PATH, branch: 'main', isBare: false, isPrimary: true },
       {
-        path: '/tmp/repo-worktree',
+        path: WORKTREE_REPO_PATH,
         branch: 'feature/a',
         isBare: false,
         isPrimary: false,
@@ -699,15 +706,15 @@ describe('repo worktree removal', () => {
       message: 'settings write failed',
       recoveryMessageKeys: ['error.worktree-removed-followup-failed'],
     })
-    expect(mocks.removeWorktree).toHaveBeenCalledWith('/tmp/repo', '/tmp/repo-worktree', undefined)
+    expect(mocks.removeWorktree).toHaveBeenCalledWith(REPO_PATH, WORKTREE_REPO_PATH, undefined)
     expect(mocks.publishSettingsInvalidation).not.toHaveBeenCalled()
   })
 
   test('removeRepoWorktree refuses locked worktrees before calling git remove', async () => {
     mocks.readWorktreeMembership.mockResolvedValueOnce([
-      { path: '/tmp/repo', branch: 'main', isBare: false, isPrimary: true },
+      { path: REPO_PATH, branch: 'main', isBare: false, isPrimary: true },
       {
-        path: '/tmp/repo-worktree',
+        path: WORKTREE_REPO_PATH,
         branch: 'feature/a',
         isBare: false,
         isPrimary: false,
@@ -724,8 +731,8 @@ describe('repo worktree removal', () => {
 
   test('removeRepoWorktree refuses when worktree status could not be read', async () => {
     mocks.readWorktreeMembership.mockResolvedValueOnce([
-      { path: '/tmp/repo', branch: 'main', isBare: false, isPrimary: true },
-      { path: '/tmp/repo-worktree', branch: 'feature/a', isBare: false, isPrimary: false },
+      { path: REPO_PATH, branch: 'main', isBare: false, isPrimary: true },
+      { path: WORKTREE_REPO_PATH, branch: 'feature/a', isBare: false, isPrimary: false },
     ])
     mocks.sampleWorktreeStatusForTarget.mockRejectedValueOnce(new Error('status failed'))
 

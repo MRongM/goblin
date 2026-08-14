@@ -4,9 +4,12 @@ import type * as RepoWritePaths from '#/server/modules/repo-write-paths.ts'
 import { commandOutcomeForTest } from '#/test-utils/command-outcome.ts'
 import {
   LINKED_REPO_ID,
+  LINKED_REPO_PATH,
   REPO_ID,
+  REPO_PATH,
   WORKTREE_BOOTSTRAP_CONFIG_HASH,
   WORKTREE_REPO_ID,
+  WORKTREE_REPO_PATH,
   createLocalRepoWorktreeWithBootstrap,
   mocks,
   repoRuntimeCapabilityForTest,
@@ -64,7 +67,7 @@ describe('repo branch mutations', () => {
       commandOutcomeForTest({
         ok: true,
         message: 'ok',
-        worktreePathsToInvalidate: ['/tmp/repo-worktree'],
+        worktreePathsToInvalidate: [WORKTREE_REPO_PATH],
       }),
     )
     const { pullRepoBranch } = await import('#/server/modules/repo-write-paths.ts')
@@ -73,20 +76,20 @@ describe('repo branch mutations', () => {
       REPO_ID,
       'feature/a',
       repoRuntimeCapabilityForTest(REPO_ID, 'test-runtime'),
-      '/tmp/repo-worktree',
+      WORKTREE_REPO_PATH,
     )
 
     expect(result).toMatchObject({
       ok: true,
       message: 'ok',
-      worktreePathsToInvalidate: ['/tmp/repo-worktree'],
+      worktreePathsToInvalidate: [WORKTREE_REPO_PATH],
     })
   })
 
   test('pullRepoBranch publishes invalidation when failure may follow partial ref updates', async () => {
     mocks.pullBranch.mockResolvedValueOnce(
       commandOutcomeForTest(
-        { ok: false, message: 'fatal: pull failed', worktreePathsToInvalidate: ['/tmp/repo'] },
+        { ok: false, message: 'fatal: pull failed', worktreePathsToInvalidate: [REPO_PATH] },
         'failed',
       ),
     )
@@ -100,7 +103,7 @@ describe('repo branch mutations', () => {
 
     expect(result).toMatchObject({ ok: false, message: 'fatal: pull failed' })
     expect(result.repoIdsToInvalidate).toEqual([REPO_ID])
-    expect(result.worktreePathsToInvalidate).toEqual(['/tmp/repo'])
+    expect(result.worktreePathsToInvalidate).toEqual([REPO_PATH])
   })
 
   test.each([
@@ -161,7 +164,7 @@ describe('repo branch mutations', () => {
         repo.createRepoWorktree(
           REPO_ID,
           {
-            worktreePath: '/tmp/repo-worktree',
+            worktreePath: WORKTREE_REPO_PATH,
             mode: { kind: 'newBranch', newBranch: 'feature/a', baseRef: 'main' },
           },
           repoRuntimeCapabilityForTest(REPO_ID, 'test-runtime'),
@@ -279,7 +282,7 @@ describe('repo branch mutations', () => {
     const result = await createRepoWorktree(
       REPO_ID,
       {
-        worktreePath: '/tmp/repo-worktree',
+        worktreePath: WORKTREE_REPO_PATH,
         mode: { kind: 'newBranch', newBranch: 'feature/a', baseRef: 'main' },
       },
       repoRuntimeCapabilityForTest(REPO_ID, 'test-runtime'),
@@ -316,7 +319,7 @@ describe('repo branch mutations', () => {
         skippedMissing: { count: 0, paths: [] },
       },
     })
-    expect(mocks.bootstrapWorktreeAfterCreate).toHaveBeenCalledWith('/tmp/repo', '/tmp/repo-worktree', {
+    expect(mocks.bootstrapWorktreeAfterCreate).toHaveBeenCalledWith(REPO_PATH, WORKTREE_REPO_PATH, {
       signal: undefined,
       expectedConfigHash: WORKTREE_BOOTSTRAP_CONFIG_HASH,
     })
@@ -605,8 +608,8 @@ describe('repo branch mutations', () => {
     ],
   ])('%s publishes sibling worktree snapshot invalidations after success', async (_name, run) => {
     mocks.readWorktreeMembership.mockResolvedValue([
-      { path: '/tmp/repo', branch: 'main', isBare: false, isPrimary: true },
-      { path: '/tmp/repo-linked', branch: 'feature/b', isBare: false, isPrimary: false },
+      { path: REPO_PATH, branch: 'main', isBare: false, isPrimary: true },
+      { path: LINKED_REPO_PATH, branch: 'feature/b', isBare: false, isPrimary: false },
     ])
     const repo = await import('#/server/modules/repo-write-paths.ts')
 
@@ -637,18 +640,18 @@ describe('repo branch mutations', () => {
     const result = await deleteRepoBranch(REPO_ID, 'feature/a', repoRuntimeCapabilityForTest(REPO_ID, 'test-runtime'))
 
     expect(result).toMatchObject({ ok: true, message: 'ok' })
-    expect(mocks.isAncestor).toHaveBeenCalledWith('/tmp/repo', 'feature/a', 'release/1.0', undefined)
-    expect(mocks.deleteBranch).toHaveBeenCalledWith('/tmp/repo', 'feature/a', { force: undefined, signal: undefined })
+    expect(mocks.isAncestor).toHaveBeenCalledWith(REPO_PATH, 'feature/a', 'release/1.0', undefined)
+    expect(mocks.deleteBranch).toHaveBeenCalledWith(REPO_PATH, 'feature/a', { force: undefined, signal: undefined })
   })
 
   test('deleteRepoBranch rejects a branch retained by a rebasing worktree before mutation', async () => {
     const membership = [
-      { path: '/tmp/repo', isBare: false, isPrimary: true, headOid: '1111111111111111111111111111111111111111' },
+      { path: REPO_PATH, isBare: false, isPrimary: true, headOid: '1111111111111111111111111111111111111111' },
     ]
     mocks.readWorktreeMembership.mockResolvedValue(membership)
     mocks.readRepoWorktreeSnapshots.mockResolvedValue([
       {
-        path: '/tmp/repo',
+        path: REPO_PATH,
         head: { kind: 'detached' },
         headOid: '1111111111111111111111111111111111111111',
         operation: { kind: 'rebase' },
@@ -682,7 +685,7 @@ describe('repo branch mutations', () => {
 
     expect(result).toMatchObject({ ok: false, message: 'error.branch-not-fully-merged' })
     expect(mocks.isAncestor).toHaveBeenCalledOnce()
-    expect(mocks.isAncestor).toHaveBeenCalledWith('/tmp/repo', 'feature/a', 'release/1.0', undefined)
+    expect(mocks.isAncestor).toHaveBeenCalledWith(REPO_PATH, 'feature/a', 'release/1.0', undefined)
     expect(mocks.deleteBranch).not.toHaveBeenCalled()
   })
 
@@ -709,8 +712,8 @@ describe('repo branch mutations', () => {
 
     expect(result).toMatchObject({ ok: true, message: 'ok' })
     expect(mocks.getUpstream).toHaveBeenCalledTimes(1)
-    expect(mocks.isAncestor).toHaveBeenCalledWith('/tmp/repo', 'feature/a', 'refs/remotes/origin/feature/a', undefined)
-    expect(mocks.deleteUpstreamBranch).toHaveBeenCalledWith('/tmp/repo', 'origin', 'feature/a', undefined)
+    expect(mocks.isAncestor).toHaveBeenCalledWith(REPO_PATH, 'feature/a', 'refs/remotes/origin/feature/a', undefined)
+    expect(mocks.deleteUpstreamBranch).toHaveBeenCalledWith(REPO_PATH, 'origin', 'feature/a', undefined)
   })
 
   test('deleteRepoBranch invalidates metadata when local deletion succeeded before upstream cancellation', async () => {
@@ -758,7 +761,7 @@ describe('repo branch mutations', () => {
       ok: true,
       message: 'ok',
     })
-    expect(mocks.isAncestor).toHaveBeenCalledWith('/tmp/repo', 'feature/a', 'refs/heads/main', undefined)
+    expect(mocks.isAncestor).toHaveBeenCalledWith(REPO_PATH, 'feature/a', 'refs/heads/main', undefined)
     expect(mocks.deleteUpstreamBranch).not.toHaveBeenCalled()
   })
 

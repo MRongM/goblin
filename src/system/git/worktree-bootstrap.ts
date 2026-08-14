@@ -425,6 +425,7 @@ async function runSetupCommand(
 }
 
 function buildSetupInvocation(setup: string): { command: string; args: string[] } {
+  if (process.platform === 'win32') return { command: 'powershell.exe', args: ['-NoLogo', '-Command', setup] }
   const shell = process.env.SHELL?.trim()
   // An interactive login shell loads the user's normal terminal environment
   // (e.g. ~/.zshrc / ~/.bashrc as well as ~/.zprofile / ~/.bash_profile),

@@ -8,12 +8,14 @@ import {
   WorkspaceRuntimeStaleError,
 } from '#/server/modules/workspace-runtimes.ts'
 import { settleWorkspaceProbeForTest } from '#/server/test-utils/workspace-runtime-capability.ts'
-import { workspaceIdForTest } from '#/test-utils/workspace-id.ts'
+import { localWorkspaceIdForTest, nativePathForTest, workspaceIdForTest } from '#/test-utils/workspace-id.ts'
 import type { WorkspaceId } from '#/shared/workspace-locator.ts'
 import { RemoteWorkspaceRuntimeFailureError } from '#/server/modules/remote-workspace-runtime-failure.ts'
 
 const USER_ID = 'workspace-route-user'
-const WORKSPACE_ID = workspaceIdForTest('goblin+file:///tmp/workspace-route')
+const WORKSPACE_ID = localWorkspaceIdForTest('/tmp/workspace-route')
+const WORKSPACE_PATH = nativePathForTest('/tmp/workspace-route')
+const MISSING_WORKSPACE_PATH = nativePathForTest('/tmp/missing-workspace')
 const CLIENT_ID = 'workspace-route-client'
 
 const mocks = vi.hoisted(() => ({
@@ -89,7 +91,7 @@ describe('workspace routes', () => {
     mocks.readWorkspaceFileViewer.mockResolvedValue({
       viewer: 'cat',
       shell: 'posix',
-      executionRoot: '/tmp/workspace-route',
+      executionRoot: WORKSPACE_PATH,
     })
     mocks.readWorkspaceDirectoryOverview.mockResolvedValue({
       topLevelFileCount: 2,
@@ -129,7 +131,7 @@ describe('workspace routes', () => {
     const commitGitCapabilityRemoval = vi.fn(async () => ({ kind: 'committed' as const }))
     const app = createWorkspaceRoutes({ workspaceCapabilityTransitionHost: { commitGitCapabilityRemoval } })
     const response = await post(app, '/runtime-open', {
-      workspaceInput: '/tmp/workspace-route',
+      workspaceInput: WORKSPACE_PATH,
       clientId: CLIENT_ID,
     })
 
@@ -173,7 +175,7 @@ describe('workspace routes', () => {
     })
 
     const response = await post(app, '/runtime-open', {
-      workspaceInput: '/tmp/workspace-route',
+      workspaceInput: WORKSPACE_PATH,
       clientId: CLIENT_ID,
     })
 
@@ -193,7 +195,7 @@ describe('workspace routes', () => {
     })
 
     const response = await post(app, '/runtime-open', {
-      workspaceInput: '/tmp/workspace-route',
+      workspaceInput: WORKSPACE_PATH,
       clientId: CLIENT_ID,
     })
 
@@ -213,7 +215,7 @@ describe('workspace routes', () => {
     })
 
     const response = await post(app, '/runtime-open', {
-      workspaceInput: '/tmp/workspace-route',
+      workspaceInput: WORKSPACE_PATH,
       clientId: CLIENT_ID,
     })
 
@@ -239,9 +241,9 @@ describe('workspace routes', () => {
       .mockResolvedValueOnce({ kind: 'failed-before-commit' as const, error: new Error('second cleanup failed') })
     const app = createWorkspaceRoutes({ workspaceCapabilityTransitionHost: { commitGitCapabilityRemoval } })
 
-    const first = post(app, '/runtime-open', { workspaceInput: '/tmp/workspace-route', clientId: CLIENT_ID })
+    const first = post(app, '/runtime-open', { workspaceInput: WORKSPACE_PATH, clientId: CLIENT_ID })
     await cleanupStarted.promise
-    const second = post(app, '/runtime-open', { workspaceInput: '/tmp/workspace-route', clientId: CLIENT_ID })
+    const second = post(app, '/runtime-open', { workspaceInput: WORKSPACE_PATH, clientId: CLIENT_ID })
     cleanupGate.resolve()
 
     await expect(first).resolves.toMatchObject({ status: 500 })
@@ -271,7 +273,7 @@ describe('workspace routes', () => {
     })
 
     const open = post(app, '/runtime-open', {
-      workspaceInput: '/tmp/workspace-route',
+      workspaceInput: WORKSPACE_PATH,
       clientId: CLIENT_ID,
     })
     await cleanupStarted.promise
@@ -302,13 +304,13 @@ describe('workspace routes', () => {
     })
     const app = createTestWorkspaceRoutes()
     const response = await post(app, '/runtime-open', {
-      workspaceInput: '/tmp/missing-workspace',
+      workspaceInput: MISSING_WORKSPACE_PATH,
       clientId: CLIENT_ID,
     })
 
     await expect(response.json()).resolves.toEqual({
       ok: false,
-      input: '/tmp/missing-workspace',
+      input: MISSING_WORKSPACE_PATH,
       reason: 'error.workspace-path-not-found',
     })
     await expect((await post(app, '/runtime-list', {})).json()).resolves.toEqual({ runtimes: [] })
@@ -322,7 +324,7 @@ describe('workspace routes', () => {
     const commitGitCapabilityRemoval = vi.fn(async () => ({ kind: 'committed' as const }))
     const app = createWorkspaceRoutes({ workspaceCapabilityTransitionHost: { commitGitCapabilityRemoval } })
     const opened = (await (
-      await post(app, '/runtime-open', { workspaceInput: '/tmp/workspace-route', clientId: CLIENT_ID })
+      await post(app, '/runtime-open', { workspaceInput: WORKSPACE_PATH, clientId: CLIENT_ID })
     ).json()) as { workspaceRuntimeId: string }
     expect(commitGitCapabilityRemoval).not.toHaveBeenCalled()
 
@@ -369,8 +371,8 @@ describe('workspace routes', () => {
 
   test('reconciles one client complete workspace declaration atomically', async () => {
     const app = createTestWorkspaceRoutes()
-    const oldWorkspaceId = workspaceIdForTest('goblin+file:///tmp/workspace-old')
-    const nextWorkspaceId = workspaceIdForTest('goblin+file:///tmp/workspace-next')
+    const oldWorkspaceId = localWorkspaceIdForTest('/tmp/workspace-old')
+    const nextWorkspaceId = localWorkspaceIdForTest('/tmp/workspace-next')
     await post(app, '/runtime-open', { workspaceId: oldWorkspaceId, clientId: CLIENT_ID })
 
     const response = await post(app, '/runtime-reconcile', {
@@ -511,7 +513,7 @@ describe('workspace routes', () => {
     const target = gitWorktreeTarget(
       WORKSPACE_ID,
       workspaceRuntimeId,
-      workspaceIdForTest('goblin+file:///tmp/workspace-worktree'),
+      localWorkspaceIdForTest('/tmp/workspace-worktree'),
     )
 
     const response = await post(app, '/trash-file', { target, path: 'src/example.ts' })
@@ -530,7 +532,7 @@ describe('workspace routes', () => {
     const target = gitWorktreeTarget(
       WORKSPACE_ID,
       workspaceRuntimeId,
-      workspaceIdForTest('goblin+file:///tmp/workspace-worktree'),
+      localWorkspaceIdForTest('/tmp/workspace-worktree'),
     )
     mocks.trashWorkspaceFile.mockResolvedValueOnce({ ok: false, message: 'cancelled' })
 

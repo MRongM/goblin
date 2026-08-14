@@ -12,7 +12,10 @@ import type { createRepoRoutes } from '#/server/routes/repo.ts'
 import { acquireWorkspaceRuntime, releaseWorkspaceRuntime } from '#/server/modules/workspace-runtimes.ts'
 import { settleWorkspaceProbeForTest } from '#/server/test-utils/workspace-runtime-capability.ts'
 import { testPhysicalWorktreeExecutionCapability } from '#/server/test-utils/physical-worktree-identity.ts'
-import { workspaceIdForTest } from '#/test-utils/workspace-id.ts'
+import { nativePathForTest, workspaceIdForTest } from '#/test-utils/workspace-id.ts'
+
+const REPO_PATH = nativePathForTest('/tmp/repo')
+const REMOVE_WORKTREE_PATH = nativePathForTest('/tmp/repo-remove')
 
 const mocks = repoRouteMocks()
 
@@ -287,7 +290,7 @@ describe('repo routes — POST body validation (action endpoints)', () => {
   })
 
   test('clone route forwards url/parentPath/directoryName and the request abort signal', async () => {
-    mocks.cloneRepo.mockResolvedValue({ ok: true, message: 'ok', path: '/tmp/repo' })
+    mocks.cloneRepo.mockResolvedValue({ ok: true, message: 'ok', path: REPO_PATH })
     const app = createTestRepoRoutes()
     const response = await app.request(
       new Request('http://localhost/clone', {
@@ -325,7 +328,7 @@ describe('repo routes — POST body validation (action endpoints)', () => {
       removeWorktree: vi.fn(
         async (_userId, input) =>
           await input.remove(
-            testPhysicalWorktreeExecutionCapability('/tmp/repo-remove'),
+            testPhysicalWorktreeExecutionCapability(REMOVE_WORKTREE_PATH),
             {
               beforeRemove,
               afterWorktreeRemoved: async () => ({ ok: true, message: '' }),
@@ -348,7 +351,7 @@ describe('repo routes — POST body validation (action endpoints)', () => {
           cwd: WORKSPACE_ID,
           workspaceRuntimeId,
           branch: 'feature/remove',
-          worktreePath: '/tmp/repo-remove',
+          worktreePath: REMOVE_WORKTREE_PATH,
           deleteBranch: false,
         }),
       }),
@@ -362,7 +365,7 @@ describe('repo routes — POST body validation (action endpoints)', () => {
       expect.objectContaining({
         repoRoot: WORKSPACE_ID,
         workspaceRuntimeId,
-        worktreePath: '/tmp/repo-remove',
+        worktreePath: REMOVE_WORKTREE_PATH,
       }),
     )
     expect(beforeRemove).toHaveBeenCalledOnce()
@@ -370,7 +373,7 @@ describe('repo routes — POST body validation (action endpoints)', () => {
       WORKSPACE_ID,
       {
         branch: 'feature/remove',
-        worktreePath: '/tmp/repo-remove',
+        worktreePath: REMOVE_WORKTREE_PATH,
         deleteBranch: false,
         forceDeleteBranch: undefined,
         deleteUpstream: undefined,
@@ -382,7 +385,7 @@ describe('repo routes — POST body validation (action endpoints)', () => {
       expect.objectContaining({
         identity: expect.objectContaining({
           kind: 'local',
-          endpoint: '/tmp/repo-remove',
+          endpoint: REMOVE_WORKTREE_PATH,
         }),
       }),
       expect.objectContaining({ workspaceId: WORKSPACE_ID, workspaceRuntimeId }),
@@ -394,7 +397,7 @@ describe('repo routes — POST body validation (action endpoints)', () => {
     const worktreeRemovalApplication: Parameters<typeof createRepoRoutes>[0]['worktreeRemovalApplication'] = {
       removeWorktree: vi.fn(async (_userId, input) => {
         return await input.remove(
-          testPhysicalWorktreeExecutionCapability('/tmp/repo-remove'),
+          testPhysicalWorktreeExecutionCapability(REMOVE_WORKTREE_PATH),
           {
             beforeRemove: async () => ({ ok: true, message: '' }),
             afterWorktreeRemoved: async () => ({ ok: true, message: '' }),
@@ -415,7 +418,7 @@ describe('repo routes — POST body validation (action endpoints)', () => {
           cwd: WORKSPACE_ID,
           workspaceRuntimeId,
           branch: 'feature/remove',
-          worktreePath: '/tmp/repo-remove',
+          worktreePath: REMOVE_WORKTREE_PATH,
           deleteBranch: false,
         }),
       }),

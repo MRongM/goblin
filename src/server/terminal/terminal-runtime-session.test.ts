@@ -5,6 +5,7 @@ import {
   WORKSPACE_PANE_TABS_SOCKET_ACTIONS,
 } from '#/shared/workspace-pane-tabs.ts'
 import {
+  LINKED_REPO_PATH,
   REPO_ROOT,
   USER_1,
   WORKSPACE_RUNTIME_ID,
@@ -28,7 +29,7 @@ describe('server terminal runtime sessions', () => {
         return [
           {
             target: workspacePaneWorktreeTarget(scope.slice(scope.lastIndexOf('\0') + 1)),
-            nativeWorktreePath: '/repo-linked',
+            nativeWorktreePath: LINKED_REPO_PATH,
           },
         ]
       },

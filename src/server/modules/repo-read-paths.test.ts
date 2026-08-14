@@ -4,9 +4,9 @@ import { useFakeTimers } from '#/test-utils/timers.ts'
 import type { RepoSource } from '#/server/modules/repo-source.ts'
 import type { PullRequestEntry, RepoSnapshot } from '#/shared/api-types.ts'
 import type { LogEntry, WorktreeStatus } from '#/shared/git-types.ts'
-import { workspaceIdForTest } from '#/test-utils/workspace-id.ts'
+import { localWorkspaceIdForTest } from '#/test-utils/workspace-id.ts'
 
-const WORKSPACE_ID = workspaceIdForTest('goblin+file:///workspace')
+const WORKSPACE_ID = localWorkspaceIdForTest('/workspace')
 
 const mocks = vi.hoisted(() => ({
   runWithRepoMembershipReadAdmission: vi.fn(),

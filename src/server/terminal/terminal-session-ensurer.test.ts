@@ -15,7 +15,7 @@ import { resolveRemoteTarget } from '#/system/ssh/config.ts'
 import { resolveKnownWorktree } from '#/shared/worktree-guards.ts'
 import type { TerminalSessionPrepareManagerResult } from '#/server/terminal/terminal-session-ensurer.ts'
 import { canonicalWorkspaceLocator } from '#/shared/workspace-locator.ts'
-import { workspaceIdForTest } from '#/test-utils/workspace-id.ts'
+import { localWorkspaceIdForTest, nativePathForTest, workspaceIdForTest } from '#/test-utils/workspace-id.ts'
 
 vi.mock('#/system/git/worktrees.ts', () => ({
   readWorktreeMembership: vi.fn(async () => [
@@ -43,14 +43,14 @@ vi.mock('#/system/ssh/config.ts', () => ({
 }))
 
 const USER_ID = 'user_terminal_ensurer'
-const REPO_ROOT = 'goblin+file:///repo'
+const REPO_ROOT = localWorkspaceIdForTest('/repo')
 const WORKSPACE_RUNTIME_ID = 'repo-runtime-ensure'
-const WORKTREE_PATH = '/repo/worktree'
+const WORKTREE_PATH = nativePathForTest('/repo/worktree')
 const LOCAL_TARGET = {
   kind: 'git-worktree' as const,
-  workspaceId: canonicalWorkspaceLocator(REPO_ROOT)!,
+  workspaceId: REPO_ROOT,
   workspaceRuntimeId: WORKSPACE_RUNTIME_ID,
-  root: canonicalWorkspaceLocator('goblin+file:///repo/worktree')!,
+  root: localWorkspaceIdForTest('/repo/worktree'),
 }
 const BRANCH_NAME = 'feature/worktree'
 const REMOTE_REPO_ROOT = workspaceIdForTest('goblin+ssh://prod/srv/repo')
@@ -150,8 +150,8 @@ describe('terminal session ensurer', () => {
   test('stores the logical workspace path while executing in its physical realpath', async () => {
     const prepareSession = vi.fn(async (input) => preparedResult(input.terminalSessionId))
     const ensurer = createTerminalSessionEnsurer({ manager: { prepareSession } })
-    const logicalPath = '/tmp/workspace'
-    const physicalPath = '/private/tmp/workspace'
+    const workspaceId = localWorkspaceIdForTest('/tmp/workspace')
+    const physicalPath = nativePathForTest('/private/tmp/workspace')
     const capability = testPhysicalWorktreeExecutionCapability(physicalPath, {
       userId: USER_ID,
     })
@@ -161,7 +161,7 @@ describe('terminal session ensurer', () => {
       {
         target: {
           kind: 'workspace-root',
-          workspaceId: canonicalWorkspaceLocator('goblin+file:///tmp/workspace')!,
+          workspaceId,
           workspaceRuntimeId: WORKSPACE_RUNTIME_ID,
         },
       },
@@ -174,7 +174,7 @@ describe('terminal session ensurer', () => {
     expect(prepareSession).toHaveBeenCalledWith(
       expect.objectContaining({
         cwd: physicalPath,
-        target: expect.objectContaining({ workspaceId: canonicalWorkspaceLocator('goblin+file:///tmp/workspace') }),
+        target: expect.objectContaining({ workspaceId }),
       }),
     )
   })
@@ -213,7 +213,8 @@ describe('terminal session ensurer', () => {
       }),
     )
     expect(input?.command).toBeTruthy()
-    expect(input?.args).toEqual(expect.arrayContaining(['-F', '/dev/null', '-tt', 'hostname=example.test']))
+    const sshConfigPath = process.platform === 'win32' ? 'NUL' : '/dev/null'
+    expect(input?.args).toEqual(expect.arrayContaining(['-F', sshConfigPath, '-tt', 'hostname=example.test']))
     expect(input?.args?.at(-2)).toBe('prod')
     expect(input?.args?.at(-1)).toContain(REMOTE_WORKTREE_PATH)
     expect(input?.args?.at(-1)).toContain('pwd')

@@ -4,6 +4,7 @@ import type { WorkspacePaneTabEntry } from '#/shared/workspace-pane.ts'
 import type { PtyHandle } from '#/server/terminal/pty-supervisor.ts'
 import { TerminalSessionManager } from '#/server/terminal/terminal-session-manager.ts'
 import { testPhysicalWorktreeExecutionCapability } from '#/server/test-utils/physical-worktree-identity.ts'
+import { nativePathForTest } from '#/test-utils/workspace-id.ts'
 import {
   BRANCH_NAME,
   CLIENT_ID,
@@ -22,6 +23,8 @@ import {
   tabsBeforeRetirement,
 } from '#/server/test-utils/terminal-session-manager.ts'
 
+const TMP_PATH = nativePathForTest('/tmp')
+
 describe('TerminalSessionManager session lifecycle', () => {
   test('rejects an existing admission after the PTY exits during placement preparation', async () => {
     const supervisor = createDeferredPtySupervisor()
@@ -34,7 +37,7 @@ describe('TerminalSessionManager session lifecycle', () => {
       target: WORKTREE_TARGET,
       terminalSessionId: TERMINAL_SESSION_ID,
       physicalWorktreeCapability: testPhysicalWorktreeExecutionCapability(WORKTREE_PATH),
-      cwd: '/tmp',
+      cwd: TMP_PATH,
     })
     if (!admission.ok) throw new Error(admission.message)
     onIdentity.mockClear()
@@ -139,7 +142,7 @@ describe('TerminalSessionManager session lifecycle', () => {
       target: WORKTREE_TARGET,
       terminalSessionId: TERMINAL_SESSION_ID,
       physicalWorktreeCapability: testPhysicalWorktreeExecutionCapability(WORKTREE_PATH),
-      cwd: '/tmp',
+      cwd: TMP_PATH,
     })
     if (!admission.ok) throw new Error(admission.message)
     onIdentity.mockClear()
@@ -279,7 +282,7 @@ describe('TerminalSessionManager session lifecycle', () => {
       target: WORKTREE_TARGET,
       terminalSessionId: TERMINAL_SESSION_ID,
       physicalWorktreeCapability: testPhysicalWorktreeExecutionCapability(WORKTREE_PATH),
-      cwd: '/tmp',
+      cwd: TMP_PATH,
     }
     const prepared = manager.prepareSession(input)
     if (!prepared.ok || prepared.admission.kind !== 'prepared') throw new Error('expected prepared admission')
@@ -310,7 +313,7 @@ describe('TerminalSessionManager session lifecycle', () => {
       target: WORKTREE_TARGET,
       terminalSessionId: TERMINAL_SESSION_ID,
       physicalWorktreeCapability: testPhysicalWorktreeExecutionCapability(WORKTREE_PATH),
-      cwd: '/tmp',
+      cwd: TMP_PATH,
       command: '/bin/zsh',
       args: ['-l'],
       startupShellCommand: 'echo ready\r',
@@ -342,7 +345,7 @@ describe('TerminalSessionManager session lifecycle', () => {
         command: '/bin/zsh',
         args: ['-l'],
         startupShellCommand: 'echo ready\r',
-        cwd: '/tmp',
+        cwd: TMP_PATH,
         cols: 123,
         rows: 41,
         env: { GOBLIN_TEST: '1' },
@@ -415,7 +418,7 @@ describe('TerminalSessionManager session lifecycle', () => {
       target: WORKTREE_TARGET,
       terminalSessionId: TERMINAL_SESSION_ID,
       physicalWorktreeCapability: testPhysicalWorktreeExecutionCapability(WORKTREE_PATH),
-      cwd: '/tmp',
+      cwd: TMP_PATH,
     })
     if (!prepared.ok) throw new Error(prepared.message)
     prepared.admission.commit({
@@ -447,7 +450,7 @@ describe('TerminalSessionManager session lifecycle', () => {
       target: WORKTREE_TARGET,
       terminalSessionId: TERMINAL_SESSION_ID,
       physicalWorktreeCapability: testPhysicalWorktreeExecutionCapability(WORKTREE_PATH),
-      cwd: '/tmp',
+      cwd: TMP_PATH,
     })
     if (!prepared.ok) throw new Error(prepared.message)
     prepared.admission.commit({
@@ -492,7 +495,7 @@ describe('TerminalSessionManager session lifecycle', () => {
       target: WORKTREE_TARGET,
       terminalSessionId: TERMINAL_SESSION_ID,
       physicalWorktreeCapability: testPhysicalWorktreeExecutionCapability(WORKTREE_PATH),
-      cwd: '/tmp',
+      cwd: TMP_PATH,
     })
     if (!prepared.ok) throw new Error(prepared.message)
     prepared.admission.commit({
@@ -522,7 +525,7 @@ describe('TerminalSessionManager session lifecycle', () => {
       target: WORKTREE_TARGET,
       terminalSessionId: TERMINAL_SESSION_ID,
       physicalWorktreeCapability: testPhysicalWorktreeExecutionCapability(WORKTREE_PATH),
-      cwd: '/tmp',
+      cwd: TMP_PATH,
     })
     if (!prepared.ok) throw new Error(prepared.message)
 

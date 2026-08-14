@@ -2,6 +2,12 @@ import { beforeEach, describe, expect, test, vi } from 'vitest'
 import { getWorktreePatch } from '#/system/git/patch.ts'
 import { sampleWorktreeStatus, sampleWorktreeStatusForTarget } from '#/system/git/status.ts'
 import type { WorktreeInfo } from '#/shared/git-types.ts'
+import { nativePathForTest } from '#/test-utils/workspace-id.ts'
+
+const REPO_PATH = nativePathForTest('/tmp/repo')
+const DETACHED_WORKTREE_PATH = nativePathForTest('/tmp/detached-worktree')
+const WORKTREE_A_PATH = nativePathForTest('/tmp/worktree-a')
+const MISSING_WORKTREE_PATH = nativePathForTest('/tmp/missing-worktree')
 
 const mocks = vi.hoisted(() => ({ git: vi.fn() }))
 
@@ -16,18 +22,18 @@ describe('getWorkingStatus', () => {
     mocks.git.mockRejectedValueOnce(new Error('worktree list failed'))
     const { getWorkingStatus } = await import('#/system/git/status.ts')
 
-    await expect(getWorkingStatus('/tmp/repo')).rejects.toThrow('worktree list failed')
+    await expect(getWorkingStatus(REPO_PATH)).rejects.toThrow('worktree list failed')
   })
 
   test('rejects the complete read when one non-bare worktree status fails', async () => {
     mocks.git
       .mockResolvedValueOnce(
         [
-          'worktree /tmp/repo',
+          `worktree ${REPO_PATH}`,
           'HEAD f00ba4a000000000000000000000000000000000',
           'branch refs/heads/main',
           '',
-          'worktree /tmp/worktree-a',
+          `worktree ${WORKTREE_A_PATH}`,
           'HEAD ba5eba1000000000000000000000000000000000',
           'branch refs/heads/feature/a',
         ].join('\0') + '\0\0',
@@ -36,18 +42,18 @@ describe('getWorkingStatus', () => {
       .mockRejectedValueOnce(new Error('status failed'))
     const { getWorkingStatus } = await import('#/system/git/status.ts')
 
-    await expect(getWorkingStatus('/tmp/repo')).rejects.toThrow('status failed')
+    await expect(getWorkingStatus(REPO_PATH)).rejects.toThrow('status failed')
   })
 
   test('rejects when a listed worktree disappears during status sampling', async () => {
     mocks.git
       .mockResolvedValueOnce(
         [
-          'worktree /tmp/repo',
+          `worktree ${REPO_PATH}`,
           'HEAD f00ba4a000000000000000000000000000000000',
           'branch refs/heads/main',
           '',
-          'worktree /tmp/worktree-a',
+          `worktree ${WORKTREE_A_PATH}`,
           'HEAD ba5eba1000000000000000000000000000000000',
           'branch refs/heads/feature/a',
         ].join('\0') + '\0\0',
@@ -56,18 +62,18 @@ describe('getWorkingStatus', () => {
       .mockRejectedValueOnce(new Error('cwd disappeared'))
     const { getWorkingStatus } = await import('#/system/git/status.ts')
 
-    await expect(getWorkingStatus('/tmp/repo')).rejects.toThrow('cwd disappeared')
+    await expect(getWorkingStatus(REPO_PATH)).rejects.toThrow('cwd disappeared')
   })
 
   test('does not run status for a prunable worktree with a missing path', async () => {
     mocks.git
       .mockResolvedValueOnce(
         [
-          'worktree /tmp/repo',
+          `worktree ${REPO_PATH}`,
           'HEAD f00ba4a000000000000000000000000000000000',
           'branch refs/heads/main',
           '',
-          'worktree /tmp/missing-worktree',
+          `worktree ${MISSING_WORKTREE_PATH}`,
           'HEAD ba5eba1000000000000000000000000000000000',
           'branch refs/heads/stale',
           'prunable gitdir file points to non-existent location',
@@ -76,8 +82,8 @@ describe('getWorkingStatus', () => {
       .mockResolvedValueOnce('')
     const { getWorkingStatus } = await import('#/system/git/status.ts')
 
-    await expect(getWorkingStatus('/tmp/repo')).resolves.toEqual([
-      { path: '/tmp/repo', branch: 'main', isMain: true, entries: [] },
+    await expect(getWorkingStatus(REPO_PATH)).resolves.toEqual([
+      { path: REPO_PATH, branch: 'main', isMain: true, entries: [] },
     ])
     expect(mocks.git).toHaveBeenCalledTimes(2)
   })
@@ -85,21 +91,21 @@ describe('getWorkingStatus', () => {
   test('returns complete status for branch and detached worktrees', async () => {
     const membership =
       [
-        'worktree /tmp/repo',
+        `worktree ${REPO_PATH}`,
         'HEAD f00ba4a000000000000000000000000000000000',
         'branch refs/heads/main',
         '',
-        'worktree /tmp/detached-worktree',
+        `worktree ${DETACHED_WORKTREE_PATH}`,
         'HEAD ba5eba1000000000000000000000000000000000',
         'detached',
       ].join('\0') + '\0\0'
     mocks.git.mockResolvedValueOnce(membership).mockResolvedValueOnce('').mockResolvedValueOnce('?? detached.ts\0')
     const { getWorkingStatus } = await import('#/system/git/status.ts')
 
-    await expect(getWorkingStatus('/tmp/repo')).resolves.toEqual([
-      { path: '/tmp/repo', branch: 'main', isMain: true, entries: [] },
+    await expect(getWorkingStatus(REPO_PATH)).resolves.toEqual([
+      { path: REPO_PATH, branch: 'main', isMain: true, entries: [] },
       {
-        path: '/tmp/detached-worktree',
+        path: DETACHED_WORKTREE_PATH,
         branch: undefined,
         isMain: false,
         entries: [{ x: '?', y: '?', path: 'detached.ts' }],
@@ -112,11 +118,11 @@ describe('getWorkingStatus', () => {
     const controller = new AbortController()
     mocks.git.mockImplementationOnce(async () => {
       controller.abort(new Error('status deadline'))
-      return 'worktree /tmp/repo\nHEAD f00ba4a000000000000000000000000000000000\nbranch refs/heads/main'
+      return `worktree ${REPO_PATH}\nHEAD f00ba4a000000000000000000000000000000000\nbranch refs/heads/main`
     })
     const { getWorkingStatus } = await import('#/system/git/status.ts')
 
-    await expect(getWorkingStatus('/tmp/repo', { signal: controller.signal })).rejects.toThrow('status deadline')
+    await expect(getWorkingStatus(REPO_PATH, { signal: controller.signal })).rejects.toThrow('status deadline')
   })
 
   test('bounds status probes across concurrent aggregate callers', async () => {

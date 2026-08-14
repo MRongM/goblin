@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, vi } from 'vitest'
-import { workspaceIdForTest } from '#/test-utils/workspace-id.ts'
+import { localWorkspaceIdForTest, nativePathForTest, workspaceIdForTest } from '#/test-utils/workspace-id.ts'
 import { acquireWorkspaceRuntime, clearWorkspaceRuntimesForUser } from '#/server/modules/workspace-runtimes.ts'
 import { settleWorkspaceProbeForTest } from '#/server/test-utils/workspace-runtime-capability.ts'
 import { createInProcessPtySupervisor } from '#/server/terminal/pty-supervisor-inprocess.ts'
@@ -16,7 +16,7 @@ import {
 import type { ServerTerminalHost } from '#/server/terminal/terminal-host.ts'
 import type { ServerWorkspacePaneRuntimeHost } from '#/server/workspace-pane/workspace-pane-runtime-host.ts'
 import type { TerminalCreateInput, TerminalCreateResult } from '#/shared/terminal-types.ts'
-import { canonicalWorkspaceLocator } from '#/shared/workspace-locator.ts'
+import { canonicalWorkspaceLocator, workspaceLocatorForPath } from '#/shared/workspace-locator.ts'
 import {
   WORKSPACE_PANE_RUNTIME_SOCKET_ACTIONS,
   type WorkspacePaneRuntimeOpenInput,
@@ -30,8 +30,10 @@ import type * as PhysicalWorktreeIdentityResolverModule from '#/server/worktree-
 // Keep that integration fixture shared while each suite owns one observable runtime behavior.
 export const USER_1 = 'user_terminal_runtime'
 export const USER_2 = 'user_terminal_runtime_second'
-export const REPO_ROOT = requiredWorkspaceLocator('goblin+file:///repo')
-export const LINKED_REPO_ROOT = requiredWorkspaceLocator('goblin+file:///repo-linked')
+export const REPO_ROOT = localWorkspaceIdForTest('/repo')
+export const LINKED_REPO_ROOT = localWorkspaceIdForTest('/repo-linked')
+export const REPO_PATH = nativePathForTest('/repo')
+export const LINKED_REPO_PATH = nativePathForTest('/repo-linked')
 export let WORKSPACE_RUNTIME_ID = ''
 export let SSH_WORKSPACE_RUNTIME_ID = ''
 export let USER_2_WORKSPACE_RUNTIME_ID = ''
@@ -79,7 +81,7 @@ export async function commitTerminalReadyProbe(
 
 vi.mock('#/system/git/worktrees.ts', () => ({
   readWorktreeMembership: vi.fn(async () => [
-    { path: '/repo-linked', branch: 'feature', isBare: false, isPrimary: false },
+    { path: LINKED_REPO_PATH, branch: 'feature', isBare: false, isPrimary: false },
   ]),
 }))
 
@@ -312,7 +314,7 @@ export const captureTestWorkspacePaneTargets: WorkspacePaneTargetProjectionProvi
   if (!workspaceId) throw new Error('invalid test workspace id')
   const separator = scope.lastIndexOf('\0')
   const workspaceRuntimeId = scope.slice(separator + 1)
-  const nativeWorktreePath = repoRoot.startsWith('goblin+ssh://') ? '/srv/repo' : '/repo-linked'
+  const nativeWorktreePath = repoRoot.startsWith('goblin+ssh://') ? '/srv/repo' : LINKED_REPO_PATH
   return [
     {
       target: {
@@ -426,7 +428,7 @@ export function createLocalWorktreeTerminal(
     repoRoot: REPO_ROOT,
     workspaceRuntimeId: WORKSPACE_RUNTIME_ID,
     branch: 'feature',
-    worktreePath: '/repo-linked',
+    worktreePath: LINKED_REPO_PATH,
     kind,
   })
 }
@@ -474,6 +476,7 @@ function terminalCreateTarget(
   const workspaceId = requiredWorkspaceLocator(input.repoRoot)
   const root = input.repoRoot.startsWith('goblin+ssh://')
     ? workspaceId
-    : requiredWorkspaceLocator(`goblin+file://${input.worktreePath}`)
+    : workspaceLocatorForPath(workspaceId, input.worktreePath)
+  if (!root) throw new Error('invalid local worktree fixture')
   return { kind: 'git-worktree' as const, workspaceId, workspaceRuntimeId: input.workspaceRuntimeId, root }
 }

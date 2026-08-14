@@ -10,7 +10,7 @@ import {
 import { beforeEach, describe, expect, test } from 'vitest'
 import { RemoteWorkspaceRuntimeFailureError } from '#/server/modules/remote-workspace-runtime-failure.ts'
 import { failRemoteWorkspaceLifecycle, runSerializedWorkspaceRefresh } from '#/server/modules/workspace-runtimes.ts'
-import { workspaceIdForTest } from '#/test-utils/workspace-id.ts'
+import { localWorkspaceIdForTest, nativePathForTest, workspaceIdForTest } from '#/test-utils/workspace-id.ts'
 import { RepoMutationRuntimeFailureError } from '#/server/modules/repo-mutation-runtime-failure.ts'
 
 const mocks = repoRouteMocks()
@@ -39,7 +39,7 @@ describe('repo routes — POST body validation (read endpoints)', () => {
 
   test('rejects Git reads after the server commits Git unavailable', async () => {
     const app = createTestRepoRoutes()
-    const workspaceId = workspaceIdForTest('goblin+file:///tmp/plain-workspace')
+    const workspaceId = localWorkspaceIdForTest('/tmp/plain-workspace')
     const workspaceRuntimeId = await openTestWorkspaceRuntime(workspaceId)
     await runSerializedWorkspaceRefresh({
       userId: 'user-test',
@@ -511,7 +511,7 @@ describe('repo routes — POST body validation (read endpoints)', () => {
   test('publishes exact filesystem invalidations for worktrees changed by pull', async () => {
     const app = createTestRepoRoutes()
     const workspaceRuntimeId = await openTestWorkspaceRuntime()
-    const worktreePath = '/tmp/repo-worktree'
+    const worktreePath = nativePathForTest('/tmp/repo-worktree')
     mocks.pullRepoBranch.mockResolvedValueOnce({
       ok: true,
       message: '',
@@ -539,7 +539,7 @@ describe('repo routes — POST body validation (read endpoints)', () => {
         kind: 'git-worktree',
         workspaceId: WORKSPACE_ID,
         workspaceRuntimeId,
-        root: workspaceIdForTest('goblin+file:///tmp/repo-worktree'),
+        root: localWorkspaceIdForTest('/tmp/repo-worktree'),
       },
     })
   })
@@ -595,7 +595,7 @@ describe('repo routes — POST body validation (read endpoints)', () => {
   test('publishes filesystem invalidation when a failed pull command may have changed a worktree', async () => {
     const app = createTestRepoRoutes()
     const workspaceRuntimeId = await openTestWorkspaceRuntime()
-    const worktreePath = '/tmp/repo-worktree'
+    const worktreePath = nativePathForTest('/tmp/repo-worktree')
     mocks.pullRepoBranch.mockResolvedValueOnce({
       ok: false,
       message: 'pull failed',
@@ -625,7 +625,7 @@ describe('repo routes — POST body validation (read endpoints)', () => {
         kind: 'git-worktree',
         workspaceId: WORKSPACE_ID,
         workspaceRuntimeId,
-        root: workspaceIdForTest('goblin+file:///tmp/repo-worktree'),
+        root: localWorkspaceIdForTest('/tmp/repo-worktree'),
       },
     })
   })

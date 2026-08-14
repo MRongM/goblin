@@ -2,6 +2,7 @@ import { describe, expect, test } from 'vitest'
 import { normalizeRemoteWorkspaceId } from '#/shared/remote-workspace.ts'
 import {
   REPO_ID,
+  REPO_PATH,
   expectNoRepoMetadataInvalidations,
   mocks,
   pullRequest,
@@ -34,7 +35,7 @@ describe('getRepoSnapshot', () => {
         repoId: REPO_ID,
         kind: 'create-worktree',
         source: 'user',
-        target: { branch: 'feature/creating', worktreePath: '/tmp/repo-creating' },
+        target: { branch: 'feature/creating', worktreePath: `${REPO_PATH}-creating` },
       },
       (operation) => async () => {
         operation.start()
@@ -61,7 +62,7 @@ describe('getRepoSnapshot', () => {
     const snapshot = repoSnapshot('fresh')
     const membership = [
       {
-        path: '/tmp/repo',
+        path: REPO_PATH,
         branch: snapshot.current,
         headOid: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
         isBare: false,
@@ -79,7 +80,7 @@ describe('getRepoSnapshot', () => {
       ...snapshot,
       worktrees: [
         {
-          path: '/tmp/repo',
+          path: REPO_PATH,
           head: { kind: 'branch', branchName: 'fresh' },
           headOid: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
           operation: null,
@@ -104,7 +105,7 @@ describe('getRepoSnapshot', () => {
   })
 
   test('reads current from symbolic HEAD only for a bare source workspace', async () => {
-    mocks.readWorktreeMembership.mockResolvedValueOnce([{ path: '/tmp/repo', isBare: true, isPrimary: true }])
+    mocks.readWorktreeMembership.mockResolvedValueOnce([{ path: REPO_PATH, isBare: true, isPrimary: true }])
     mocks.getBranches.mockResolvedValueOnce([])
     mocks.getCurrentBranch.mockResolvedValueOnce('bare/main')
     mocks.getRemoteInfo.mockResolvedValueOnce(repoSnapshot().remote)
@@ -118,10 +119,10 @@ describe('getRepoSnapshot', () => {
 
 describe('getWorkspacePaneTargetIdentities', () => {
   test('reads only worktree and branch identity without status or remote display data', async () => {
-    const worktrees = [{ path: '/tmp/repo', branch: 'main', isBare: false, isPrimary: true }]
+    const worktrees = [{ path: REPO_PATH, branch: 'main', isBare: false, isPrimary: true }]
     const worktreeSnapshots = [
       {
-        path: '/tmp/repo',
+        path: REPO_PATH,
         head: { kind: 'branch' as const, branchName: 'main' },
         headOid: '0123456789abcdef0123456789abcdef01234567',
         operation: null,
@@ -132,18 +133,18 @@ describe('getWorkspacePaneTargetIdentities', () => {
     mocks.readWorktreeMembership.mockResolvedValueOnce(worktrees)
     mocks.readRepoWorktreeSnapshots.mockResolvedValueOnce(worktreeSnapshots)
     mocks.getBranchWorktreeIdentities.mockResolvedValueOnce([
-      { branch: 'main', worktreePath: '/tmp/repo' },
+      { branch: 'main', worktreePath: REPO_PATH },
       { branch: 'feature/no-worktree', worktreePath: null },
     ])
 
     const { getWorkspacePaneTargetIdentities } = await import('#/server/modules/repo-read-paths.ts')
     await expect(getWorkspacePaneTargetIdentities(REPO_ID)).resolves.toEqual([
-      { branch: 'main', worktreePath: '/tmp/repo' },
+      { branch: 'main', worktreePath: REPO_PATH },
       { branch: 'feature/no-worktree', worktreePath: null },
     ])
 
-    expect(mocks.readWorktreeMembership).toHaveBeenCalledWith('/tmp/repo', undefined)
-    expect(mocks.getBranchWorktreeIdentities).toHaveBeenCalledWith('/tmp/repo', worktreeSnapshots, {
+    expect(mocks.readWorktreeMembership).toHaveBeenCalledWith(REPO_PATH, undefined)
+    expect(mocks.getBranchWorktreeIdentities).toHaveBeenCalledWith(REPO_PATH, worktreeSnapshots, {
       signal: undefined,
     })
     expect(mocks.getBranches).not.toHaveBeenCalled()

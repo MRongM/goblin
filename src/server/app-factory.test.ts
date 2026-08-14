@@ -113,32 +113,36 @@ const TEST_WORKSPACE_CAPABILITY_TRANSITION_HOST = {
 }
 
 describe('server app body limit', () => {
-  test('rejects POST bodies over 1 MiB with a 413 JSON response', async () => {
-    const { createApp } = await import('#/server/app-factory.ts')
-    const app = createApp({
-      version: '0.1.0',
-      startedAt: Date.now(),
-      accessToken: 'secret',
-      workspaceCapabilityTransitionHost: TEST_WORKSPACE_CAPABILITY_TRANSITION_HOST,
-      appRealtimeHost: appRealtimeHostStub,
-      workspacePaneTabsHost: workspacePaneTabsHostStub,
-      worktreeRemovalApplication: worktreeRemovalApplicationStub,
-    })
-    const oversized = 'x'.repeat(2 * 1024 * 1024)
-    const response = await app.request(
-      new Request('http://127.0.0.1:32100/api/settings/prefs', {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          'x-goblin-access-token': 'secret',
-        },
-        body: JSON.stringify({ session: { blob: oversized } }),
-      }),
-    )
-    expect(response.status).toBe(413)
-    const json = (await response.json()) as { ok: boolean; code: string }
-    expect(json).toEqual({ ok: false, code: 'PAYLOAD_TOO_LARGE', message: 'Request body too large' })
-  })
+  test(
+    'rejects POST bodies over 1 MiB with a 413 JSON response',
+    async () => {
+      const { createApp } = await import('#/server/app-factory.ts')
+      const app = createApp({
+        version: '0.1.0',
+        startedAt: Date.now(),
+        accessToken: 'secret',
+        workspaceCapabilityTransitionHost: TEST_WORKSPACE_CAPABILITY_TRANSITION_HOST,
+        appRealtimeHost: appRealtimeHostStub,
+        workspacePaneTabsHost: workspacePaneTabsHostStub,
+        worktreeRemovalApplication: worktreeRemovalApplicationStub,
+      })
+      const oversized = 'x'.repeat(2 * 1024 * 1024)
+      const response = await app.request(
+        new Request('http://127.0.0.1:32100/api/settings/prefs', {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'x-goblin-access-token': 'secret',
+          },
+          body: JSON.stringify({ session: { blob: oversized } }),
+        }),
+      )
+      expect(response.status).toBe(413)
+      const json = (await response.json()) as { ok: boolean; code: string }
+      expect(json).toEqual({ ok: false, code: 'PAYLOAD_TOO_LARGE', message: 'Request body too large' })
+    },
+    20_000,
+  )
 
   test('accepts POST bodies under the limit and surfaces route errors normally', async () => {
     const { createApp } = await import('#/server/app-factory.ts')

@@ -20,6 +20,15 @@ let tmp = ''
 let sourceRoot = ''
 let targetRoot = ''
 
+function setupNodeCommand(script: string): string {
+  if (process.platform === 'win32') {
+    const executable = process.execPath.replaceAll("'", "''")
+    const argument = script.replaceAll("'", "''")
+    return `& '${executable}' -e '${argument}'`
+  }
+  return `${JSON.stringify(process.execPath)} -e ${JSON.stringify(script)}`
+}
+
 beforeEach(async () => {
   tmp = await mkdtemp(path.join(os.tmpdir(), 'worktree-bootstrap-test-'))
   sourceRoot = path.join(tmp, 'repo')
@@ -98,7 +107,7 @@ exclude = ["config/*.log"]
     await writeFile(path.join(sourceRoot, 'config', 'debug.log'), 'skip\n')
     await writeFile(path.join(sourceRoot, 'linked.txt'), 'linked\n')
     await writeFile(path.join(sourceRoot, 'cache.db'), 'cache\n')
-    const setupCommand = `${JSON.stringify(process.execPath)} -e "require('node:fs').writeFileSync('setup.txt', 'done')"`
+    const setupCommand = setupNodeCommand("require('node:fs').writeFileSync('setup.txt', 'done')")
     await writeConfig(`
 [worktree]
 copy = [".env.local", "config/*"]
@@ -157,7 +166,7 @@ setup = ${JSON.stringify(setupCommand)}
   })
 
   test('preserves cancellation through the real setup failure boundary', async () => {
-    const setupCommand = `${JSON.stringify(process.execPath)} -e "setTimeout(() => {}, 10000)"`
+    const setupCommand = setupNodeCommand('setTimeout(() => {}, 10000)')
     await writeConfig(`[worktree]\nsetup = ${JSON.stringify(setupCommand)}\n`)
     const controller = new AbortController()
     const abort = setTimeout(() => controller.abort(), 100)
@@ -225,6 +234,7 @@ exclude = ["config/*.log", "config/nested"]
     await writeFile(path.join(sourceDirectory, 'settings.json'), '{"enabled":true}\n')
     await writeConfig('[worktree]\ncopy = ["readonly-config"]\n')
     await chmod(sourceDirectory, 0o555)
+    const sourceMode = (await stat(sourceDirectory)).mode & 0o777
 
     try {
       const result = await bootstrapWorktreeAfterCreate(sourceRoot, targetRoot)
@@ -233,7 +243,7 @@ exclude = ["config/*.log", "config/nested"]
       await expect(readFile(path.join(targetRoot, 'readonly-config', 'settings.json'), 'utf8')).resolves.toBe(
         '{"enabled":true}\n',
       )
-      expect((await stat(path.join(targetRoot, 'readonly-config'))).mode & 0o777).toBe(0o555)
+      expect((await stat(path.join(targetRoot, 'readonly-config'))).mode & 0o777).toBe(sourceMode)
     } finally {
       await chmod(sourceDirectory, 0o755)
       await chmod(path.join(targetRoot, 'readonly-config'), 0o755).catch(() => {})
@@ -358,7 +368,7 @@ copy = [".env.local", "later.txt"]
     await expect(readFile(path.join(targetRoot, 'later.txt'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
-  test('reports only fully completed materializations before a later failure', async () => {
+  test.runIf(process.platform !== 'win32')('reports only fully completed materializations before a later failure', async () => {
     await writeFile(path.join(sourceRoot, 'first.env'), 'first\n')
     const socketPath = path.join(sourceRoot, 'unsupported.sock')
     const server = createServer()
@@ -463,7 +473,7 @@ ${mode} = ["linked-dir/secret.txt"]
   })
 
   test('fails when setup exits non-zero', async () => {
-    const setupCommand = `${JSON.stringify(process.execPath)} -e "process.exit(7)"`
+    const setupCommand = setupNodeCommand('process.exit(7)')
     await writeFile(path.join(sourceRoot, 'before-setup.env'), 'copied\n')
     await writeConfig(`
 [worktree]
