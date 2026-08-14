@@ -2,20 +2,22 @@ import { computed, toValue, watch } from 'vue'
 import type { ComputedRef, MaybeRefOrGetter } from 'vue'
 import { useRouter } from 'vue-router'
 import { isEqual } from 'es-toolkit'
-import type { AppRouteNavigation, AppRouteNavigationOptions } from '#/web/app-route-navigation.ts'
+import type { AppRouteNavigation } from '#/web/app-route-navigation.ts'
+import type { AppNavigationExecutionOptions } from '#/web/app-navigation-lifecycle.ts'
 import { workspacesStore } from '#/web/stores/workspaces/store.ts'
 import type { WorkspaceNavigationHistoryEntry } from '#/web/stores/workspaces/types.ts'
-import { getRepoSnapshotQueryData } from '#/web/repo-query-cache.ts'
-import { formatTerminalFilesystemTargetKeyForPath } from '#/shared/terminal-filesystem-target-key.ts'
-import { isWorkspacePaneStaticTabType } from '#/shared/workspace-pane.ts'
-import type { WorkspacePaneTabType } from '#/shared/workspace-pane.ts'
+import type { WorkspacePaneStaticTabType, WorkspacePaneTabType } from '#/shared/workspace-pane.ts'
 import { workspaceNavigationHistoryEntryEqual } from '#/web/stores/workspaces/navigation-history-entry.ts'
-import type { WorkspacePaneRoute } from '#/web/App.tsx'
-import { workspacePaneRouteNavigationBlockedForBranch } from '#/web/workspace-pane/workspace-pane-tab-target.ts'
+import type { BranchWorkspacePaneRouteTarget, WorkspacePaneRoute } from '#/web/App.tsx'
+import {
+  workspacePaneRouteNavigationBlockedForBranch,
+  workspacePaneRouteNavigationBlockedForWorktree,
+} from '#/web/workspace-pane/workspace-pane-tab-target.ts'
 import { consumeAppHistoryPresentationAction } from '#/web/app-history-presentation.ts'
 import type { AppHistoryPresentationAction } from '#/web/app-history-presentation.ts'
 import type { WorkspaceId } from '#/shared/workspace-locator.ts'
 import { useStoreSelector } from '#/web/stores/store-selector.ts'
+import { getRepoSnapshotQueryData } from '#/web/repo-query-cache.ts'
 
 export type WorkspaceNavigationRouteContext =
   | { kind: 'empty'; workspaceId: WorkspaceId }
@@ -27,8 +29,7 @@ export type WorkspaceNavigationRouteContext =
       kind: 'branch'
       workspaceId: WorkspaceId
       branchName: string
-      worktreePath?: string | null
-      workspacePaneRoute: WorkspacePaneRoute | null
+      workspacePaneRoute: BranchWorkspacePaneRouteTarget
     }
 
 interface WorkspaceNavigationHistoryOptions {
@@ -136,9 +137,7 @@ type WorkspaceNavigationHistoryRouteSnapshot =
       workspaceId: WorkspaceId
       kind: 'branch'
       branchName: string
-      workspacePaneTab: WorkspacePaneTabType | null
-      terminalFilesystemTargetKey: string | null
-      terminalSessionId: string | null
+      workspacePaneTab: WorkspacePaneStaticTabType | null
     }
 
 function workspaceNavigationHistoryRouteSnapshotFromContext({
@@ -171,21 +170,11 @@ function workspaceNavigationHistoryRouteSnapshotFromContext({
       }
     }
     case 'branch': {
-      const repo = workspacesStore.getState().workspaces[workspaceId]
-      const branchModel =
-        repo?.capability.kind === 'git' ? getRepoSnapshotQueryData(repo.id, repo.workspaceRuntimeId) : null
-      const branch = branchModel?.branches.find((candidate) => candidate.name === routeContext.branchName)
-      const worktreePath = routeContext.worktreePath ?? branch?.worktree?.path ?? null
-      const terminalFilesystemTargetKey = worktreePath
-        ? formatTerminalFilesystemTargetKeyForPath(workspaceId, worktreePath)
-        : null
-      const route = routeContext.workspacePaneRoute
       return {
         workspaceId,
         kind: 'branch',
         branchName: routeContext.branchName,
-        ...workspaceNavigationPaneSelection(route),
-        terminalFilesystemTargetKey,
+        workspacePaneTab: routeContext.workspacePaneRoute?.tab ?? null,
       }
     }
   }
@@ -238,8 +227,6 @@ function workspaceNavigationHistoryEntryFromSnapshot(
           kind: 'branch',
           branchName: snapshot.branchName,
           workspacePaneTab: snapshot.workspacePaneTab,
-          terminalFilesystemTargetKey: snapshot.terminalFilesystemTargetKey,
-          terminalSessionId: snapshot.terminalSessionId,
         },
       }
   }
@@ -255,7 +242,7 @@ function workspaceNavigationHistoryRouteSnapshotEqual(
 export function restoreWorkspaceNavigationEntry(
   entry: WorkspaceNavigationHistoryEntry,
   routeNavigation: AppRouteNavigation,
-  options?: AppRouteNavigationOptions,
+  options?: AppNavigationExecutionOptions,
 ): WorkspaceNavigationRestoreResult {
   if (workspaceNavigationEntryBlocksWorkspacePaneInteraction(entry)) return { kind: 'blocked' }
   switch (entry.route.kind) {
@@ -283,6 +270,9 @@ export function restoreWorkspaceNavigationEntry(
       routeNavigation.openRepoNewWorktree(entry.workspaceId, { ...options, returnTo: entry.route.returnTo })
       return { kind: 'accepted' }
     case 'worktree':
+      if (!workspaceNavigationWorktreeExists(entry.workspaceId, entry.route.worktreePath)) {
+        return { kind: 'unavailable' }
+      }
       if (entry.route.workspacePaneTab === 'terminal' && entry.route.terminalSessionId) {
         const accepted = routeNavigation.openRepoWorktreeTerminal(
           entry.workspaceId,
@@ -305,20 +295,7 @@ export function restoreWorkspaceNavigationEntry(
         ? { kind: 'accepted' }
         : { kind: 'unavailable' }
     case 'branch':
-      if (entry.route.workspacePaneTab === 'terminal' && entry.route.terminalSessionId) {
-        const accepted = routeNavigation.openRepoBranchTerminal(
-          entry.workspaceId,
-          entry.route.branchName,
-          entry.route.terminalSessionId,
-          options,
-        )
-        return accepted ? { kind: 'accepted' } : { kind: 'unavailable' }
-      }
       if (!entry.route.workspacePaneTab) {
-        const accepted = routeNavigation.openRepoBranch(entry.workspaceId, entry.route.branchName, options)
-        return accepted ? { kind: 'accepted' } : { kind: 'unavailable' }
-      }
-      if (!isWorkspacePaneStaticTabType(entry.route.workspacePaneTab)) {
         const accepted = routeNavigation.openRepoBranch(entry.workspaceId, entry.route.branchName, options)
         return accepted ? { kind: 'accepted' } : { kind: 'unavailable' }
       }
@@ -330,6 +307,13 @@ export function restoreWorkspaceNavigationEntry(
       )
       return accepted ? { kind: 'accepted' } : { kind: 'unavailable' }
   }
+}
+
+function workspaceNavigationWorktreeExists(workspaceId: WorkspaceId, worktreePath: string): boolean {
+  const workspace = workspacesStore.getState().workspaces[workspaceId]
+  if (!workspace || workspace.capability.kind !== 'git') return false
+  const snapshot = getRepoSnapshotQueryData(workspace.id, workspace.workspaceRuntimeId)
+  return !!snapshot?.worktrees.some((worktree) => worktree.path === worktreePath)
 }
 
 export type WorkspaceNavigationRestoreResult = { kind: 'accepted' } | { kind: 'blocked' } | { kind: 'unavailable' }
@@ -350,16 +334,16 @@ export function workspaceNavigationHistoryRestoreBlocked(
 function workspaceNavigationEntryBlocksWorkspacePaneInteraction(
   entry: WorkspaceNavigationHistoryEntry | null,
 ): boolean {
-  if (entry?.route.kind !== 'branch') return false
-  if (!workspaceNavigationBranchEntryTargetsWorkspacePane(entry)) return false
-  return workspacePaneRouteNavigationBlockedForBranch(entry.workspaceId, entry.route.branchName)
-}
-
-function workspaceNavigationBranchEntryTargetsWorkspacePane(entry: WorkspaceNavigationHistoryEntry): boolean {
-  if (entry.route.kind !== 'branch') return false
-  if (!entry.route.workspacePaneTab) return false
-  if (entry.route.workspacePaneTab !== 'terminal') return true
-  return !!entry.route.terminalSessionId
+  if (!entry) return false
+  if (entry.route.kind === 'branch') {
+    if (!entry.route.workspacePaneTab) return false
+    return workspacePaneRouteNavigationBlockedForBranch(entry.workspaceId, entry.route.branchName)
+  }
+  if (entry.route.kind === 'worktree') {
+    if (!entry.route.workspacePaneTab) return false
+    return workspacePaneRouteNavigationBlockedForWorktree(entry.workspaceId, entry.route.worktreePath)
+  }
+  return false
 }
 
 function workspaceNavigationBrowserHistoryTraversal(

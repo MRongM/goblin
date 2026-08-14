@@ -8,7 +8,7 @@ import { isWorkspacePaneStaticTabType } from '#/shared/workspace-pane.ts'
 import type { AppNavigationGeneration } from '#/web/app-navigation-lifecycle.ts'
 import { createAppHistoryPresentationHistory } from '#/web/app-history-presentation.ts'
 import { App } from '#/web/App.tsx'
-import type { ParsedWorkspacePaneRoute, WorkspaceRouteView } from '#/web/App.tsx'
+import type { ParsedBranchWorkspacePaneRouteTarget, ParsedWorkspacePaneRoute, WorkspaceRouteView } from '#/web/App.tsx'
 import { Layout } from '#/web/Layout.tsx'
 import { EmptyState } from '#/web/components/Layout.tsx'
 import { useAppRouteNavigation } from '#/web/app-route-navigation.ts'
@@ -23,7 +23,6 @@ import {
 import type { RuntimeCoherentWorkspaceState } from '#/web/stores/workspaces/types.ts'
 import { workspacesStore } from '#/web/stores/workspaces/store.ts'
 import { useStoreSelector } from '#/web/stores/store-selector.ts'
-import { openWorkspacePaneRoute } from '#/web/workspace-pane/repo-branch-workspace-pane-route.ts'
 
 const AppRouteView = defineComponent({
   name: 'AppRouteView',
@@ -72,11 +71,6 @@ const appRouteChildren: RouteRecordRaw[] = [
   {
     path: 'workspace/:workspaceSlug/branch/:branchSlug/tab/:tabKey',
     name: 'workspace-branch-tab',
-    component: AppRouteView,
-  },
-  {
-    path: 'workspace/:workspaceSlug/branch/:branchSlug/terminal/:terminalSessionId',
-    name: 'workspace-branch-terminal',
     component: AppRouteView,
   },
   { path: 'workspace/:workspaceSlug/worktree/new', name: 'workspace-new-worktree', component: AppRouteView },
@@ -179,8 +173,6 @@ function workspaceRouteViewFromRoute(route: RouteLocationNormalized): WorkspaceR
       routeName === 'workspace-root-terminal' ? routeStringParam(route.params.terminalSessionId) : null,
     branchSlug: routeName.startsWith('workspace-branch') ? routeStringParam(route.params.branchSlug) : null,
     tabKey: routeName === 'workspace-branch-tab' ? routeStringParam(route.params.tabKey) : null,
-    terminalSessionId:
-      routeName === 'workspace-branch-terminal' ? routeStringParam(route.params.terminalSessionId) : null,
     worktreeSlug: routeName.startsWith('workspace-worktree') ? routeStringParam(route.params.worktreeSlug) : null,
     worktreeTerminalSessionId:
       routeName === 'workspace-worktree-terminal' ? routeStringParam(route.params.terminalSessionId) : null,
@@ -219,7 +211,6 @@ interface WorkspaceChildRoute {
   workspaceTerminalSessionId?: string | null
   branchSlug: string | null
   tabKey?: string | null
-  terminalSessionId?: string | null
   worktreeSlug?: string | null
   worktreeTerminalSessionId?: string | null
   worktreeTabKey?: string | null
@@ -247,7 +238,7 @@ export function workspaceRouteViewFromChildRoute(
       kind: 'branch',
       workspaceId,
       branchName,
-      workspacePaneRoute: workspacePaneRouteFromParams(childRoute.terminalSessionId, childRoute.tabKey),
+      workspacePaneRoute: workspacePaneStaticRouteFromTabKey(childRoute.tabKey),
     }
   }
   if (childRoute.newWorktree) return { kind: 'newWorktree', workspaceId }
@@ -263,6 +254,12 @@ export function workspaceRouteViewFromChildRoute(
     }
   }
   return { kind: 'empty', workspaceId }
+}
+
+function workspacePaneStaticRouteFromTabKey(tabKey: string | null | undefined): ParsedBranchWorkspacePaneRouteTarget {
+  if (!tabKey) return null
+  if (isWorkspacePaneStaticTabType(tabKey)) return { kind: 'static', tab: tabKey }
+  return { kind: 'invalid-static', tabKey }
 }
 
 function workspacePaneRouteFromParams(
@@ -283,15 +280,13 @@ export function appRouterCallbacks(routeActions: AppRouteNavigation) {
     onOpenWorkspaceNavigator: (workspaceId: WorkspaceId) => routeActions.openWorkspaceNavigator(workspaceId),
     onOpenWorkspaceRootPane: (workspaceId: WorkspaceId) => routeActions.openWorkspaceRootPane(workspaceId),
     onOpenWorkspaceDashboard: (workspaceId: WorkspaceId) => routeActions.openWorkspaceDashboard(workspaceId),
-    onOpenRepoBranch: (workspaceId: WorkspaceId, branchName: string) =>
-      openWorkspacePaneRoute(routeActions, workspaceId, branchName),
     onOpenRepoNewWorktree: (workspaceId: WorkspaceId) => routeActions.openRepoNewWorktree(workspaceId),
     onCancelRepoNewWorktree: (workspaceId: WorkspaceId) => routeActions.cancelRepoNewWorktree(workspaceId),
-    onReplaceRepoBranch: (
+    onReplaceRepoWorktree: (
       workspaceId: WorkspaceId,
-      branchName: string,
+      worktreePath: string,
       navigationGeneration: AppNavigationGeneration,
-    ) => routeActions.openRepoBranch(workspaceId, branchName, { replace: true, navigationGeneration }),
+    ) => routeActions.openRepoWorktree(workspaceId, worktreePath, { replace: true, navigationGeneration }),
   }
 }
 

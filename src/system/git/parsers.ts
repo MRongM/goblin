@@ -8,7 +8,7 @@
 
 import path from 'node:path'
 import type { BranchSnapshotInfo, LogEntry, StatusEntry, WorktreeInfo } from '#/shared/git-types.ts'
-import { GIT_HASH_RE } from '#/shared/git-types.ts'
+import { GIT_OBJECT_ID_OR_PREFIX_RE, GIT_OBJECT_ID_RE, isFullGitObjectId } from '#/shared/git-types.ts'
 import { isSafeBranchName } from '#/shared/refnames.ts'
 
 /** NUL cannot occur in Git's formatted ref/log fields. */
@@ -21,24 +21,23 @@ export const PRETTY_FIELD_SEP = '%x00'
  * Fields, in order: refname:short, objectname, objectname:short, subject,
  * authordate:iso-strict, authorname, upstream:short, upstream:track.
  */
-export function parseBranches(
-  output: string,
-  currentBranch: string,
-  worktrees: WorktreeInfo[] = [],
-): BranchSnapshotInfo[] {
+export function parseBranches(output: string): BranchSnapshotInfo[] {
   if (!output) return []
 
   const lines = output.split('\n').filter((line) => line.length > 0)
+  const branchNames = new Set<string>()
   for (const line of lines) {
     const parts = line.split(FIELD_SEP)
     if (parts.length !== 8) throw new Error('Invalid branch snapshot row')
     const [name, hash, shortHash, , date, , upstream, track] = parts
-    if (!name || !isSafeBranchName(name) || !hash || !GIT_HASH_RE.test(hash)) {
+    if (!name || !isSafeBranchName(name) || !hash || !isFullGitObjectId(hash)) {
       throw new Error('Invalid branch snapshot identity')
     }
+    if (branchNames.has(name)) throw new Error('Duplicate branch snapshot identity')
+    branchNames.add(name)
     if (
       !shortHash ||
-      !GIT_HASH_RE.test(shortHash) ||
+      !GIT_OBJECT_ID_OR_PREFIX_RE.test(shortHash) ||
       !date ||
       Number.isNaN(Date.parse(date)) ||
       (upstream !== '' && (!upstream || !isSafeBranchName(upstream))) ||
@@ -46,17 +45,6 @@ export function parseBranches(
       (!upstream && track !== '')
     ) {
       throw new Error('Invalid branch snapshot metadata')
-    }
-  }
-
-  const worktreeMap = new Map<string, { path: string; isPrimary: boolean; isLocked: boolean }>()
-  for (const wt of worktrees) {
-    if (wt.branch) {
-      worktreeMap.set(wt.branch, {
-        path: wt.path,
-        isPrimary: wt.isPrimary,
-        isLocked: wt.isLocked ?? false,
-      })
     }
   }
 
@@ -82,7 +70,6 @@ export function parseBranches(
 
     const branchInfo: BranchSnapshotInfo = {
       name,
-      isCurrent: name === currentBranch,
       ahead,
       behind,
       lastCommitHash: hash,
@@ -95,15 +82,6 @@ export function parseBranches(
     if (upstream) {
       branchInfo.tracking = upstream
       branchInfo.trackingGone = track.includes('gone')
-    }
-
-    const wtInfo = worktreeMap.get(name)
-    if (wtInfo) {
-      branchInfo.worktree = {
-        path: wtInfo.path,
-        isPrimary: wtInfo.isPrimary,
-        isLocked: wtInfo.isLocked,
-      }
     }
 
     branches.push(branchInfo)
@@ -126,9 +104,9 @@ export function parseLog(output: string): LogEntry[] {
       const [hash, shortHash, refs, message, author, date] = parts
       if (
         !hash ||
-        !GIT_HASH_RE.test(hash) ||
+        !isFullGitObjectId(hash) ||
         !shortHash ||
-        !GIT_HASH_RE.test(shortHash) ||
+        !GIT_OBJECT_ID_OR_PREFIX_RE.test(shortHash) ||
         !date ||
         Number.isNaN(Date.parse(date))
       ) {
@@ -176,8 +154,14 @@ export function parseStatus(output: string): StatusEntry[] {
   return entries
 }
 
+export type GitPathPlatform = 'posix' | 'win32'
+
+export function normalizeGitPath(value: string, platform: GitPathPlatform): string {
+  return platform === 'win32' ? path.win32.normalize(value.replaceAll('/', '\\')) : path.posix.normalize(value)
+}
+
 /** Parse and validate `git worktree list --porcelain -z`. */
-export function parseWorktrees(output: string): WorktreeInfo[] {
+export function parseWorktrees(output: string, platform: GitPathPlatform = 'posix'): WorktreeInfo[] {
   if (output.length === 0) throw new Error('Invalid worktree output')
   if (!output.endsWith('\0\0')) throw new Error('Invalid worktree output')
   const blocks = output.slice(0, -2).split('\0\0')
@@ -196,7 +180,7 @@ export function parseWorktrees(output: string): WorktreeInfo[] {
         }
       } else if (line.startsWith('HEAD ')) {
         headCount += 1
-        if (!GIT_HASH_RE.test(line.slice('HEAD '.length))) throw new Error('Invalid worktree HEAD')
+        if (!GIT_OBJECT_ID_RE.test(line.slice('HEAD '.length))) throw new Error('Invalid worktree HEAD')
       } else if (line.startsWith('branch refs/heads/')) {
         stateCount += 1
         if (!isSafeBranchName(line.slice('branch refs/heads/'.length))) throw new Error('Invalid worktree branch')
@@ -219,14 +203,20 @@ export function parseWorktrees(output: string): WorktreeInfo[] {
     }
   }
   const worktrees: WorktreeInfo[] = []
+  const worktreePaths = new Set<string>()
   for (const [blockIndex, block] of blocks.entries()) {
     const lines = block.split('\0')
     const worktreeLine = lines.find((line) => line.startsWith('worktree '))!
+    const headLine = lines.find((line) => line.startsWith('HEAD '))
     const branchLine = lines.find((line) => line.startsWith('branch refs/heads/'))
     const isPrunable = lines.some((line) => line === 'prunable' || line.startsWith('prunable '))
     if (isPrunable) continue
+    const worktreePath = normalizeGitPath(worktreeLine.slice('worktree '.length), platform)
+    if (worktreePaths.has(worktreePath)) throw new Error('Duplicate worktree path')
+    worktreePaths.add(worktreePath)
     worktrees.push({
-      path: worktreeLine.slice('worktree '.length),
+      path: worktreePath,
+      ...(headLine ? { headOid: gitWorktreeHeadOid(headLine.slice('HEAD '.length)) } : {}),
       ...(branchLine ? { branch: branchLine.slice('branch refs/heads/'.length) } : {}),
       isBare: lines.includes('bare'),
       isPrimary: blockIndex === 0,
@@ -234,4 +224,8 @@ export function parseWorktrees(output: string): WorktreeInfo[] {
     })
   }
   return worktrees
+}
+
+function gitWorktreeHeadOid(value: string): string | null {
+  return /^0+$/u.test(value) ? null : value
 }

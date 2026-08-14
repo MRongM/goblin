@@ -377,6 +377,73 @@ describe('repo branch mutations', () => {
     expect(result.repoIdsToInvalidate).toEqual([repoId, worktreeRepoId])
   })
 
+  test('uses the remote physical path for a successfully created worktree', async () => {
+    const repoId = normalizeRemoteWorkspaceId({ alias: 'prod', remotePath: '/srv/repo' })
+    mocks.resolveRemoteWorktreePath.mockResolvedValueOnce('/srv/feature')
+    const { createRepoWorktree } = await import('#/server/modules/repo-write-paths.ts')
+
+    const result = await createRepoWorktree(
+      repoId,
+      {
+        worktreePath: '/srv/nested/../feature',
+        mode: { kind: 'newBranch', newBranch: 'feature/a', baseRef: 'main' },
+      },
+      repoRuntimeCapabilityForTest(repoId, 'test-runtime'),
+      { kind: 'skip' },
+    )
+
+    expect(result).toMatchObject({ ok: true, createdWorktreePath: '/srv/feature' })
+    expect(mocks.resolveRemoteWorktreePath).toHaveBeenCalledWith(
+      expect.anything(),
+      '/srv/nested/../feature',
+      expect.objectContaining({ signal: undefined }),
+    )
+  })
+
+  test('reports recovery when the created remote target cannot be resolved', async () => {
+    const repoId = normalizeRemoteWorkspaceId({ alias: 'prod', remotePath: '/srv/repo' })
+    mocks.resolveRemoteWorktreePath.mockResolvedValueOnce(null)
+    const { createRepoWorktree } = await import('#/server/modules/repo-write-paths.ts')
+
+    const result = await createRepoWorktree(
+      repoId,
+      {
+        worktreePath: '/srv/repo-feature',
+        mode: { kind: 'newBranch', newBranch: 'feature/a', baseRef: 'main' },
+      },
+      repoRuntimeCapabilityForTest(repoId, 'test-runtime'),
+      { kind: 'skip' },
+    )
+
+    expect(result).toMatchObject({
+      ok: false,
+      message: 'error.failed-read-repo',
+      recoveryMessageKeys: ['error.worktree-created-followup-failed'],
+    })
+  })
+
+  test('reports recovery when the remote target is outside the app locator grammar', async () => {
+    const repoId = normalizeRemoteWorkspaceId({ alias: 'prod', remotePath: '/srv/repo' })
+    mocks.resolveRemoteWorktreePath.mockResolvedValueOnce('/srv/repo\\feature')
+    const { createRepoWorktree } = await import('#/server/modules/repo-write-paths.ts')
+
+    const result = await createRepoWorktree(
+      repoId,
+      {
+        worktreePath: '/srv/repo-feature',
+        mode: { kind: 'newBranch', newBranch: 'feature/a', baseRef: 'main' },
+      },
+      repoRuntimeCapabilityForTest(repoId, 'test-runtime'),
+      { kind: 'skip' },
+    )
+
+    expect(result).toMatchObject({
+      ok: false,
+      message: 'error.invalid-path',
+      recoveryMessageKeys: ['error.worktree-created-followup-failed'],
+    })
+  })
+
   test('createRepoWorktree surfaces recovery when remote bootstrap is cancelled after creation', async () => {
     const repoId = normalizeRemoteWorkspaceId({ alias: 'prod', remotePath: '/srv/repo' })
     const worktreeRepoId = normalizeRemoteWorkspaceId({ alias: 'prod', remotePath: '/srv/repo-feature' })
@@ -572,6 +639,32 @@ describe('repo branch mutations', () => {
     expect(result).toMatchObject({ ok: true, message: 'ok' })
     expect(mocks.isAncestor).toHaveBeenCalledWith('/tmp/repo', 'feature/a', 'release/1.0', undefined)
     expect(mocks.deleteBranch).toHaveBeenCalledWith('/tmp/repo', 'feature/a', { force: undefined, signal: undefined })
+  })
+
+  test('deleteRepoBranch rejects a branch retained by a rebasing worktree before mutation', async () => {
+    const membership = [
+      { path: '/tmp/repo', isBare: false, isPrimary: true, headOid: '1111111111111111111111111111111111111111' },
+    ]
+    mocks.readWorktreeMembership.mockResolvedValue(membership)
+    mocks.readRepoWorktreeSnapshots.mockResolvedValue([
+      {
+        path: '/tmp/repo',
+        head: { kind: 'detached' },
+        headOid: '1111111111111111111111111111111111111111',
+        operation: { kind: 'rebase' },
+        materializedBranch: 'feature/a',
+        isPrimary: true,
+        isLocked: false,
+      },
+    ])
+    const { deleteRepoBranch } = await import('#/server/modules/repo-write-paths.ts')
+
+    const result = await deleteRepoBranch(REPO_ID, 'feature/a', repoRuntimeCapabilityForTest(REPO_ID, 'test-runtime'), {
+      force: true,
+    })
+
+    expect(result).toMatchObject({ ok: false, message: 'error.cannot-delete-checked-out-branch' })
+    expect(mocks.deleteBranch).not.toHaveBeenCalled()
   })
 
   test('deleteRepoBranch treats a configured but missing tracking ref as unavailable for merge safety', async () => {

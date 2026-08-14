@@ -3,16 +3,26 @@ import { realpath } from 'node:fs/promises'
 import { omit } from 'es-toolkit'
 import { git, gitCommandResultWithOptions, NETWORK_TIMEOUT_MS } from '#/system/git/git-exec.ts'
 import { withoutMutationCommand, type CommandOutcome } from '#/system/command-execution.ts'
-import { FOR_EACH_REF_FIELD_SEP, PRETTY_FIELD_SEP, parseBranches, parseLog } from '#/system/git/parsers.ts'
+import {
+  FOR_EACH_REF_FIELD_SEP,
+  PRETTY_FIELD_SEP,
+  normalizeGitPath,
+  parseBranches,
+  parseLog,
+} from '#/system/git/parsers.ts'
 import { isSafeBranchName } from '#/shared/refnames.ts'
 import {
   DEFAULT_REPOSITORY_LOG_COUNT,
+  repoLogTargetRevision,
   type BranchSnapshotInfo,
   type ExecResult,
   type LogEntry,
+  type RepoLogTarget,
+  type RepoWorktreeTargetProjection,
+  type WorkspacePaneTargetIdentity,
   type WorktreeInfo,
 } from '#/shared/git-types.ts'
-import { gitHead, type GitHead } from '#/shared/git-head.ts'
+import { repoWorktreeMaterializedBranch } from '#/shared/git-types.ts'
 import { decodeGitUpstream, GIT_UPSTREAM_FORMAT, type GitUpstream } from '#/system/git/upstream.ts'
 
 export async function isGitRepo(cwd: string): Promise<boolean> {
@@ -26,10 +36,23 @@ export async function isGitRepo(cwd: string): Promise<boolean> {
 
 export async function getRepoRoot(cwd: string, options?: { signal?: AbortSignal }): Promise<string> {
   try {
-    return await git(cwd, ['rev-parse', '--show-toplevel'], { signal: options?.signal })
+    const root = await git(cwd, ['rev-parse', '--show-toplevel'], { signal: options?.signal })
+    return normalizeGitPath(root, process.platform === 'win32' ? 'win32' : 'posix')
   } catch {
     return ''
   }
+}
+
+/** Physical root of the addressed Git workspace. Bare repositories use their
+ * common directory because they have no working-tree top level. */
+export async function resolveGitWorkspacePath(cwd: string, options?: { signal?: AbortSignal }): Promise<string> {
+  const bare = await git(cwd, ['rev-parse', '--is-bare-repository'], { signal: options?.signal })
+  if (bare === 'true') return await resolveRepoCommonDir(cwd, options)
+  if (bare !== 'false') throw new Error('Git returned an invalid bare-repository state')
+  const root = await git(cwd, ['rev-parse', '--show-toplevel'], { signal: options?.signal })
+  if (!root) throw new Error('Git returned an empty workspace root')
+  const normalizedRoot = normalizeGitPath(root, process.platform === 'win32' ? 'win32' : 'posix')
+  return path.normalize(await realpath(normalizedRoot))
 }
 
 export async function resolveRepoCommonDir(cwd: string, options?: { signal?: AbortSignal }): Promise<string> {
@@ -63,14 +86,6 @@ export async function getCurrentBranch(cwd: string, options?: { signal?: AbortSi
   const branch = await git(cwd, ['branch', '--show-current'], { signal: options?.signal })
   options?.signal?.throwIfAborted()
   return branch || null
-}
-
-/** Authoritative detached-HEAD identity read; failures and cancellation throw. */
-export async function getHeadHash(cwd: string, options?: { signal?: AbortSignal }): Promise<string> {
-  const head = await git(cwd, ['rev-parse', '--short', 'HEAD'], { signal: options?.signal })
-  options?.signal?.throwIfAborted()
-  if (!head) throw new Error('Git returned an empty HEAD')
-  return head
 }
 
 export async function getDefaultBranch(cwd: string, options?: { signal?: AbortSignal }): Promise<string> {
@@ -124,12 +139,7 @@ async function getMergedBranchNames(
 }
 
 /** Authoritative branch projection read. Optional display enrichments may degrade, but membership may not. */
-export async function getBranches(
-  cwd: string,
-  worktrees: WorktreeInfo[] | undefined,
-  currentBranch: string | null,
-  options?: { signal?: AbortSignal },
-): Promise<BranchSnapshotInfo[]> {
+export async function getBranches(cwd: string, options?: { signal?: AbortSignal }): Promise<BranchSnapshotInfo[]> {
   const format = [
     '%(refname:short)',
     '%(objectname)',
@@ -147,53 +157,67 @@ export async function getBranches(
   options?.signal?.throwIfAborted()
   const mergedBranchNames = await getMergedBranchNames(cwd, defaultBranch, options?.signal)
   options?.signal?.throwIfAborted()
-  const branches = markDefaultBranch(parseBranches(output, currentBranch ?? '', worktrees), defaultBranch)
+  const branches = markDefaultBranch(parseBranches(output), defaultBranch)
   return prioritizeDefaultBranch(
     mergedBranchNames ? markMergedToDefault(branches, defaultBranch, mergedBranchNames) : branches,
     defaultBranch,
   )
 }
 
-export type BranchWorktreeIdentity =
-  { kind: 'git-branch'; branchName: string } | { kind: 'git-worktree'; worktreePath: string; head: GitHead }
-
 /** Strict, display-free branch membership read for admission/catalog paths. */
 export async function getBranchWorktreeIdentities(
   cwd: string,
-  worktrees: readonly WorktreeInfo[],
+  worktrees: readonly RepoWorktreeTargetProjection[],
   options?: { signal?: AbortSignal },
-): Promise<BranchWorktreeIdentity[]> {
+): Promise<WorkspacePaneTargetIdentity[]> {
   const output = await git(cwd, ['for-each-ref', '--format=%(refname:short)', 'refs/heads/'], {
     signal: options?.signal,
   })
   options?.signal?.throwIfAborted()
-  const branches = output
-    .split('\n')
-    .map((branch) => branch.trim())
-    .filter(Boolean)
-  const usableWorktrees = worktrees.filter((worktree) => !worktree.isBare && !worktree.isPrunable)
-  const checkedOutBranches = new Set(usableWorktrees.flatMap((worktree) => (worktree.branch ? [worktree.branch] : [])))
+  const branches = output ? output.split('\n') : []
+  const branchNames = new Set(branches)
+  if (branches.some((branch) => !isSafeBranchName(branch)) || branchNames.size !== branches.length) {
+    throw new Error('Git returned invalid branch identities')
+  }
+  if (
+    worktrees.some(
+      (worktree) =>
+        worktree.headOid !== null &&
+        worktree.materializedBranch !== null &&
+        !branchNames.has(worktree.materializedBranch),
+    )
+  ) {
+    throw new Error('Git worktree materialized branch is unavailable')
+  }
+  const materializedBranches = new Set(
+    worktrees.flatMap((worktree) => {
+      const branchName = repoWorktreeMaterializedBranch(worktree)
+      return branchName ? [branchName] : []
+    }),
+  )
   return [
-    ...usableWorktrees.map((worktree): BranchWorktreeIdentity => ({
+    ...worktrees.map((worktree): WorkspacePaneTargetIdentity => ({
       kind: 'git-worktree',
       worktreePath: worktree.path,
-      head: gitHead(worktree.branch ?? null),
+      head: worktree.head,
+      materializedBranch: worktree.materializedBranch,
     })),
     ...branches
-      .filter((branch) => !checkedOutBranches.has(branch))
-      .map((branch): BranchWorktreeIdentity => ({ kind: 'git-branch', branchName: branch })),
+      .filter((branch) => !materializedBranches.has(branch))
+      .map((branch): WorkspacePaneTargetIdentity => ({ kind: 'git-branch', branchName: branch })),
   ]
 }
 
 export async function getLog(
   cwd: string,
-  branch: string,
+  target: RepoLogTarget,
   count = DEFAULT_REPOSITORY_LOG_COUNT,
   skip = 0,
   options?: { signal?: AbortSignal },
 ): Promise<LogEntry[]> {
   if (options?.signal?.aborted) return []
-  if (!isSafeBranchName(branch)) return []
+  const revision = repoLogTargetRevision(target)
+  if (!revision) return []
   try {
     const format = ['%H', '%h', '%D', '%s', '%an', '%aI'].join(PRETTY_FIELD_SEP)
     const args = [
@@ -204,7 +228,7 @@ export async function getLog(
       String(count),
       '--skip',
       String(skip),
-      branch,
+      revision,
       '--',
     ]
     const output = await git(cwd, args, { signal: options?.signal })

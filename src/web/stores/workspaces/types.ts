@@ -1,5 +1,5 @@
 import type { StoreApi } from 'zustand/vanilla'
-import type { RepoMutationExecResult } from '#/shared/git-types.ts'
+import type { CreateWorktreeExecResult, RepoMutationExecResult } from '#/shared/git-types.ts'
 import type { RemoteWorkspaceConnectionLifecycle, WorkspaceSessionEntry } from '#/shared/remote-workspace.ts'
 import type {
   BranchViewMode,
@@ -7,9 +7,13 @@ import type {
   WorkspaceTabsRestoreResult,
   WorkspaceRuntimeRestoreSnapshot,
 } from '#/shared/api-types.ts'
-import type { WorkspacePaneTabType } from '#/shared/workspace-pane.ts'
+import type { WorkspacePaneStaticTabType, WorkspacePaneTabType } from '#/shared/workspace-pane.ts'
 import type { WorkspacePaneTabsTarget } from '#/shared/workspace-pane-tabs-target.ts'
-import type { RepoBranchAction, RunBranchActionOptions } from '#/web/stores/workspaces/branch-action-types.ts'
+import type {
+  CreateWorktreeAction,
+  NonCreateRepoBranchAction,
+  RunBranchActionOptions,
+} from '#/web/stores/workspaces/branch-action-types.ts'
 import type { RepoOperationsState } from '#/web/stores/workspaces/operations.ts'
 import type {
   WorkspaceFilesystemReadyProbeState,
@@ -146,9 +150,7 @@ export type WorkspaceNavigationHistoryRoute =
   | {
       kind: 'branch'
       branchName: string
-      workspacePaneTab: WorkspacePaneTabType | null
-      terminalFilesystemTargetKey: string | null
-      terminalSessionId: string | null
+      workspacePaneTab: WorkspacePaneStaticTabType | null
     }
 
 export interface WorkspaceNavigationHistoryEntry {
@@ -296,9 +298,14 @@ export interface GitWorkspaceClientActions extends GitWorkspacePreferenceActions
 }
 
 interface GitWorkspaceMutationActions {
+  runCreateWorktreeAction: (
+    id: WorkspaceId,
+    action: CreateWorktreeAction,
+    options?: RunBranchActionOptions,
+  ) => Promise<CreateWorktreeExecResult | null>
   runBranchAction: (
     id: WorkspaceId,
-    action: RepoBranchAction,
+    action: NonCreateRepoBranchAction,
     options?: RunBranchActionOptions,
   ) => Promise<RepoMutationExecResult | null>
 }

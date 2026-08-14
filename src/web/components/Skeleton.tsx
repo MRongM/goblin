@@ -9,12 +9,12 @@ import type { FunctionalComponent, VNodeChild } from 'vue'
 import { Skeleton } from '#/web/components/ui/skeleton.tsx'
 import { WorkspaceLayoutPane, WorkspaceSplitLayout } from '#/web/components/Layout.tsx'
 import {
-  BRANCH_ROW_ACTION_BOX_CLASS,
-  BRANCH_ROW_ACTION_SLOT_CLASS,
-  BRANCH_ROW_CONTENT_CLASS,
-  BRANCH_ROW_GRID_CLASS,
-  BRANCH_ROW_LIST_CLASS,
-} from '#/web/components/branch-navigator/branch-row-metrics.ts'
+  NAVIGATOR_ROW_ACTION_BOX_CLASS,
+  NAVIGATOR_ROW_ACTION_SLOT_CLASS,
+  NAVIGATOR_ROW_CONTENT_CLASS,
+  NAVIGATOR_ROW_GRID_CLASS,
+  NAVIGATOR_ROW_LIST_CLASS,
+} from '#/web/components/workspace-navigator/navigator-row-metrics.ts'
 import {
   WorkspaceToolbar,
   WorkspaceToolbarActions,
@@ -29,7 +29,7 @@ import {
 } from '#/web/components/tab-strip/tab-variants.ts'
 import { STATUS_ROWS_CLASS, STATUS_ROW_LAYOUT_CLASS } from '#/web/components/workspace-pane/status-ui.tsx'
 
-interface BranchNavigatorSkeletonProps {
+interface GitWorkspaceNavigatorSkeletonProps {
   rows?: number
 }
 
@@ -39,9 +39,13 @@ interface WorkspaceSkeletonProps {
   workspacePaneState?: 'empty' | 'content'
 }
 
-export function BranchNavigatorSkeleton({ rows = 6 }: BranchNavigatorSkeletonProps) {
+export function GitWorkspaceNavigatorSkeleton({ rows = 6 }: GitWorkspaceNavigatorSkeletonProps) {
   return (
-    <SkeletonList rows={rows} class={BRANCH_ROW_LIST_CLASS} renderRow={(i) => <BranchNavigatorSkeletonRow key={i} />} />
+    <SkeletonList
+      rows={rows}
+      class={NAVIGATOR_ROW_LIST_CLASS}
+      renderRow={(i) => <GitWorkspaceNavigatorSkeletonRow key={i} />}
+    />
   )
 }
 
@@ -60,7 +64,7 @@ export function WorkspaceLayoutSkeleton({
   )
   const sidebarPane = (
     <WorkspaceLayoutPane>
-      <BranchNavigatorSkeleton />
+      <GitWorkspaceNavigatorSkeleton />
     </WorkspaceLayoutPane>
   )
 
@@ -159,15 +163,15 @@ const SkeletonList: FunctionalComponent<SkeletonListProps> = ({
 SkeletonList.props = ['rows', 'class', 'renderRow']
 SkeletonList.inheritAttrs = false
 
-function BranchNavigatorSkeletonRow() {
+function GitWorkspaceNavigatorSkeletonRow() {
   return (
-    <li class={`${BRANCH_ROW_GRID_CLASS} bg-muted/30`}>
-      <div class={`${BRANCH_ROW_CONTENT_CLASS} gap-3`}>
+    <li class={`${NAVIGATOR_ROW_GRID_CLASS} bg-muted/30`}>
+      <div class={`${NAVIGATOR_ROW_CONTENT_CLASS} gap-3`}>
         <Skeleton class="h-4 w-4 rounded-full" />
         <Skeleton class="h-4 w-3/5" />
       </div>
-      <div class={BRANCH_ROW_ACTION_SLOT_CLASS}>
-        <div class={BRANCH_ROW_ACTION_BOX_CLASS} data-testid="branch-navigator-skeleton-action">
+      <div class={NAVIGATOR_ROW_ACTION_SLOT_CLASS}>
+        <div class={NAVIGATOR_ROW_ACTION_BOX_CLASS} data-testid="git-workspace-navigator-skeleton-action">
           <Skeleton class="h-6 w-7" />
         </div>
       </div>

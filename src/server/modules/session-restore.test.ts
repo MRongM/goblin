@@ -101,7 +101,18 @@ describe('restoreServerWorkspace', () => {
     mocks.readRepoSnapshot.mockResolvedValue({
       snapshot: {
         current: 'main',
-        branches: [{ name: 'main', worktree: { path: '/repo', isPrimary: false, isLocked: false } }],
+        branches: [{ name: 'main' }],
+        worktrees: [
+          {
+            path: '/repo',
+            head: { kind: 'branch', branchName: 'main' },
+            headOid: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            operation: null,
+            materializedBranch: 'main',
+            isPrimary: false,
+            isLocked: false,
+          },
+        ],
         remote: {
           remotes: [],
           hasRemotes: false,
@@ -458,7 +469,18 @@ describe('restoreServerWorkspace', () => {
       return {
         snapshot: {
           current: 'main',
-          branches: [{ name: 'main', worktree: { path: '/repo', isPrimary: false, isLocked: false } }],
+          branches: [{ name: 'main' }],
+          worktrees: [
+            {
+              path: '/repo',
+              head: { kind: 'branch', branchName: 'main' },
+              headOid: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+              operation: null,
+              materializedBranch: 'main',
+              isPrimary: false,
+              isLocked: false,
+            },
+          ],
           remote: {
             remotes: [],
             hasRemotes: false,

@@ -1,6 +1,11 @@
 // @vitest-environment jsdom
 
-import { resetWorkspacesStore, seedRepoWithReadModelForTest, createRepoBranch } from '#/web/test-utils/repo-store.ts'
+import {
+  resetWorkspacesStore,
+  seedRepoWithReadModelForTest,
+  createRepoBranch,
+  createRepoWorktreeSnapshotForTest,
+} from '#/web/test-utils/repo-store.ts'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import type { WorkspacePaneTabEntry } from '#/shared/workspace-pane.ts'
 import { workspacePaneRuntimeTabEntry, workspacePaneStaticTabEntry } from '#/shared/workspace-pane.ts'
@@ -183,6 +188,34 @@ describe('updateWorkspacePaneTabs', () => {
     await expect(update).resolves.toEqual({ ok: true, projection: 'superseded' })
     expect(readTabs()).toEqual([workspacePaneStaticTabEntry('status')])
   })
+
+  test('does not let a pending mutation from an old runtime block its replacement', async () => {
+    const serverTabs = Promise.withResolvers<WorkspacePaneTabEntry[]>()
+    const requestStarted = Promise.withResolvers<void>()
+    installWorkspacePaneTabsTestBridge({
+      updateWorkspaceTabs: async () => {
+        requestStarted.resolve()
+        return await serverTabs.promise
+      },
+    })
+    const update = updateWorkspacePaneTabs({
+      ...target(),
+      operation: { type: 'close-static', tabType: 'status' },
+    })
+    await requestStarted.promise
+    expect(workspacePaneTabsInteractionBlocked()).toBe(true)
+
+    seedWorkspacePaneTabsRepo(NEXT_WORKSPACE_RUNTIME_ID)
+    expect(
+      workspacePaneTabsInteractionBlockedForTarget({
+        ...target(),
+        workspaceRuntimeId: NEXT_WORKSPACE_RUNTIME_ID,
+      }),
+    ).toBe(false)
+
+    serverTabs.resolve([])
+    await update
+  })
 })
 
 function target() {
@@ -227,7 +260,8 @@ function seedWorkspacePaneTabsRepo(workspaceRuntimeId: string): void {
   seedRepoWithReadModelForTest({
     id: REPO_ROOT,
     workspaceRuntimeId,
-    branches: [createRepoBranch(BRANCH_NAME, { worktree: { path: WORKTREE_PATH, isPrimary: false, isLocked: false } })],
+    branches: [createRepoBranch(BRANCH_NAME)],
+    worktrees: [createRepoWorktreeSnapshotForTest(BRANCH_NAME, WORKTREE_PATH)],
     currentBranchName: BRANCH_NAME,
   })
 }

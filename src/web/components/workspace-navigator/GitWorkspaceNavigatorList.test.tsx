@@ -1,20 +1,32 @@
 // @vitest-environment jsdom
 
-// Unit tests for the presentational BranchList. Its contract is
+// Unit tests for the presentational GitWorkspaceNavigatorList. Its contract is
 // "given branches + a highlighted name + callbacks, paint rows and
 // bubble events up". We stub BranchActionsMenu and the terminal bell/output
 // hook so the suite stays focused on the list.
 
-import { createRepoBranch, createGitRepoPresentationForTest } from '#/web/test-utils/repo-store.ts'
+import {
+  createRepoBranch,
+  createGitRepoPresentationForTest,
+  createRepoWorktreeSnapshotForTest,
+} from '#/web/test-utils/repo-store.ts'
+import type { RepoWorktreeSnapshot } from '#/shared/git-types.ts'
 import { afterEach, describe, expect, test, vi } from 'vitest'
-import { BranchList } from '#/web/components/branch-navigator/BranchList.tsx'
+import { GitWorkspaceNavigatorList } from '#/web/components/workspace-navigator/GitWorkspaceNavigatorList.tsx'
 import { emptyWorkspace } from '#/web/stores/workspaces/workspace-state-factory.ts'
 import { renderInJsdom } from '#/test-utils/render.tsx'
 import { workspaceIdForTest } from '#/test-utils/workspace-id.ts'
 import { nextTick } from 'vue'
 
 vi.mock('#/web/components/BranchActionsMenu.tsx', () => ({
-  BranchActionsMenu: () => null,
+  BranchActionsMenu: (props: { open?: boolean; onOpenChange?: (open: boolean) => void }) => (
+    <button
+      type="button"
+      data-testid="branch-actions-menu"
+      data-open={props.open ? 'true' : 'false'}
+      onClick={() => props.onOpenChange?.(true)}
+    />
+  ),
 }))
 
 vi.mock('#/web/components/terminal/terminal-session-store.ts', () => ({
@@ -27,17 +39,17 @@ afterEach(() => {
   Reflect.deleteProperty(HTMLElement.prototype, 'scrollIntoView')
 })
 
-describe('BranchList', () => {
+describe('GitWorkspaceNavigatorList', () => {
   test('renders one row per branch and forwards click/double-click', () => {
     const branches = [createRepoBranch('main'), createRepoBranch('feature/a'), createRepoBranch('fix/b')]
-    const repo = branchListRepo(branches, 'main')
+    const repo = gitWorkspaceNavigatorRepo(branches, 'main')
     const onSelect = vi.fn()
     const onOpenStatus = vi.fn()
 
     const { container } = renderInJsdom(
-      <BranchList
+      <GitWorkspaceNavigatorList
         repo={repo}
-        branches={branches}
+        rows={branches.map((branch) => ({ kind: 'branch' as const, branch }))}
         highlightedBranch="main"
         onSelectBranch={onSelect}
         onOpenBranchStatus={onOpenStatus}
@@ -56,13 +68,13 @@ describe('BranchList', () => {
   })
 
   test('renders the emptyState slot when branches is empty', () => {
-    const repo = branchListRepo([], '')
+    const repo = gitWorkspaceNavigatorRepo([], '')
     const onSelect = vi.fn()
 
     const { container } = renderInJsdom(
-      <BranchList
+      <GitWorkspaceNavigatorList
         repo={repo}
-        branches={[]}
+        rows={[]}
         highlightedBranch={null}
         onSelectBranch={onSelect}
         onOpenBranchStatus={() => {}}
@@ -80,9 +92,9 @@ describe('BranchList', () => {
     // short-circuits — passing `branches={[]}` would exercise the
     // empty-list early-return instead.
     const { container } = renderInJsdom(
-      <BranchList
+      <GitWorkspaceNavigatorList
         repo={null}
-        branches={[createRepoBranch('main')]}
+        rows={[{ kind: 'branch', branch: createRepoBranch('main') }]}
         highlightedBranch={null}
         onSelectBranch={() => {}}
         onOpenBranchStatus={() => {}}
@@ -94,14 +106,42 @@ describe('BranchList', () => {
     expect(container.querySelector('[data-testid="empty"]')?.textContent).toBe('repo not loaded')
   })
 
-  test('highlights the row whose name matches highlightedBranch', () => {
-    const branches = [createRepoBranch('main'), createRepoBranch('feature/a'), createRepoBranch('fix/b')]
-    const repo = branchListRepo(branches, 'main')
+  test('renders an unborn attached worktree without a branch row', () => {
+    const worktree: RepoWorktreeSnapshot = {
+      ...createRepoWorktreeSnapshotForTest('main', '/tmp/repo'),
+      headOid: null,
+    }
+    const repo = gitWorkspaceNavigatorRepo([], 'main', [worktree])
+    const onSelectWorktree = vi.fn()
 
     const { container } = renderInJsdom(
-      <BranchList
+      <GitWorkspaceNavigatorList
         repo={repo}
-        branches={branches}
+        rows={[{ kind: 'worktree', branch: null, worktree }]}
+        highlightedBranch={null}
+        highlightedWorktreePath={worktree.path}
+        onSelectBranch={() => {}}
+        onOpenBranchStatus={() => {}}
+        onSelectWorktree={onSelectWorktree}
+        emptyState={null}
+      />,
+    )
+
+    const row = container.querySelector('li')
+    expect(row).not.toBeNull()
+    expect(row?.textContent).toContain('main')
+    row?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(onSelectWorktree).toHaveBeenCalledWith(worktree.path)
+  })
+
+  test('highlights the row whose name matches highlightedBranch', () => {
+    const branches = [createRepoBranch('main'), createRepoBranch('feature/a'), createRepoBranch('fix/b')]
+    const repo = gitWorkspaceNavigatorRepo(branches, 'main')
+
+    const { container } = renderInJsdom(
+      <GitWorkspaceNavigatorList
+        repo={repo}
+        rows={branches.map((branch) => ({ kind: 'branch' as const, branch }))}
         highlightedBranch="fix/b"
         onSelectBranch={() => {}}
         onOpenBranchStatus={() => {}}
@@ -115,6 +155,40 @@ describe('BranchList', () => {
     expect(items[1]?.className).not.toContain('bg-selected')
   })
 
+  test('closes a branch action menu when the row changes to operation presentation', async () => {
+    const branch = createRepoBranch('feature/a')
+    const attached = createRepoWorktreeSnapshotForTest(branch.name, '/tmp/feature-a')
+    const repo = gitWorkspaceNavigatorRepo([branch], branch.name, [attached])
+    const props = {
+      repo,
+      highlightedBranch: null,
+      highlightedWorktreePath: attached.path,
+      onSelectBranch: () => {},
+      onOpenBranchStatus: () => {},
+      emptyState: null,
+    }
+    const { container, rerender } = renderInJsdom(
+      <GitWorkspaceNavigatorList {...props} rows={[{ kind: 'worktree', branch, worktree: attached }]} />,
+    )
+
+    const menu = container.querySelector('[data-testid="branch-actions-menu"]')
+    if (!(menu instanceof HTMLButtonElement)) throw new Error('missing branch actions menu')
+    menu.click()
+    await nextTick()
+    expect(menu.dataset.open).toBe('true')
+
+    const rebasing: RepoWorktreeSnapshot = {
+      ...attached,
+      head: { kind: 'detached' },
+      operation: { kind: 'rebase' },
+    }
+    await rerender(<GitWorkspaceNavigatorList {...props} rows={[{ kind: 'worktree', branch, worktree: rebasing }]} />)
+    expect(container.querySelector('[data-testid="branch-actions-menu"]')).toBeNull()
+
+    await rerender(<GitWorkspaceNavigatorList {...props} rows={[{ kind: 'worktree', branch, worktree: attached }]} />)
+    expect(container.querySelector('[data-testid="branch-actions-menu"]')?.getAttribute('data-open')).toBe('false')
+  })
+
   test('scrolls the initially highlighted row into view after its ref mounts', async () => {
     const scrollIntoView = vi.fn()
     Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
@@ -122,11 +196,11 @@ describe('BranchList', () => {
       value: scrollIntoView,
     })
     const branches = [createRepoBranch('main'), createRepoBranch('feature/a'), createRepoBranch('fix/b')]
-    const repo = branchListRepo(branches, 'main')
+    const repo = gitWorkspaceNavigatorRepo(branches, 'main')
     const { container } = renderInJsdom(
-      <BranchList
+      <GitWorkspaceNavigatorList
         repo={repo}
-        branches={branches}
+        rows={branches.map((branch) => ({ kind: 'branch' as const, branch }))}
         highlightedBranch="fix/b"
         onSelectBranch={() => {}}
         onOpenBranchStatus={() => {}}
@@ -142,13 +216,18 @@ describe('BranchList', () => {
   })
 })
 
-function branchListRepo(branches: ReturnType<typeof createRepoBranch>[], currentBranch: string) {
+function gitWorkspaceNavigatorRepo(
+  branches: ReturnType<typeof createRepoBranch>[],
+  currentBranch: string,
+  worktrees?: RepoWorktreeSnapshot[],
+) {
   return createGitRepoPresentationForTest(
     emptyWorkspace(workspaceIdForTest('goblin+file:///tmp/repo'), 'repo-runtime-test'),
     {
       branches,
       currentBranch,
       status: [],
+      worktrees,
     },
   )
 }

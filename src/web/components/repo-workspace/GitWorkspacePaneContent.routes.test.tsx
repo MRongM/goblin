@@ -14,7 +14,11 @@ import {
   responsiveMocks,
   staticEntry,
 } from '#/web/test-utils/git-workspace-pane-content.tsx'
-import { seedRepoWithReadModelForTest, createBranchSnapshot } from '#/web/test-utils/repo-store.ts'
+import {
+  createRepoWorktreeSnapshotForTest,
+  seedRepoWithReadModelForTest,
+  createBranchSnapshot,
+} from '#/web/test-utils/repo-store.ts'
 import { screen } from '@testing-library/vue'
 import { describe, expect, test, vi } from 'vitest'
 import { BranchActionSurfaceProvider } from '#/web/components/repo-workspace/branch-action-surface-context.ts'
@@ -36,7 +40,7 @@ describe('GitWorkspacePaneContent routes', () => {
       ui: { ...existingPresentationRepo.ui, currentBranchName: 'feature/removed' },
     }
     const detail = getTestGitWorkspacePanePresentation(presentationRepo)
-    const onBackToBranchNavigator = vi.fn()
+    const onBackToGitWorkspaceNavigator = vi.fn()
 
     const renderMissingBranch = () =>
       renderInJsdom(
@@ -45,7 +49,7 @@ describe('GitWorkspacePaneContent routes', () => {
             repo={presentationRepo}
             detail={detail}
             workspacePaneId="workspace"
-            onBackToBranchNavigator={onBackToBranchNavigator}
+            onBackToGitWorkspaceNavigator={onBackToGitWorkspaceNavigator}
           />
         </TerminalSessionReadScope>,
       )
@@ -60,17 +64,13 @@ describe('GitWorkspacePaneContent routes', () => {
     expect(document.body.textContent).toContain('branches.missing')
     expect(document.body.textContent).not.toContain('branches.filter-empty')
     screen.getByRole('button', { name: 'branches.back-to-list' }).click()
-    expect(onBackToBranchNavigator).toHaveBeenCalledOnce()
+    expect(onBackToGitWorkspaceNavigator).toHaveBeenCalledOnce()
   })
 
   test('renders an empty pane on an explicit bare branch route without a saved preference', async () => {
     const repo = seedRepoWithReadModelForTest({
       id: REPO_ID,
-      branchSnapshots: [
-        createBranchSnapshot('feature/first-open', {
-          worktree: { path: '/tmp/goblin-first-open', isPrimary: false, isLocked: false },
-        }),
-      ],
+      branchSnapshots: [createBranchSnapshot('feature/first-open')],
       currentBranchName: 'feature/first-open',
       workspacePaneTabsByBranch: { 'feature/first-open': [staticEntry('status')] },
     })
@@ -161,14 +161,9 @@ describe('GitWorkspacePaneContent routes', () => {
   })
 
   test('does not apply a stale preference to an explicit bare branch route', async () => {
-    const worktreePath = '/tmp/hook-terminal-empty-worktree'
     const repo = seedRepoWithReadModelForTest({
       id: REPO_ID,
-      branchSnapshots: [
-        createBranchSnapshot('feature/hook-terminal-empty', {
-          worktree: { path: worktreePath, isPrimary: false, isLocked: false },
-        }),
-      ],
+      branchSnapshots: [createBranchSnapshot('feature/hook-terminal-empty')],
       currentBranchName: 'feature/hook-terminal-empty',
       preferredWorkspacePaneTab: 'terminal',
       workspacePaneTabsByBranch: { 'feature/hook-terminal-empty': [staticEntry('status')] },
@@ -198,9 +193,11 @@ describe('GitWorkspacePaneContent routes', () => {
     const worktreePath = '/tmp/terminal-empty-worktree'
     const repo = seedRepoWithReadModelForTest({
       id: REPO_ID,
-      branchSnapshots: [
-        createBranchSnapshot('feature/terminal-empty', {
-          worktree: { path: worktreePath, isPrimary: false, isLocked: false },
+      branchSnapshots: [createBranchSnapshot('feature/terminal-empty')],
+      worktrees: [
+        createRepoWorktreeSnapshotForTest('feature/terminal-empty', worktreePath, {
+          isPrimary: false,
+          isLocked: false,
         }),
       ],
       currentBranchName: 'feature/terminal-empty',

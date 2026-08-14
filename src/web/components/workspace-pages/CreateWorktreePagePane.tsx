@@ -50,7 +50,7 @@ interface CreateWorktreePagePaneProps {
   compact?: boolean
   trafficLightOffset?: boolean
   onCancel: () => void
-  onCreated: (branchName: string, navigationGeneration: AppNavigationGeneration) => void
+  onCreated: (worktreePath: string, navigationGeneration: AppNavigationGeneration) => void
 }
 
 type GitCreateWorktreeWorkspace = Pick<WorkspaceState, 'id' | 'workspaceRuntimeId' | 'admission'> & {
@@ -185,7 +185,7 @@ const GitCreateWorktreePagePane = defineComponent<GitCreateWorktreePagePaneProps
       () => snapshotReadModel.data.value?.snapshot !== undefined && bootstrapDecisionReady.value,
     )
     const showLoadingSkeleton = useLoadingVisibility(() => !pageReady.value)
-    const { runBranchAction } = workspacesStore.getState()
+    const { runCreateWorktreeAction } = workspacesStore.getState()
 
     function currentWorktreeBootstrapDecision(): WorktreeBootstrapDecision {
       return resolveWorktreeBootstrapDecision({
@@ -215,7 +215,7 @@ const GitCreateWorktreePagePane = defineComponent<GitCreateWorktreePagePaneProps
       if (branchAction.phase !== 'idle') return false
       const navigationGeneration = beginAppNavigation()
       const worktreeBootstrap = currentWorktreeBootstrapDecision()
-      const result = await runBranchAction(
+      const result = await runCreateWorktreeAction(
         repoId,
         {
           kind: 'createWorktree',
@@ -224,7 +224,7 @@ const GitCreateWorktreePagePane = defineComponent<GitCreateWorktreePagePaneProps
         },
         { workspaceRuntimeId },
       )
-      if (result?.ok) onCreated(createWorktreeTargetBranch(request.input), navigationGeneration)
+      if (result?.ok) onCreated(result.worktreePath, navigationGeneration)
       return false
     }
 
@@ -361,19 +361,6 @@ const CreateWorktreePageShell = defineComponent<CreateWorktreePageShellProps>({
     )
   },
 })
-
-function createWorktreeTargetBranch(input: CreateWorktreeRequest['input']): string {
-  switch (input.mode.kind) {
-    case 'newBranch':
-      return input.mode.newBranch
-    case 'existingBranch':
-      return input.mode.branch
-    case 'trackRemoteBranch':
-      return input.mode.localBranch
-  }
-  const exhaustive: never = input.mode
-  return exhaustive
-}
 
 function isBootstrapLoadForRepo(load: BootstrapLoad | null, repoId: WorkspaceId, workspaceRuntimeId: string): boolean {
   return load?.repoId === repoId && load.workspaceRuntimeId === workspaceRuntimeId

@@ -1,4 +1,6 @@
 import type { BranchViewMode, ClientWorkspaceState } from '#/shared/api-types.ts'
+import { repoWorktreeForBranch } from '#/shared/git-types.ts'
+import type { GitHead } from '#/shared/git-head.ts'
 import {
   isWorkspacePaneSessionTabType,
   isWorkspacePaneStaticTabType,
@@ -40,13 +42,15 @@ interface WorkspacePaneTabsQueryWorkspaceState {
   session: WorkspaceSessionState
 }
 
-interface ClientWorkspaceBranchProjection {
-  name: string
-  worktree?: { path?: string }
+interface ClientWorkspaceGitTargets {
+  branches: ReadonlyArray<{ name: string }>
+  worktrees: readonly ClientWorkspaceWorktreeTarget[]
 }
 
-interface ClientWorkspaceGitTargets {
-  branches: readonly ClientWorkspaceBranchProjection[]
+interface ClientWorkspaceWorktreeTarget {
+  path: string
+  head: GitHead
+  materializedBranch: string | null
 }
 
 interface ClientWorkspaceTargetProjection {
@@ -119,16 +123,16 @@ function clientWorkspaceRestorationProjections(
     const workspace = workspaces[id]
     if (!workspace) continue
     if (workspace.session.projectionState === 'stub') continue
-    const branchModel =
+    const repoSnapshot =
       workspace.capability.kind === 'git' ? getRepoSnapshotQueryData(workspace.id, workspace.workspaceRuntimeId) : null
     const readyWithoutGit = workspace.capability.kind === 'filesystem'
-    if (!branchModel && !readyWithoutGit) continue
+    if (!repoSnapshot && !readyWithoutGit) continue
     projections[id] = {
       id: workspace.id,
       ui: {
         preferredWorkspacePaneTabByTarget: workspace.ui.preferredWorkspacePaneTabByTarget,
       },
-      ...(branchModel ? { gitTargets: { branches: branchModel.branches } } : {}),
+      ...(repoSnapshot ? { gitTargets: { branches: repoSnapshot.branches, worktrees: repoSnapshot.worktrees } } : {}),
     }
   }
   return projections
@@ -283,7 +287,10 @@ function workspacePaneTabsTargetKeyBelongsToWorkspace(
   if (!target || target.workspaceId !== workspaceId) return null
   if (target.kind === 'workspace-root') return target
   if (target.kind === 'branch') {
-    return workspace.gitTargets?.branches.some((branch) => branch.name === target.branchName) ? target : null
+    const gitTargets = workspace.gitTargets
+    if (!gitTargets?.branches.some((branch) => branch.name === target.branchName)) return null
+    const hasMaterializedWorktree = repoWorktreeForBranch(gitTargets.worktrees, target.branchName)
+    return hasMaterializedWorktree ? null : target
   }
   const worktreePath = parseCanonicalWorkspaceLocator(target.worktreeId)?.path
   return worktreePath && clientWorkspaceContainsWorktreePath(workspace, worktreePath) ? target : null
@@ -293,7 +300,7 @@ function clientWorkspaceContainsWorktreePath(
   workspace: ClientWorkspaceTargetProjection,
   worktreePath: string,
 ): boolean {
-  return workspace.gitTargets?.branches.some((branch) => branch.worktree?.path === worktreePath) === true
+  return workspace.gitTargets?.worktrees.some((worktree) => worktree.path === worktreePath) === true
 }
 
 function selectedTerminalSessionsForClientWorkspace(

@@ -50,14 +50,6 @@ import {
 
 export type WorkspacePaneModelTarget = WorkspacePaneTabsTarget | { kind: 'inactive'; workspaceId: WorkspaceId }
 
-/** Stable identity for presentation targets; excludes projected tab/view metadata. */
-export function workspacePaneModelTargetIdentityKey(target: WorkspacePaneModelTarget): string {
-  if (target.kind === 'inactive') return `inactive\0${target.workspaceId}`
-  if (target.kind === 'workspace-root') return `workspace-root\0${target.workspaceId}`
-  if (target.kind === 'git-branch') return `git-branch\0${target.workspaceId}\0${target.branchName}`
-  return `git-worktree\0${target.workspaceId}\0${target.worktreePath}`
-}
-
 export type WorkspacePaneTabKind = 'static' | 'runtime' | 'pending'
 
 interface WorkspacePaneTabBase {
@@ -133,8 +125,7 @@ export type WorkspacePaneSelection =
 export interface WorkspacePaneTabModel {
   workspaceId: WorkspaceId
   workspaceRuntimeId: string
-  /** URL family owned by the current pane. Kept separate from paneTarget because
-   * a branch route may persist tabs against its checked-out worktree target. */
+  /** Canonical URL target owned by the current pane. */
   routeTarget: WorkspacePaneModelTarget
   branchName: string | null
   worktreePath: string | null
@@ -174,7 +165,7 @@ export function workspacePaneTerminalBaseForTabModel(
   if (!target) return null
   if (target.kind === 'workspace-root') return { target, presentation: { kind: 'workspace-root' } }
   if (target.kind === 'git-worktree') {
-    return { target, presentation: terminalGitWorktreePresentation(model.branchName) }
+    return { target, presentation: terminalGitWorktreePresentation() }
   }
   return null
 }
@@ -224,12 +215,7 @@ export function createWorkspacePaneTabModel(input: WorkspacePaneTabModelInput): 
     input.paneTarget.kind === 'inactive'
       ? []
       : normalizeWorkspacePaneTabs(input.tabEntries, { hasWorktree: worktreePath !== null })
-  const tabEntries =
-    input.paneTarget.kind === 'git-worktree' && input.worktreeHead?.kind === 'detached'
-      ? normalizedTabEntries.filter(
-          (entry) => isWorkspacePaneRuntimeTabEntry(entry) || entry.type === 'status' || entry.type === 'files',
-        )
-      : normalizedTabEntries
+  const tabEntries = normalizedTabEntries
   const runtimeTabTargetKeyByType = workspacePaneRuntimeTabTargetKeyByType({
     workspaceId: input.workspaceId,
     workspaceRuntimeId: input.workspaceRuntimeId,

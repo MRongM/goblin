@@ -1,10 +1,14 @@
 // @vitest-environment jsdom
-import { createRepoBranch, createGitRepoPresentationForTest } from '#/web/test-utils/repo-store.ts'
+import {
+  createRepoBranch,
+  createGitRepoPresentationForTest,
+  createRepoWorktreeSnapshotForTest,
+} from '#/web/test-utils/repo-store.ts'
 import { shallowRef } from 'vue'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { useFakeTimers } from '#/test-utils/timers.ts'
 import { renderInJsdom } from '#/test-utils/render.tsx'
-import { BranchRow } from '#/web/components/branch-navigator/BranchRow.tsx'
+import { BranchRow } from '#/web/components/workspace-navigator/BranchRow.tsx'
 import { emptyWorkspace } from '#/web/stores/workspaces/workspace-state-factory.ts'
 import { workspaceIdForTest } from '#/test-utils/workspace-id.ts'
 import { i18nStore } from '#/web/stores/i18n.ts'
@@ -53,15 +57,14 @@ describe('BranchRow', () => {
   test('shows the generic dirty label for dirty worktrees', async () => {
     const repo = branchRowRepo()
     markDirty(repo, 7)
-    const branch = createRepoBranch('feature/a', {
-      worktree: { path: '/tmp/worktree-a', isPrimary: false, isLocked: false },
-    })
+    const branch = createRepoBranch('feature/a')
 
     const { container } = renderInJsdom(
       <ul>
         <BranchRow
           repo={repo}
           branch={branch}
+          worktree={worktreeForFixture(branch)}
           selected={null}
           onSelectBranch={vi.fn()}
           onOpenBranchStatus={vi.fn()}
@@ -78,15 +81,14 @@ describe('BranchRow', () => {
   test('keeps status-derived dirty presentation unknown when status is unavailable', async () => {
     const repo = branchRowRepo()
     repo.status = undefined
-    const branch = createRepoBranch('feature/a', {
-      worktree: { path: '/tmp/worktree-a', isPrimary: false, isLocked: false },
-    })
+    const branch = createRepoBranch('feature/a')
 
     const { container } = renderInJsdom(
       <ul>
         <BranchRow
           repo={repo}
           branch={branch}
+          worktree={worktreeForFixture(branch)}
           selected={null}
           onSelectBranch={vi.fn()}
           onOpenBranchStatus={vi.fn()}
@@ -110,15 +112,14 @@ describe('BranchRow', () => {
         reason,
         target: 'feature/a',
       }
-      const branch = createRepoBranch('feature/a', {
-        worktree: { path: '/tmp/worktree-a', isPrimary: false, isLocked: false },
-      })
+      const branch = createRepoBranch('feature/a')
 
       const { container } = renderInJsdom(
         <ul>
           <BranchRow
             repo={repo}
             branch={branch}
+            worktree={worktreeForFixture(branch)}
             selected={null}
             onSelectBranch={vi.fn()}
             onOpenBranchStatus={vi.fn()}
@@ -144,15 +145,14 @@ describe('BranchRow', () => {
       reason: 'branch:createWorktree',
       target: 'feature/b',
     }
-    const branch = createRepoBranch('feature/a', {
-      worktree: { path: '/tmp/worktree-a', isPrimary: false, isLocked: false },
-    })
+    const branch = createRepoBranch('feature/a')
 
     const { container } = renderInJsdom(
       <ul>
         <BranchRow
           repo={repo}
           branch={branch}
+          worktree={worktreeForFixture(branch)}
           selected={null}
           onSelectBranch={vi.fn()}
           onOpenBranchStatus={vi.fn()}
@@ -166,15 +166,14 @@ describe('BranchRow', () => {
 
   test('shows terminal bell count badges in the action slot in non-compact mode', async () => {
     const repo = branchRowRepo()
-    const branch = createRepoBranch('feature/a', {
-      worktree: { path: '/tmp/worktree-a', isPrimary: false, isLocked: false },
-    })
+    const branch = createRepoBranch('feature/a')
 
     const { container } = renderInJsdom(
       <ul>
         <BranchRow
           repo={repo}
           branch={branch}
+          worktree={worktreeForFixture(branch)}
           selected={null}
           onSelectBranch={vi.fn()}
           onOpenBranchStatus={vi.fn()}
@@ -195,15 +194,14 @@ describe('BranchRow', () => {
 
   test('shows terminal output activity in the action slot in non-compact mode', async () => {
     const repo = branchRowRepo()
-    const branch = createRepoBranch('feature/a', {
-      worktree: { path: '/tmp/worktree-a', isPrimary: false, isLocked: false },
-    })
+    const branch = createRepoBranch('feature/a')
 
     const { container } = renderInJsdom(
       <ul>
         <BranchRow
           repo={repo}
           branch={branch}
+          worktree={worktreeForFixture(branch)}
           selected={null}
           onSelectBranch={vi.fn()}
           onOpenBranchStatus={vi.fn()}
@@ -224,15 +222,14 @@ describe('BranchRow', () => {
 
   test('hides terminal output activity when the branch row is selected in non-compact mode', async () => {
     const repo = branchRowRepo()
-    const branch = createRepoBranch('feature/a', {
-      worktree: { path: '/tmp/worktree-a', isPrimary: false, isLocked: false },
-    })
+    const branch = createRepoBranch('feature/a')
 
     const { container } = renderInJsdom(
       <ul>
         <BranchRow
           repo={repo}
           branch={branch}
+          worktree={worktreeForFixture(branch)}
           selected="feature/a"
           onSelectBranch={vi.fn()}
           onOpenBranchStatus={vi.fn()}
@@ -248,15 +245,14 @@ describe('BranchRow', () => {
 
   test('gives terminal bell priority over terminal output activity', async () => {
     const repo = branchRowRepo()
-    const branch = createRepoBranch('feature/a', {
-      worktree: { path: '/tmp/worktree-a', isPrimary: false, isLocked: false },
-    })
+    const branch = createRepoBranch('feature/a')
 
     const { container } = renderInJsdom(
       <ul>
         <BranchRow
           repo={repo}
           branch={branch}
+          worktree={worktreeForFixture(branch)}
           selected={null}
           onSelectBranch={vi.fn()}
           onOpenBranchStatus={vi.fn()}
@@ -280,6 +276,7 @@ describe('BranchRow', () => {
         <BranchRow
           repo={repo}
           branch={branch}
+          worktree={worktreeForFixture(branch)}
           selected={null}
           onSelectBranch={vi.fn()}
           onOpenBranchStatus={vi.fn()}
@@ -301,6 +298,7 @@ describe('BranchRow', () => {
         <BranchRow
           repo={repo}
           branch={branch}
+          worktree={worktreeForFixture(branch)}
           selected="feature/a"
           onSelectBranch={vi.fn()}
           onOpenBranchStatus={vi.fn()}
@@ -326,6 +324,7 @@ describe('BranchRow', () => {
         <BranchRow
           repo={repo}
           branch={branch}
+          worktree={worktreeForFixture(branch)}
           selected={null}
           onSelectBranch={vi.fn()}
           onOpenBranchStatus={vi.fn()}
@@ -358,6 +357,7 @@ describe('BranchRow', () => {
         <BranchRow
           repo={repo}
           branch={branch}
+          worktree={worktreeForFixture(branch)}
           selected={null}
           onSelectBranch={vi.fn()}
           onOpenBranchStatus={vi.fn()}
@@ -383,15 +383,14 @@ describe('BranchRow', () => {
     responsiveMocks.compact = true
     const repo = branchRowRepo()
     markDirty(repo, 3)
-    const branch = createRepoBranch('feature/a', {
-      worktree: { path: '/tmp/worktree-a', isPrimary: false, isLocked: false },
-    })
+    const branch = createRepoBranch('feature/a')
 
     const { container } = renderInJsdom(
       <ul>
         <BranchRow
           repo={repo}
           branch={branch}
+          worktree={worktreeForFixture(branch)}
           selected={null}
           onSelectBranch={vi.fn()}
           onOpenBranchStatus={vi.fn()}
@@ -421,6 +420,7 @@ describe('BranchRow', () => {
         <BranchRow
           repo={repo}
           branch={branch}
+          worktree={worktreeForFixture(branch)}
           selected="feature/a"
           onSelectBranch={vi.fn()}
           onOpenBranchStatus={vi.fn()}
@@ -448,6 +448,7 @@ describe('BranchRow', () => {
         <BranchRow
           repo={repo}
           branch={branch}
+          worktree={worktreeForFixture(branch)}
           selected={null}
           onSelectBranch={vi.fn()}
           onOpenBranchStatus={vi.fn()}
@@ -479,6 +480,7 @@ describe('BranchRow', () => {
         <BranchRow
           repo={repo}
           branch={branch}
+          worktree={worktreeForFixture(branch)}
           selected="feature/a"
           onSelectBranch={vi.fn()}
           onOpenBranchStatus={vi.fn()}
@@ -539,6 +541,7 @@ function renderRow(
       <BranchRow
         repo={repo}
         branch={branch}
+        worktree={worktreeForFixture(branch)}
         selected={null}
         onSelectBranch={vi.fn()}
         onOpenBranchStatus={vi.fn()}
@@ -567,6 +570,12 @@ function branchRowRepo() {
       status: [],
     },
   )
+}
+
+function worktreeForFixture(branch: ReturnType<typeof createRepoBranch>) {
+  return createRepoWorktreeSnapshotForTest(branch.name, '/tmp/worktree-a', {
+    headOid: branch.lastCommitHash,
+  })
 }
 
 function markDirty(repo: ReturnType<typeof branchRowRepo>, count: number): void {

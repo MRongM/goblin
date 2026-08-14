@@ -19,6 +19,8 @@ import { emptyWorkspace, replaceWorkspace } from '#/web/stores/workspaces/worksp
 import { acceptWorkspaceProbeState } from '#/web/stores/workspaces/workspace-guards.ts'
 import { workspaceIdForTest } from '#/test-utils/workspace-id.ts'
 import type { WorkspaceId } from '#/shared/workspace-locator.ts'
+import { gitWorktreeFilesystemExecutionTarget } from '#/shared/workspace-runtime.ts'
+import { gitBranchPaneTargetLease, gitWorktreePaneTargetLease } from '#/web/workspace-pane/workspace-pane-tab-target.ts'
 
 // Vitest has no reusable fixture for app route navigation and workspace history state.
 export const REPO_ID = workspaceIdForTest('goblin+file:///tmp/navigation-actions-repo')
@@ -34,6 +36,18 @@ export const historyRestoreOptions = (options: { returnTo?: string | null } = {}
 export const WORKTREE_PATH = '/tmp/navigation-actions-worktree'
 export const WORKTREE_KEY = formatTerminalFilesystemTargetKeyForPath(REPO_ID, WORKTREE_PATH)
 
+export function branchSelectionLease(branchName = BRANCH_NAME) {
+  const workspace = workspacesStore.getState().workspaces[REPO_ID]
+  if (!workspace) throw new Error('missing branch selection workspace fixture')
+  return gitBranchPaneTargetLease(REPO_ID, workspace.workspaceRuntimeId, branchName)
+}
+
+export function worktreeSelectionLease(worktreePath = WORKTREE_PATH) {
+  const workspace = workspacesStore.getState().workspaces[REPO_ID]
+  if (!workspace) throw new Error('missing worktree selection workspace fixture')
+  return gitWorktreePaneTargetLease(REPO_ID, workspace.workspaceRuntimeId, worktreePath)
+}
+
 export function setupAppNavigationActionsTests() {
   resetWorkspacesStore()
   setTerminalSessionCommandBridge(null)
@@ -48,6 +62,7 @@ export function preferredWorkspacePaneTab() {
           {
             workspaceId: repo.id,
             branches: getRepoSnapshotQueryData(repo.id, repo.workspaceRuntimeId)?.branches ?? [],
+            worktrees: getRepoSnapshotQueryData(repo.id, repo.workspaceRuntimeId)?.worktrees ?? [],
           },
           BRANCH_NAME,
         ),
@@ -66,8 +81,6 @@ export function branchHistoryEntry(
       kind: 'branch',
       branchName,
       workspacePaneTab,
-      terminalFilesystemTargetKey: null,
-      terminalSessionId: null,
     },
   }
 }
@@ -158,10 +171,6 @@ export function routeNavigation(): AppRouteNavigation {
       options?.onCommit?.()
       return true
     }),
-    openRepoBranchTerminal: vi.fn((_repoId, _branchName, _sessionId, options) => {
-      options?.onCommit?.()
-      return true
-    }),
     openRepoWorktree: vi.fn((_repoId, _worktreePath, options) => {
       options?.onCommit?.()
       return true
@@ -192,4 +201,69 @@ export function createPendingWorktreeSnapshot(): TerminalFilesystemTargetSnapsho
     outputActiveCount: 0,
     createPending: true,
   }
+}
+
+export function worktreeSnapshotForSessions(terminalSessionIds: string[]): TerminalFilesystemTargetSnapshot {
+  const workspace = workspacesStore.getState().workspaces[REPO_ID]
+  if (!workspace) throw new Error('missing worktree terminal workspace fixture')
+  const selectedTerminalSessionId =
+    workspacesStore.getState().selectedTerminalSessionIdByTerminalFilesystemTarget[WORKTREE_KEY] ?? null
+  const sessions = terminalSessionIds.map((terminalSessionId, index) => ({
+    type: 'terminal' as const,
+    terminalSessionId,
+    terminalFilesystemTargetKey: WORKTREE_KEY,
+    index: index + 1,
+    title: `terminal ${index + 1}`,
+    phase: 'open' as const,
+    selected: terminalSessionId === selectedTerminalSessionId,
+    hasBell: false,
+    hasRecentOutput: false,
+  }))
+  const selectedSession = sessions.find((session) => session.selected) ?? null
+  const target = gitWorktreeFilesystemExecutionTarget(REPO_ID, workspace.workspaceRuntimeId, WORKTREE_PATH)
+  if (target?.kind !== 'git-worktree') throw new Error('invalid worktree terminal target fixture')
+  return {
+    terminalFilesystemTargetKey: WORKTREE_KEY,
+    selectedDescriptor: selectedSession
+      ? {
+          terminalSessionId: selectedSession.terminalSessionId,
+          index: selectedSession.index,
+          target,
+          presentation: { kind: 'git-worktree' },
+        }
+      : null,
+    sessions,
+    count: sessions.length,
+    bellCount: 0,
+    outputActiveCount: 0,
+    createPending: false,
+  }
+}
+
+export function installTerminalSessionCommandBridgeForTest(snapshot: TerminalFilesystemTargetSnapshot) {
+  const terminalFilesystemTargetSnapshot = vi.fn((terminalFilesystemTargetKey: string) => {
+    if (terminalFilesystemTargetKey !== snapshot.terminalFilesystemTargetKey) {
+      throw new Error(`Unexpected terminal filesystem target: ${terminalFilesystemTargetKey}`)
+    }
+    return snapshot
+  })
+  setTerminalSessionCommandBridge({
+    terminalFilesystemTargetSnapshot,
+    createTerminal: vi.fn(async () => {
+      throw new Error('Unexpected terminal creation')
+    }),
+    createTerminalWithAdmission: vi.fn(async () => {
+      throw new Error('Unexpected terminal creation admission')
+    }),
+    selectTerminal: vi.fn(() => {
+      throw new Error('Unexpected terminal selection')
+    }),
+    focusTerminal: vi.fn(() => {
+      throw new Error('Unexpected terminal focus')
+    }),
+    closeTerminalByDescriptor: vi.fn(async () => {
+      throw new Error('Unexpected terminal close')
+    }),
+  })
+  return terminalFilesystemTargetSnapshot
 }

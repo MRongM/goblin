@@ -288,19 +288,6 @@ describe('workspace route view derivation', () => {
       branchName: 'feature/a',
       workspacePaneRoute: { kind: 'invalid-static', tabKey: 'not-a-tab' },
     })
-    expect(
-      workspaceRouteViewFromChildRoute(ROUTE_WORKSPACE_ID, {
-        dashboard: false,
-        branchSlug: 'ZmVhdHVyZS9h',
-        terminalSessionId: 'term-111111111111111111111',
-        newWorktree: false,
-      }),
-    ).toEqual({
-      kind: 'branch',
-      workspaceId: ROUTE_WORKSPACE_ID,
-      branchName: 'feature/a',
-      workspacePaneRoute: { kind: 'terminal', terminalSessionId: 'term-111111111111111111111' },
-    })
   })
 
   test('prefers a terminal child route when terminal and static params are both present', async () => {
@@ -471,6 +458,26 @@ describe('workspace route context derivation', () => {
       ]),
     ).toEqual({ kind: 'empty', workspaceSlug: 'L3JlcG8' })
   })
+
+  test('does not admit terminal parameters into a bare branch route context', async () => {
+    expect(
+      workspaceRouteContextFromMatches([
+        {
+          routeId: '/workspace/$workspaceSlug/branch/$branchSlug',
+          params: { workspaceSlug: 'L3JlcG8', branchSlug: 'ZmVhdHVyZS9h' },
+        },
+        {
+          routeId: '/workspace/$workspaceSlug/branch/$branchSlug/terminal/$terminalSessionId',
+          params: { terminalSessionId: 'term-111111111111111111111' },
+        },
+      ]),
+    ).toEqual({
+      kind: 'branch',
+      workspaceSlug: 'L3JlcG8',
+      branchName: 'feature/a',
+      workspacePaneRoute: null,
+    })
+  })
 })
 
 describe('app route callback facades', () => {
@@ -484,7 +491,7 @@ describe('app route callback facades', () => {
       openWorkspaceRootPane: vi.fn(),
       openRepoBranch: vi.fn(() => true),
       openRepoBranchTab: vi.fn(() => true),
-      openRepoBranchTerminal: vi.fn(() => true),
+      openRepoWorktree: vi.fn(() => true),
       openRepoNewWorktree: vi.fn(),
       cancelRepoNewWorktree: vi.fn(),
       workspaceSlugForId: vi.fn(),
@@ -495,10 +502,9 @@ describe('app route callback facades', () => {
     routerCallbacks.onRouteSettingsPageChange('general')
     routerCallbacks.onOpenWorkspaceNavigator(ROUTE_WORKSPACE_ID)
     routerCallbacks.onOpenWorkspaceDashboard(ROUTE_WORKSPACE_ID)
-    routerCallbacks.onOpenRepoBranch(ROUTE_WORKSPACE_ID, 'main')
     routerCallbacks.onOpenRepoNewWorktree(ROUTE_WORKSPACE_ID)
     routerCallbacks.onCancelRepoNewWorktree(ROUTE_WORKSPACE_ID)
-    routerCallbacks.onReplaceRepoBranch(ROUTE_WORKSPACE_ID, 'main', 1)
+    routerCallbacks.onReplaceRepoWorktree(ROUTE_WORKSPACE_ID, '/tmp/main-worktree', 1)
     applyAppSettingsRouteChange(routeActions, null)
     layoutCallbacks.navigateToSettingsShortcuts()
     layoutCallbacks.navigateToIndex()
@@ -510,17 +516,21 @@ describe('app route callback facades', () => {
     expect(routeActions.openWorkspaceDashboard).toHaveBeenCalledWith(ROUTE_WORKSPACE_ID)
     expect(routeActions.openRepoNewWorktree).toHaveBeenCalledWith(ROUTE_WORKSPACE_ID)
     expect(routeActions.cancelRepoNewWorktree).toHaveBeenCalledWith(ROUTE_WORKSPACE_ID)
+    expect(routeActions.openRepoWorktree).toHaveBeenCalledWith(ROUTE_WORKSPACE_ID, '/tmp/main-worktree', {
+      replace: true,
+      navigationGeneration: 1,
+    })
     expect(routeActions.openHome).toHaveBeenCalledOnce()
   })
 
-  test('created worktree replacement commits its accepted branch route without snapshot admission', async () => {
+  test('created worktree replacement commits the server-confirmed worktree target without snapshot admission', async () => {
     const routeActions = {
-      openRepoBranch: vi.fn(() => true),
+      openRepoWorktree: vi.fn(() => true),
     } as unknown as AppRouteNavigation
 
-    appRouterCallbacks(routeActions).onReplaceRepoBranch(ROUTE_WORKSPACE_ID, 'feature/new', 7)
+    appRouterCallbacks(routeActions).onReplaceRepoWorktree(ROUTE_WORKSPACE_ID, '/tmp/feature-new', 7)
 
-    expect(routeActions.openRepoBranch).toHaveBeenCalledWith(ROUTE_WORKSPACE_ID, 'feature/new', {
+    expect(routeActions.openRepoWorktree).toHaveBeenCalledWith(ROUTE_WORKSPACE_ID, '/tmp/feature-new', {
       replace: true,
       navigationGeneration: 7,
     })

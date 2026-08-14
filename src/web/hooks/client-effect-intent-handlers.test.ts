@@ -4,6 +4,7 @@ import {
   seedRepoQueryDataForTest,
   seedRepoWithReadModelForTest,
   createRepoBranch,
+  createRepoWorktreeSnapshotForTest,
 } from '#/web/test-utils/repo-store.ts'
 import { workspaceIdForTest } from '#/test-utils/workspace-id.ts'
 
@@ -51,12 +52,9 @@ describe('client effect intent handlers', () => {
       currentBranchName: 'feature/query',
     })
     seedRepoQueryDataForTest(repo, {
-      branches: [
-        createRepoBranch('feature/query', {
-          worktree: { path: '/tmp/bell-worktree', isPrimary: false, isLocked: false },
-        }),
-      ],
+      branches: [createRepoBranch('feature/query')],
       currentBranch: 'feature/query',
+      worktrees: [createRepoWorktreeSnapshotForTest('feature/query', '/tmp/bell-worktree')],
     })
     appQueryClient.setQueryData(workspacePaneTabsQueryKey(REPO_ID, repo.workspaceRuntimeId), {
       revision: 1,
@@ -73,7 +71,7 @@ describe('client effect intent handlers', () => {
       ],
     })
     const d = deps(REPO_ID)
-    const showRepoBranchTerminalSession = vi.mocked(d.navigation.showRepoBranchTerminalSession)
+    const commitFilesystemWorkspacePaneRoute = vi.mocked(d.navigation.commitFilesystemWorkspacePaneRoute)
     handleTerminalBellClickIntent(
       {
         type: 'terminal-bell-click',
@@ -85,14 +83,24 @@ describe('client effect intent handlers', () => {
             workspaceRuntimeId: repo.workspaceRuntimeId,
             root: workspaceIdForTest('goblin+file:///tmp/bell-worktree'),
           },
-          presentation: { kind: 'git-worktree', head: { kind: 'branch', branchName: 'feature/query' } },
+          presentation: { kind: 'git-worktree' },
         },
       },
       d,
     )
 
     await vi.waitFor(() => {
-      expect(showRepoBranchTerminalSession).toHaveBeenCalledWith(REPO_ID, 'feature/query', 'term-queryqueryqueryquery1')
+      expect(commitFilesystemWorkspacePaneRoute).toHaveBeenCalledWith(
+        expect.objectContaining({
+          routeTarget: {
+            kind: 'git-worktree',
+            workspaceId: REPO_ID,
+            worktreePath: '/tmp/bell-worktree',
+          },
+        }),
+        { kind: 'terminal', terminalSessionId: 'term-queryqueryqueryquery1' },
+        expect.any(Object),
+      )
     })
   })
 
@@ -116,7 +124,7 @@ describe('client effect intent handlers', () => {
             workspaceRuntimeId: repo.workspaceRuntimeId,
             root: workspaceIdForTest('goblin+file:///tmp/bell-worktree'),
           },
-          presentation: { kind: 'git-worktree', head: { kind: 'branch', branchName: 'feature/query' } },
+          presentation: { kind: 'git-worktree' },
         },
       },
       d,
@@ -222,19 +230,21 @@ describe('client effect intent handlers', () => {
 })
 
 function deps(currentWorkspaceId: WorkspaceId | null, currentBranchName = 'feature/worktree') {
+  const currentWorkspace = currentWorkspaceId
+    ? (workspacesStore.getState().workspaces[currentWorkspaceId] ?? null)
+    : null
   return {
     navigation: navigationWithStoreActions(),
-    currentWorkspace: currentWorkspaceId ? (workspacesStore.getState().workspaces[currentWorkspaceId] ?? null) : null,
-    terminalBellWorkspace: currentWorkspaceId
-      ? (workspacesStore.getState().workspaces[currentWorkspaceId] ?? null)
-      : null,
-    currentWorkspacePaneCommandTarget: currentWorkspaceId
+    currentWorkspace,
+    terminalBellWorkspace: currentWorkspace,
+    currentWorkspacePaneCommandTarget: currentWorkspace
       ? {
           routeTarget: {
             kind: 'git-branch' as const,
-            workspaceId: workspaceIdForTest(currentWorkspaceId),
+            workspaceId: currentWorkspace.id,
             branchName: currentBranchName,
           },
+          workspaceRuntimeId: currentWorkspace.workspaceRuntimeId,
           workspacePaneRoute: null,
           filesystemTarget: null,
         }
@@ -270,7 +280,6 @@ function navigationWithStoreActions(): ObservedAppNavigationActionsForTest {
       state.setWorkspacePaneTab(repoId, branch, tab)
       return true
     },
-    showRepoBranchTerminalSession: vi.fn(() => true),
     goBack: vi.fn(),
     goForward: vi.fn(),
     openSettings: vi.fn(),

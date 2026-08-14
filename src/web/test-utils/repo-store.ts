@@ -25,7 +25,13 @@ import type { GitWorkspaceClientState, WorkspaceState } from '#/web/stores/works
 import { emptyWorkspace } from '#/web/stores/workspaces/workspace-state-factory.ts'
 import { acceptWorkspaceProbeState } from '#/web/stores/workspaces/workspace-guards.ts'
 import { setWorkspacePaneTabsForTargetQueryData } from '#/web/test-utils/workspace-pane-tabs.ts'
-import type { BranchSnapshotInfo, PullRequestInfo, WorktreeStatus } from '#/shared/git-types.ts'
+import {
+  repoWorktreeForBranch,
+  type BranchSnapshotInfo,
+  type PullRequestInfo,
+  type RepoWorktreeSnapshot,
+  type WorktreeStatus,
+} from '#/shared/git-types.ts'
 
 export type RepoPresentationForTest = WorkspaceState & {
   operations: GitWorkspaceClientState['operations']
@@ -39,6 +45,7 @@ interface RepoPresentationFactsForTest {
   branches: BranchSnapshotInfo[]
   currentBranch: string
   status?: WorktreeStatus[]
+  worktrees?: RepoWorktreeSnapshot[]
   remote?: Partial<RepoRemoteInfo>
 }
 
@@ -53,7 +60,7 @@ export function repoPresentationForTest(
     operations: git.operations,
     remoteLifecycle: repo.admission.kind === 'remote' ? repo.admission.lifecycle : null,
     branchAction: git.operations.branchAction,
-    snapshot: testRepoSnapshot(facts.branches, facts.currentBranch, facts.remote),
+    snapshot: testRepoSnapshot(facts.branches, facts.currentBranch, facts.remote, facts.worktrees),
     status: facts.status,
   }
 }
@@ -129,11 +136,10 @@ export function setWorkspaceProbeForTest(workspaceId: string, workspaceProbe: Wo
 export function createBranchSnapshot(name: string, options: Partial<BranchSnapshotInfo> = {}): BranchSnapshotInfo {
   return {
     name,
-    isCurrent: false,
     ahead: 0,
     behind: 0,
-    lastCommitHash: '',
-    lastCommitShortHash: '',
+    lastCommitHash: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    lastCommitShortHash: 'aaaaaaa',
     lastCommitMessage: '',
     lastCommitDate: '',
     lastCommitAuthor: '',
@@ -143,6 +149,23 @@ export function createBranchSnapshot(name: string, options: Partial<BranchSnapsh
 
 export function createRepoBranch(name: string, options: Partial<BranchSnapshotInfo> = {}): BranchSnapshotInfo {
   return createBranchSnapshot(name, options)
+}
+
+export function createRepoWorktreeSnapshotForTest(
+  branchName: string,
+  path: string,
+  options: Partial<Omit<RepoWorktreeSnapshot, 'path' | 'head'>> = {},
+): RepoWorktreeSnapshot {
+  return {
+    path,
+    head: { kind: 'branch', branchName },
+    headOid: '1111111111111111111111111111111111111111',
+    operation: null,
+    materializedBranch: branchName,
+    isPrimary: false,
+    isLocked: false,
+    ...options,
+  }
 }
 
 export function createGitWorkspaceProbeForTest(): WorkspaceProbeState {
@@ -198,12 +221,14 @@ export function seedRepoWithReadModelForTest(options: {
   workspacePaneTabsByBranch?: Record<string, WorkspacePaneTabEntry[]>
   workspaceRuntimeId?: string
   status?: WorktreeStatus[]
+  worktrees?: RepoWorktreeSnapshot[]
   remote?: Partial<RepoRemoteInfo>
   remoteLifecycle?: RemoteWorkspaceConnectionLifecycle | null
   workspaceProbe?: WorkspaceProbeState
 }): WorkspaceState {
   const workspaceId = workspaceIdForTest(options.id)
-  const branchesWithSnapshotWorktreeMetadata = options.branchSnapshots ?? options.branches ?? []
+  const branches = options.branchSnapshots ?? options.branches ?? []
+  const worktrees = options.worktrees ?? []
   const status = options.status ?? []
   const currentBranchName = options.currentBranchName ?? null
   const preferredWorkspacePaneTabByTarget =
@@ -214,8 +239,7 @@ export function seedRepoWithReadModelForTest(options: {
             requiredGitWorkspacePaneTabsTarget(
               workspaceId,
               currentBranchName,
-              branchesWithSnapshotWorktreeMetadata.find((branch) => branch.name === currentBranchName)?.worktree
-                ?.path ?? null,
+              repoWorktreeForBranch(worktrees, currentBranchName)?.path ?? null,
             ),
           )]: options.preferredWorkspacePaneTab,
         }
@@ -236,16 +260,21 @@ export function seedRepoWithReadModelForTest(options: {
     },
   })
   seedRepoQueryDataForTest(repo, {
-    branches: branchesWithSnapshotWorktreeMetadata,
+    branches,
     currentBranch: options.currentBranch ?? currentBranchName ?? '',
     status,
+    worktrees,
     remote: options.remote,
   })
   for (const [branchName, tabs] of Object.entries(options.workspacePaneTabsByBranch ?? {})) {
-    const branch = branchesWithSnapshotWorktreeMetadata.find((candidate) => candidate.name === branchName)
+    const branch = branches.find((candidate) => candidate.name === branchName)
     if (!branch) continue
     setWorkspacePaneTabsForTargetQueryData({
-      ...requiredGitWorkspacePaneTabsTarget(repo.id, branchName, branch.worktree?.path ?? null),
+      ...requiredGitWorkspacePaneTabsTarget(
+        repo.id,
+        branchName,
+        repoWorktreeForBranch(worktrees, branchName)?.path ?? null,
+      ),
       workspaceRuntimeId: repo.workspaceRuntimeId,
       tabs,
     })
@@ -259,6 +288,7 @@ export function seedRepoQueryDataForTest(
     branches: BranchSnapshotInfo[]
     currentBranch: string
     status?: WorktreeStatus[]
+    worktrees?: RepoWorktreeSnapshot[]
     remote?: Partial<RepoRemoteInfo>
   },
 ): void {
@@ -266,7 +296,7 @@ export function seedRepoQueryDataForTest(
   setRepoSnapshotQueryData(
     repo.id,
     repo.workspaceRuntimeId,
-    testRepoSnapshot(readModel.branches, readModel.currentBranch, readModel.remote),
+    testRepoSnapshot(readModel.branches, readModel.currentBranch, readModel.remote, readModel.worktrees),
   )
   setRepoWorktreeStatusQueryData(repo.id, repo.workspaceRuntimeId, {
     workspaceRuntimeId: repo.workspaceRuntimeId,
@@ -279,9 +309,11 @@ function testRepoSnapshot(
   branches: BranchSnapshotInfo[],
   current: string,
   remote: Partial<RepoRemoteInfo> = {},
+  worktrees: RepoWorktreeSnapshot[] = [],
 ): RepoSnapshot {
   return {
     branches,
+    worktrees,
     current,
     remote: {
       remotes: [],

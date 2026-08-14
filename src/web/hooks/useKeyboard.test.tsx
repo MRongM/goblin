@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import {
+  createRepoWorktreeSnapshotForTest,
   resetWorkspacesStore,
   seedRepoQueryDataForTest,
   seedRepoWithReadModelForTest,
@@ -14,6 +15,7 @@ import { renderInJsdom } from '#/test-utils/render.tsx'
 import { workspaceIdForTest } from '#/test-utils/workspace-id.ts'
 import { useKeyboard } from '#/web/hooks/useKeyboard.ts'
 import { formatTerminalFilesystemTargetKeyForPath } from '#/shared/terminal-filesystem-target-key.ts'
+import { repoWorktreeForBranch } from '#/shared/git-types.ts'
 
 vi.mock('vue-sonner', () => ({
   toast: {
@@ -30,7 +32,7 @@ import {
 import { workspacesStore } from '#/web/stores/workspaces/store.ts'
 import type { AppNavigationActions } from '#/web/app-navigation-actions.ts'
 import type { WorkspacePaneCommandTarget } from '#/web/workspace-pane/workspace-pane-command-target.ts'
-import { getRepoSnapshotQueryData } from '#/web/repo-query-cache.ts'
+import { getRepoSnapshotQueryData, setRepoSnapshotQueryData } from '#/web/repo-query-cache.ts'
 import { setTerminalSessionCommandBridge } from '#/web/components/terminal/terminal-session-command-bridge.ts'
 import type {
   TerminalCreateOptions,
@@ -46,6 +48,7 @@ import { setRepoOperationsQueryData } from '#/web/repo-query-cache.ts'
 import { repoOperationsQueryKey, repoSnapshotQueryKey } from '#/web/repo-query-keys.ts'
 import type { RepoServerOperationState } from '#/shared/api-types.ts'
 import type { WorkspaceId } from '#/shared/workspace-locator.ts'
+import type { GitWorkspaceNavigatorRowIdentity } from '#/web/components/workspace-navigator/git-workspace-navigator-model.ts'
 import { beginAppNavigation, resetAppNavigationForTest } from '#/web/app-navigation-lifecycle.ts'
 import { claimTerminalAutoFocus, resetTerminalAutoFocusForTest } from '#/web/terminal-focus.ts'
 import {
@@ -75,6 +78,7 @@ const FILESYSTEM_CAPABILITIES = {
 interface HookHostOptions {
   currentWorkspaceId: WorkspaceId | null
   currentBranchName: string | null
+  currentGitWorkspaceNavigatorRowIdentity: GitWorkspaceNavigatorRowIdentity | null
   currentWorkspacePaneCommandTarget: WorkspacePaneCommandTarget | null
   isWorkspaceShortcutSuppressed: () => boolean
   isSettingsOpen: () => boolean
@@ -158,7 +162,7 @@ describe('useKeyboard', () => {
     seedTabbedWorktreeRepoForTest('status')
     const selectTerminal = vi.fn()
     const showRepoBranchWorkspacePaneTab = vi.fn()
-    const showRepoBranchTerminalSession = vi.fn(() => true)
+    const commitFilesystemWorkspacePaneRoute = vi.fn(async () => true)
     setTerminalSessionCommandBridge({
       terminalFilesystemTargetSnapshot: () => terminalFilesystemTargetSnapshot(),
       createTerminal: vi.fn(async () => 'term-111111111111111111111'),
@@ -172,7 +176,10 @@ describe('useKeyboard', () => {
     await renderHookHost({
       currentWorkspaceId: REPO_ID,
       currentBranchName: 'feature/worktree',
-      navigation: navigationWith({ showRepoBranchWorkspacePaneTab, showRepoBranchTerminalSession }),
+      navigation: navigationWith({
+        showRepoBranchWorkspacePaneTab,
+        commitFilesystemWorkspacePaneRoute,
+      }),
     })
     seedInitialObservedWorkspacePaneRouteForTest({
       workspaceId: REPO_ID,
@@ -187,10 +194,12 @@ describe('useKeyboard', () => {
       await Promise.resolve()
     })
 
-    expect(showRepoBranchTerminalSession).toHaveBeenCalledWith(
-      REPO_ID,
-      'feature/worktree',
-      'term-111111111111111111111',
+    expect(commitFilesystemWorkspacePaneRoute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        routeTarget: { kind: 'git-worktree', workspaceId: REPO_ID, worktreePath: WORKTREE_PATH },
+      }),
+      { kind: 'terminal', terminalSessionId: 'term-111111111111111111111' },
+      expect.any(Object),
     )
     expect(showRepoBranchWorkspacePaneTab).not.toHaveBeenCalled()
     expect(selectTerminal).not.toHaveBeenCalled()
@@ -257,7 +266,133 @@ describe('useKeyboard', () => {
       await Promise.resolve()
     })
 
-    expect(selectRepoBranch).toHaveBeenCalledWith(REPO_ID, 'feature/query')
+    expect(selectRepoBranch).toHaveBeenCalledWith({
+      routeTarget: { kind: 'git-branch', workspaceId: REPO_ID, branchName: 'feature/query' },
+      workspaceRuntimeId: repo.workspaceRuntimeId,
+    })
+  })
+
+  test('branch navigation traverses the rendered targets across attached, rebase, and detached states', async () => {
+    const currentBranch = createRepoBranch('feature/current')
+    const nextBranch = createRepoBranch('feature/next')
+    const repo = seedRepoWithReadModelForTest({
+      id: REPO_ID,
+      branches: [currentBranch, nextBranch],
+      currentBranchName: currentBranch.name,
+      worktrees: [createRepoWorktreeSnapshotForTest(currentBranch.name, WORKTREE_PATH)],
+    })
+    const selectRepoBranch = vi.fn()
+    const selectRepoWorktree = vi.fn()
+    await renderHookHost({
+      currentWorkspaceId: REPO_ID,
+      currentBranchName: currentBranch.name,
+      currentGitWorkspaceNavigatorRowIdentity: { kind: 'worktree', worktreePath: WORKTREE_PATH },
+      navigation: navigationWith({ selectRepoBranch, selectRepoWorktree }),
+    })
+
+    await dispatchBranchShortcut('j', 'KeyJ')
+    expect(selectRepoBranch).toHaveBeenCalledOnce()
+    expect(selectRepoBranch).toHaveBeenCalledWith({
+      routeTarget: { kind: 'git-branch', workspaceId: REPO_ID, branchName: nextBranch.name },
+      workspaceRuntimeId: repo.workspaceRuntimeId,
+    })
+    selectRepoBranch.mockClear()
+
+    const attachedSnapshot = getRepoSnapshotQueryData(repo.id, repo.workspaceRuntimeId)
+    if (!attachedSnapshot) throw new Error('expected attached snapshot')
+    setRepoSnapshotQueryData(repo.id, repo.workspaceRuntimeId, {
+      ...attachedSnapshot,
+      worktrees: attachedSnapshot.worktrees.map((worktree) => ({
+        ...worktree,
+        head: { kind: 'detached' as const },
+        operation: { kind: 'rebase' as const },
+      })),
+    })
+
+    await dispatchBranchShortcut('j', 'KeyJ')
+    expect(selectRepoBranch).toHaveBeenCalledOnce()
+    expect(selectRepoBranch).toHaveBeenCalledWith({
+      routeTarget: { kind: 'git-branch', workspaceId: REPO_ID, branchName: nextBranch.name },
+      workspaceRuntimeId: repo.workspaceRuntimeId,
+    })
+    selectRepoBranch.mockClear()
+
+    const rebaseSnapshot = getRepoSnapshotQueryData(repo.id, repo.workspaceRuntimeId)
+    if (!rebaseSnapshot) throw new Error('expected rebase snapshot')
+    setRepoSnapshotQueryData(repo.id, repo.workspaceRuntimeId, {
+      ...rebaseSnapshot,
+      worktrees: rebaseSnapshot.worktrees.map((worktree) => ({
+        ...worktree,
+        operation: null,
+        materializedBranch: null,
+      })),
+    })
+
+    await dispatchBranchShortcut('k', 'KeyK')
+    expect(selectRepoBranch).toHaveBeenCalledOnce()
+    expect(selectRepoBranch).toHaveBeenCalledWith({
+      routeTarget: { kind: 'git-branch', workspaceId: REPO_ID, branchName: nextBranch.name },
+      workspaceRuntimeId: repo.workspaceRuntimeId,
+    })
+    expect(selectRepoWorktree).not.toHaveBeenCalled()
+  })
+
+  test('branch navigation fast-fails when the authoritative snapshot is unavailable', async () => {
+    const repo = seedRepoWithReadModelForTest({
+      id: REPO_ID,
+      branches: [createRepoBranch('main'), createRepoBranch('feature/next')],
+      currentBranchName: 'main',
+    })
+    appQueryClient.removeQueries({ queryKey: repoSnapshotQueryKey(repo.id, repo.workspaceRuntimeId), exact: true })
+    const selectRepoBranch = vi.fn()
+    const selectRepoWorktree = vi.fn()
+    await renderHookHost({
+      currentWorkspaceId: REPO_ID,
+      currentBranchName: 'main',
+      navigation: navigationWith({ selectRepoBranch, selectRepoWorktree }),
+    })
+
+    const shortcut = await dispatchBranchShortcut('j', 'KeyJ')
+
+    expect(shortcut.defaultPrevented).toBe(false)
+    expect(selectRepoBranch).not.toHaveBeenCalled()
+    expect(selectRepoWorktree).not.toHaveBeenCalled()
+  })
+
+  test('branch navigation selects a detached worktree with its runtime lease', async () => {
+    const repo = seedRepoWithReadModelForTest({
+      id: REPO_ID,
+      branches: [createRepoBranch('main')],
+      currentBranchName: 'main',
+      worktrees: [
+        {
+          path: WORKTREE_PATH,
+          head: { kind: 'detached' },
+          headOid: '0123456789abcdef0123456789abcdef01234567',
+          operation: null,
+          materializedBranch: null,
+          isPrimary: false,
+          isLocked: false,
+        },
+      ],
+    })
+    const selectRepoBranch = vi.fn()
+    const selectRepoWorktree = vi.fn()
+    await renderHookHost({
+      currentWorkspaceId: REPO_ID,
+      currentBranchName: 'main',
+      currentGitWorkspaceNavigatorRowIdentity: { kind: 'branch', branchName: 'main' },
+      navigation: navigationWith({ selectRepoBranch, selectRepoWorktree }),
+    })
+
+    await dispatchBranchShortcut('j', 'KeyJ')
+
+    expect(selectRepoWorktree).toHaveBeenCalledOnce()
+    expect(selectRepoWorktree).toHaveBeenCalledWith({
+      routeTarget: { kind: 'git-worktree', workspaceId: REPO_ID, worktreePath: WORKTREE_PATH },
+      workspaceRuntimeId: repo.workspaceRuntimeId,
+    })
+    expect(selectRepoBranch).not.toHaveBeenCalled()
   })
 
   test('alt-arrow navigates workspace history', async () => {
@@ -307,7 +442,7 @@ describe('useKeyboard', () => {
     seedTabbedWorktreeRepoForTest('status')
     const selectTerminal = vi.fn()
     const showRepoBranchWorkspacePaneTab = vi.fn()
-    const showRepoBranchTerminalSession = vi.fn(() => true)
+    const commitFilesystemWorkspacePaneRoute = vi.fn(async () => true)
     setTerminalSessionCommandBridge({
       terminalFilesystemTargetSnapshot: () => terminalFilesystemTargetSnapshot(),
       createTerminal: vi.fn(async () => 'term-111111111111111111111'),
@@ -321,7 +456,10 @@ describe('useKeyboard', () => {
     await renderHookHost({
       currentWorkspaceId: REPO_ID,
       currentBranchName: 'feature/worktree',
-      navigation: navigationWith({ showRepoBranchWorkspacePaneTab, showRepoBranchTerminalSession }),
+      navigation: navigationWith({
+        showRepoBranchWorkspacePaneTab,
+        commitFilesystemWorkspacePaneRoute,
+      }),
     })
     seedInitialObservedWorkspacePaneRouteForTest({
       workspaceId: REPO_ID,
@@ -338,10 +476,12 @@ describe('useKeyboard', () => {
 
     await dispatchPrimaryShortcut('2', 'Digit2')
 
-    expect(showRepoBranchTerminalSession).toHaveBeenCalledWith(
-      REPO_ID,
-      'feature/worktree',
-      'term-111111111111111111111',
+    expect(commitFilesystemWorkspacePaneRoute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        routeTarget: { kind: 'git-worktree', workspaceId: REPO_ID, worktreePath: WORKTREE_PATH },
+      }),
+      { kind: 'terminal', terminalSessionId: 'term-111111111111111111111' },
+      expect.any(Object),
     )
     expect(showRepoBranchWorkspacePaneTab).not.toHaveBeenCalled()
     expect(selectTerminal).not.toHaveBeenCalled()
@@ -503,7 +643,6 @@ describe('useKeyboard', () => {
       currentWorkspaceId: REPO_ID,
       currentBranchName: null,
       currentWorkspacePaneCommandTarget: {
-        routeTarget: { kind: 'workspace-root', workspaceId: REPO_ID },
         workspacePaneRoute: null,
         filesystemTarget: workspaceRootPaneFilesystemTarget({
           workspaceId: REPO_ID,
@@ -795,8 +934,9 @@ function renderHookHost(overrides: Partial<HookHostOptions> = {}) {
 function seedCurrentWorktreeRepoForTest() {
   return seedRepoWithReadModelForTest({
     id: REPO_ID,
-    branches: [
-      createRepoBranch('feature/worktree', { worktree: { path: WORKTREE_PATH, isPrimary: false, isLocked: false } }),
+    branches: [createRepoBranch('feature/worktree')],
+    worktrees: [
+      createRepoWorktreeSnapshotForTest('feature/worktree', WORKTREE_PATH, { isPrimary: false, isLocked: false }),
     ],
     currentBranchName: 'feature/worktree',
   })
@@ -805,8 +945,9 @@ function seedCurrentWorktreeRepoForTest() {
 function seedTabbedWorktreeRepoForTest(preferredWorkspacePaneTab: 'status' | 'terminal') {
   return seedRepoWithReadModelForTest({
     id: REPO_ID,
-    branches: [
-      createRepoBranch('feature/worktree', { worktree: { path: WORKTREE_PATH, isPrimary: false, isLocked: false } }),
+    branches: [createRepoBranch('feature/worktree')],
+    worktrees: [
+      createRepoWorktreeSnapshotForTest('feature/worktree', WORKTREE_PATH, { isPrimary: false, isLocked: false }),
     ],
     currentBranchName: 'feature/worktree',
     preferredWorkspacePaneTab,
@@ -821,7 +962,6 @@ function seedTabbedWorktreeRepoForTest(preferredWorkspacePaneTab: 'status' | 'te
 
 function currentTerminalPaneCommandTargetForTest(): WorkspacePaneCommandTarget {
   return {
-    routeTarget: { kind: 'git-branch', workspaceId: REPO_ID, branchName: 'feature/worktree' },
     workspacePaneRoute: { kind: 'terminal', terminalSessionId: 'term-111111111111111111111' },
     filesystemTarget: gitWorktreePaneFilesystemTarget({
       workspaceId: REPO_ID,
@@ -831,6 +971,15 @@ function currentTerminalPaneCommandTargetForTest(): WorkspacePaneCommandTarget {
       capabilities: FILESYSTEM_CAPABILITIES,
     }),
   }
+}
+
+async function dispatchBranchShortcut(key: string, code: string): Promise<KeyboardEvent> {
+  const shortcut = keyboardEventForTest('keydown', { key, code })
+  await flushTestUpdates(async () => {
+    window.dispatchEvent(shortcut)
+    await Promise.resolve()
+  })
+  return shortcut
 }
 
 async function dispatchPrimaryShortcut(
@@ -881,6 +1030,7 @@ const HookHost = defineComponent<Partial<HookHostOptions>>({
   props: [
     'currentWorkspaceId',
     'currentBranchName',
+    'currentGitWorkspaceNavigatorRowIdentity',
     'currentWorkspacePaneCommandTarget',
     'isWorkspaceShortcutSuppressed',
     'isSettingsOpen',
@@ -899,19 +1049,16 @@ const HookHost = defineComponent<Partial<HookHostOptions>>({
             (candidate) => candidate.name === overrides.currentBranchName,
           )
         : null
+    const snapshot = repo ? getRepoSnapshotQueryData(repo.id, repo.workspaceRuntimeId) : null
+    const worktree = snapshot && branch ? repoWorktreeForBranch(snapshot.worktrees, branch.name) : undefined
     const defaultCommandTarget =
-      repo?.capability.kind === 'git' && overrides.currentBranchName && branch?.worktree
+      repo?.capability.kind === 'git' && overrides.currentBranchName && worktree
         ? {
-            routeTarget: {
-              kind: 'git-branch' as const,
-              workspaceId: repo.id,
-              branchName: overrides.currentBranchName,
-            },
             workspacePaneRoute: null,
             filesystemTarget: gitWorktreePaneFilesystemTarget({
               workspaceId: repo.id,
               workspaceRuntimeId: repo.workspaceRuntimeId,
-              worktreePath: branch.worktree.path,
+              worktreePath: worktree.path,
               head: { kind: 'branch' as const, branchName: overrides.currentBranchName },
               capabilities: repo.capability.probe.capabilities,
             }),
@@ -923,6 +1070,7 @@ const HookHost = defineComponent<Partial<HookHostOptions>>({
                 workspaceId: repo?.id ?? REPO_ID,
                 branchName: overrides.currentBranchName,
               },
+              workspaceRuntimeId: repo?.workspaceRuntimeId ?? workspaceRuntimeIdForTest(),
               workspacePaneRoute: null,
               filesystemTarget: null,
             }
@@ -931,6 +1079,9 @@ const HookHost = defineComponent<Partial<HookHostOptions>>({
       navigation: overrides.navigation ?? navigationWith(),
       currentWorkspaceId: overrides.currentWorkspaceId ?? null,
       currentBranchName: overrides.currentBranchName ?? null,
+      currentGitWorkspaceNavigatorRowIdentity:
+        overrides.currentGitWorkspaceNavigatorRowIdentity ??
+        (overrides.currentBranchName ? { kind: 'branch', branchName: overrides.currentBranchName } : null),
       currentWorkspacePaneCommandTarget: overrides.currentWorkspacePaneCommandTarget ?? defaultCommandTarget,
       onShowHelp: () => {},
       isWorkspaceShortcutSuppressed: overrides.isWorkspaceShortcutSuppressed ?? (() => false),
@@ -951,7 +1102,6 @@ function navigationWith(overrides: AppNavigationOverridesForTest = {}): AppNavig
     selectRepoBranch: () => true,
     showRepoBranchEmptyWorkspacePane: () => true,
     showRepoBranchWorkspacePaneTab: () => true,
-    showRepoBranchTerminalSession: () => true,
     goBack: () => {},
     goForward: () => {},
     openSettings: () => {},

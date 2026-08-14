@@ -14,10 +14,12 @@ import { hasClientServerConfig } from '#/web/lib/server-config.ts'
 import { useStoreSelector } from '#/web/stores/store-selector.ts'
 import { workspaceCanExecute } from '#/web/stores/workspaces/workspace-guards.ts'
 import { workspacesStore } from '#/web/stores/workspaces/store.ts'
+import type { GitWorkspaceNavigatorRowIdentity } from '#/web/components/workspace-navigator/git-workspace-navigator-model.ts'
 
 interface AuthenticatedWorkspaceSideEffectsProps {
   hydratedRouteWorkspaceId: WorkspaceId | null
   currentBranchName: string | null
+  currentGitWorkspaceNavigatorRowIdentity: GitWorkspaceNavigatorRowIdentity | null
   currentWorkspacePaneCommandTarget: () => WorkspacePaneCommandTarget | null
   routeContext: WorkspaceNavigationRouteContext | null
   navigation: AppNavigationActions
@@ -37,6 +39,7 @@ export const AuthenticatedWorkspaceSideEffects = defineComponent<AuthenticatedWo
   props: [
     'hydratedRouteWorkspaceId',
     'currentBranchName',
+    'currentGitWorkspaceNavigatorRowIdentity',
     'currentWorkspacePaneCommandTarget',
     'routeContext',
     'navigation',
@@ -56,6 +59,7 @@ export const AuthenticatedWorkspaceSideEffects = defineComponent<AuthenticatedWo
       navigation: () => props.navigation,
       currentWorkspaceId: () => props.hydratedRouteWorkspaceId,
       currentBranchName: () => props.currentBranchName,
+      currentGitWorkspaceNavigatorRowIdentity: () => props.currentGitWorkspaceNavigatorRowIdentity,
       currentWorkspacePaneCommandTarget,
       onShowHelp: () => props.navigateToSettingsShortcuts(),
       isWorkspaceShortcutSuppressed: workspaceShortcutsSuppressed,

@@ -6,18 +6,25 @@
 // from each git command.
 
 import { describe, expect, test } from 'vitest'
-import { FIELD_SEP, parseBranches, parseLog, parseStatus, parseWorktrees } from '#/system/git/parsers.ts'
+import {
+  FIELD_SEP,
+  normalizeGitPath,
+  parseBranches,
+  parseLog,
+  parseStatus,
+  parseWorktrees,
+} from '#/system/git/parsers.ts'
 
 const SEP = FIELD_SEP
 const NUL = String.fromCharCode(0)
 
 describe('parseBranches', () => {
   test('returns empty array for empty input', () => {
-    expect(parseBranches('', '')).toEqual([])
+    expect(parseBranches('')).toEqual([])
   })
 
   test('strict parsing rejects incomplete and invalid authoritative rows', () => {
-    expect(() => parseBranches(`main${SEP}abc1234`, 'main')).toThrow('Invalid branch snapshot row')
+    expect(() => parseBranches(`main${SEP}abc1234`)).toThrow('Invalid branch snapshot row')
     expect(() =>
       parseBranches(
         [
@@ -30,8 +37,13 @@ describe('parseBranches', () => {
           '',
           '',
         ].join(SEP),
-        'main',
       ),
+    ).toThrow('Invalid branch snapshot identity')
+    expect(() =>
+      parseBranches(['main', 'abcdef1', 'abcdef1', 'short full hash', '2026-05-20', 'A', '', ''].join(SEP)),
+    ).toThrow('Invalid branch snapshot identity')
+    expect(() =>
+      parseBranches(['main', '0'.repeat(40), '0000000', 'invalid sentinel', '2026-05-20', 'A', '', ''].join(SEP)),
     ).toThrow('Invalid branch snapshot identity')
   })
 
@@ -46,11 +58,10 @@ describe('parseBranches', () => {
       '',
       '',
     ].join(SEP)
-    const result = parseBranches(line, 'main')
+    const result = parseBranches(line)
     expect(result).toHaveLength(1)
     expect(result[0]).toMatchObject({
       name: 'main',
-      isCurrent: true,
       ahead: 0,
       behind: 0,
       lastCommitHash: 'abc1234000000000000000000000000000000000',
@@ -63,10 +74,25 @@ describe('parseBranches', () => {
     expect(result[0]?.trackingGone).toBeUndefined()
   })
 
+  test('rejects duplicate branch identities', () => {
+    const line = [
+      'main',
+      'abc1234000000000000000000000000000000000',
+      'abc1234',
+      'initial commit',
+      '2026-05-20T10:00:00+08:00',
+      'Alice',
+      '',
+      '',
+    ].join(SEP)
+
+    expect(() => parseBranches(`${line}\n${line}`)).toThrow('Duplicate branch snapshot identity')
+  })
+
   test('parses ahead/behind from track string', () => {
     const line = [
       'feature',
-      'def567800000000000000000000000000000000',
+      'def5678000000000000000000000000000000000',
       'def5678',
       'wip',
       '2026-05-20T10:00:00+08:00',
@@ -74,7 +100,7 @@ describe('parseBranches', () => {
       'origin/feature',
       '[ahead 3, behind 2]',
     ].join(SEP)
-    const [b] = parseBranches(line, 'main')
+    const [b] = parseBranches(line)
     expect(b?.ahead).toBe(3)
     expect(b?.behind).toBe(2)
     expect(b?.tracking).toBe('origin/feature')
@@ -84,7 +110,7 @@ describe('parseBranches', () => {
   test('flags trackingGone when upstream marked [gone]', () => {
     const line = [
       'stale',
-      'aaa111100000000000000000000000000000000',
+      'aaa1111000000000000000000000000000000000',
       'aaa1111',
       'old',
       '2026-05-20T10:00:00+08:00',
@@ -92,41 +118,11 @@ describe('parseBranches', () => {
       'origin/stale',
       '[gone]',
     ].join(SEP)
-    const [b] = parseBranches(line, 'main')
+    const [b] = parseBranches(line)
     expect(b?.tracking).toBe('origin/stale')
     expect(b?.trackingGone).toBe(true)
     expect(b?.ahead).toBe(0)
     expect(b?.behind).toBe(0)
-  })
-
-  test('marks isCurrent only for the matching branch', () => {
-    const out = [
-      ['main', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'aaaaaaa', 's', '2026-05-20', 'a1', '', ''].join(SEP),
-      ['dev', 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', 'bbbbbbb', 's', '2026-05-20', 'a1', '', ''].join(SEP),
-    ].join('\n')
-    const result = parseBranches(out, 'dev')
-    expect(result.find((b) => b.name === 'main')?.isCurrent).toBe(false)
-    expect(result.find((b) => b.name === 'dev')?.isCurrent).toBe(true)
-  })
-
-  test('attaches worktree info when branch matches', () => {
-    const line = ['feat', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'aaaaaaa', 's', '2026-05-20', 'a', '', ''].join(
-      SEP,
-    )
-    const result = parseBranches(line, 'main', [{ path: '/wt/feat', branch: 'feat', isBare: false, isPrimary: false }])
-    expect(result[0]?.worktree?.path).toBe('/wt/feat')
-    expect(result[0]?.worktree?.isPrimary).toBe(false)
-    expect(result[0]?.worktree).not.toHaveProperty('summary')
-  })
-
-  test('attaches primary worktree marker when branch matches the main worktree', () => {
-    const line = ['main', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'aaaaaaa', 's', '2026-05-20', 'a', '', ''].join(
-      SEP,
-    )
-    const [branch] = parseBranches(line, 'feature', [{ path: '/repo', branch: 'main', isBare: false, isPrimary: true }])
-    expect(branch?.worktree?.path).toBe('/repo')
-    expect(branch?.worktree?.isPrimary).toBe(true)
-    expect(branch?.worktree).not.toHaveProperty('summary')
   })
 
   test('preserves SEP-free subjects with spaces and unicode', () => {
@@ -141,8 +137,13 @@ describe('parseBranches', () => {
       '',
       '',
     ].join(SEP)
-    const [b] = parseBranches(line, 'main')
+    const [b] = parseBranches(line)
     expect(b?.lastCommitMessage).toBe(subject)
+  })
+
+  test('accepts a full SHA-256 object id', () => {
+    const line = ['main', 'a'.repeat(64), 'aaaaaaa', 'sha256', '2026-05-20', 'A', '', ''].join(SEP)
+    expect(parseBranches(line)[0]?.lastCommitHash).toBe('a'.repeat(64))
   })
 })
 
@@ -153,13 +154,13 @@ describe('parseLog', () => {
 
   test('parses multiple entries', () => {
     const out = [
-      ['aaaaaaaa', 'aaaaaaa', 'HEAD -> main, origin/main', 'first', 'Alice', '2026-05-20T10:00:00+08:00'].join(SEP),
-      ['bbbbbbbb', 'bbbbbbb', '', 'second', 'Bob', '2026-05-19T10:00:00+08:00'].join(SEP),
+      ['a'.repeat(40), 'aaaaaaa', 'HEAD -> main, origin/main', 'first', 'Alice', '2026-05-20T10:00:00+08:00'].join(SEP),
+      ['b'.repeat(40), 'bbbbbbb', '', 'second', 'Bob', '2026-05-19T10:00:00+08:00'].join(SEP),
     ].join('\n')
     const result = parseLog(out)
     expect(result).toHaveLength(2)
     expect(result[0]).toEqual({
-      hash: 'aaaaaaaa',
+      hash: 'a'.repeat(40),
       shortHash: 'aaaaaaa',
       refs: 'HEAD -> main, origin/main',
       message: 'first',
@@ -170,7 +171,7 @@ describe('parseLog', () => {
   })
 
   test('subjects with embedded spaces survive', () => {
-    const out = ['aaaaaaaa', 'aaaaaaa', '', 'feat(scope): hello world', 'a', '2026-05-20T10:00:00Z'].join(SEP)
+    const out = ['a'.repeat(40), 'aaaaaaa', '', 'feat(scope): hello world', 'a', '2026-05-20T10:00:00Z'].join(SEP)
     expect(parseLog(out)[0]?.message).toBe('feat(scope): hello world')
   })
 
@@ -178,10 +179,17 @@ describe('parseLog', () => {
     ['missing field', ['aaaaaaaa', 'aaaaaaa', '', 'message', 'author'].join(SEP)],
     ['extra field', ['aaaaaaaa', 'aaaaaaa', '', 'message', 'author', '2026-05-20T10:00:00Z', 'extra'].join(SEP)],
     ['invalid full hash', ['not-a-hash', 'aaaaaaa', '', 'message', 'author', '2026-05-20T10:00:00Z'].join(SEP)],
+    ['abbreviated full hash', ['abcdef1', 'abcdef1', '', 'message', 'author', '2026-05-20T10:00:00Z'].join(SEP)],
+    ['null object sentinel', ['0'.repeat(40), '0000000', '', 'message', 'author', '2026-05-20T10:00:00Z'].join(SEP)],
     ['invalid short hash', ['aaaaaaaa', 'short', '', 'message', 'author', '2026-05-20T10:00:00Z'].join(SEP)],
     ['invalid date', ['aaaaaaaa', 'aaaaaaa', '', 'message', 'author', 'not-a-date'].join(SEP)],
   ])('rejects %s', (_name, output) => {
     expect(() => parseLog(output)).toThrow()
+  })
+
+  test('accepts a full SHA-256 object id', () => {
+    const output = ['a'.repeat(64), 'aaaaaaa', '', 'message', 'author', '2026-05-20T10:00:00Z'].join(SEP)
+    expect(parseLog(output)[0]?.hash).toBe('a'.repeat(64))
   })
 })
 
@@ -256,26 +264,82 @@ describe('parseStatus', () => {
 })
 
 describe('parseWorktrees', () => {
+  test('normalizes Windows Git paths to the native local-domain spelling', () => {
+    expect(normalizeGitPath('C:/repo/feature', 'win32')).toBe('C:\\repo\\feature')
+  })
+
   test('rejects empty output because a Git repository always has a primary or bare worktree', () => {
     expect(() => parseWorktrees('')).toThrow('Invalid worktree output')
   })
 
   test('parses a single non-bare worktree on a branch', () => {
-    const out = ['worktree /repo', 'HEAD abc1234', 'branch refs/heads/main'].join(NUL) + NUL + NUL
+    const out =
+      ['worktree /repo', 'HEAD abc1234000000000000000000000000000000000', 'branch refs/heads/main'].join(NUL) +
+      NUL +
+      NUL
     const result = parseWorktrees(out)
     expect(result).toHaveLength(1)
-    expect(result[0]).toEqual({ path: '/repo', branch: 'main', isBare: false, isPrimary: true, isLocked: false })
+    expect(result[0]).toEqual({
+      path: '/repo',
+      headOid: 'abc1234000000000000000000000000000000000',
+      branch: 'main',
+      isBare: false,
+      isPrimary: true,
+      isLocked: false,
+    })
+  })
+
+  test('rejects duplicate normalized worktree paths', () => {
+    const out =
+      [
+        'worktree /srv/repo/../same',
+        'HEAD abc1234000000000000000000000000000000000',
+        'branch refs/heads/main',
+        '',
+        'worktree /srv/same',
+        'HEAD def5678000000000000000000000000000000000',
+        'detached',
+      ].join(NUL) +
+      NUL +
+      NUL
+
+    expect(() => parseWorktrees(out)).toThrow('Duplicate worktree path')
+  })
+
+  test('accepts a complete SHA-256 worktree object id', () => {
+    const headOid = 'a'.repeat(64)
+    const out = ['worktree /repo', `HEAD ${headOid}`, 'branch refs/heads/main'].join(NUL) + NUL + NUL
+
+    expect(parseWorktrees(out)[0]?.headOid).toBe(headOid)
+  })
+
+  test.each([40, 64])('decodes the %i-character unborn object-id sentinel as no commit', (length) => {
+    const out = ['worktree /repo', `HEAD ${'0'.repeat(length)}`, 'branch refs/heads/main'].join(NUL) + NUL + NUL
+
+    expect(parseWorktrees(out)[0]?.headOid).toBeNull()
   })
 
   test('flags locked worktrees (with or without reason)', () => {
     // `git worktree list --porcelain` emits either a bare `locked` line
     // or `locked <reason>` when the user passed `--reason` to lock.
     const out =
-      ['worktree /repo/wt', 'HEAD aaaaaaa', 'branch refs/heads/feat', 'locked needed for release'].join(NUL) + NUL + NUL
+      [
+        'worktree /repo/wt',
+        'HEAD aaaaaaa000000000000000000000000000000000',
+        'branch refs/heads/feat',
+        'locked needed for release',
+      ].join(NUL) +
+      NUL +
+      NUL
     const [w] = parseWorktrees(out)
     expect(w?.isLocked).toBe(true)
 
-    const bare = ['worktree /repo/wt2', 'HEAD aaaaaaa', 'branch refs/heads/x', 'locked'].join(NUL) + NUL + NUL
+    const bare =
+      ['worktree /repo/wt2', 'HEAD aaaaaaa000000000000000000000000000000000', 'branch refs/heads/x', 'locked'].join(
+        NUL,
+      ) +
+      NUL +
+      NUL
     expect(parseWorktrees(bare)[0]?.isLocked).toBe(true)
   })
 
@@ -283,16 +347,16 @@ describe('parseWorktrees', () => {
     const out =
       [
         'worktree /repo',
-        'HEAD aaaaaaa',
+        'HEAD aaaaaaa000000000000000000000000000000000',
         'branch refs/heads/main',
         '',
         'worktree /repo/missing',
-        'HEAD bbbbbbb',
+        'HEAD bbbbbbb000000000000000000000000000000000',
         'branch refs/heads/stale',
         'prunable gitdir file points to non-existent location',
         '',
         'worktree /repo/live',
-        'HEAD ccccccc',
+        'HEAD ccccccc000000000000000000000000000000000',
         'branch refs/heads/live',
       ].join(NUL) +
       NUL +
@@ -302,22 +366,38 @@ describe('parseWorktrees', () => {
   })
 
   test('accepts an absolute Windows path in authoritative porcelain output', () => {
-    const out = ['worktree C:/repo', 'HEAD aaaaaaa', 'branch refs/heads/main'].join(NUL) + NUL + NUL
-    expect(parseWorktrees(out)).toEqual([
-      { path: 'C:/repo', branch: 'main', isBare: false, isPrimary: true, isLocked: false },
+    const out =
+      ['worktree C:/repo', 'HEAD aaaaaaa000000000000000000000000000000000', 'branch refs/heads/main'].join(NUL) +
+      NUL +
+      NUL
+    expect(parseWorktrees(out, 'win32')).toEqual([
+      {
+        path: 'C:\\repo',
+        headOid: 'aaaaaaa000000000000000000000000000000000',
+        branch: 'main',
+        isBare: false,
+        isPrimary: true,
+        isLocked: false,
+      },
     ])
   })
 
   test.each(['/repo/line\nbreak', '/repo/tab\tpath'])(
     'preserves special characters in worktree path %j',
     (worktreePath) => {
-      const out = [`worktree ${worktreePath}`, 'HEAD aaaaaaa', 'branch refs/heads/main'].join(NUL) + NUL + NUL
+      const out =
+        [`worktree ${worktreePath}`, 'HEAD aaaaaaa000000000000000000000000000000000', 'branch refs/heads/main'].join(
+          NUL,
+        ) +
+        NUL +
+        NUL
       expect(parseWorktrees(out)[0]?.path).toBe(worktreePath)
     },
   )
 
   test('detached HEAD has no branch line — branch left undefined', () => {
-    const out = ['worktree /repo/wt-detached', 'HEAD abc1234', 'detached'].join(NUL) + NUL + NUL
+    const out =
+      ['worktree /repo/wt-detached', 'HEAD abc1234000000000000000000000000000000000', 'detached'].join(NUL) + NUL + NUL
     const [w] = parseWorktrees(out)
     expect(w?.path).toBe('/repo/wt-detached')
     expect(w?.branch).toBeUndefined()
@@ -337,11 +417,11 @@ describe('parseWorktrees', () => {
     const out =
       [
         'worktree /repo',
-        'HEAD aaaaaaa',
+        'HEAD aaaaaaa000000000000000000000000000000000',
         'branch refs/heads/main',
         '',
         'worktree /repo/wt',
-        'HEAD bbbbbbb',
+        'HEAD bbbbbbb000000000000000000000000000000000',
         'branch refs/heads/feat',
       ].join(NUL) +
       NUL +
@@ -353,7 +433,20 @@ describe('parseWorktrees', () => {
   })
 
   test('strips refs/heads/ prefix from branch ref', () => {
-    const out = ['worktree /repo', 'HEAD aaaaaaa', 'branch refs/heads/feature/nested/name'].join(NUL) + NUL + NUL
+    const out =
+      ['worktree /repo', 'HEAD aaaaaaa000000000000000000000000000000000', 'branch refs/heads/feature/nested/name'].join(
+        NUL,
+      ) +
+      NUL +
+      NUL
     expect(parseWorktrees(out)[0]?.branch).toBe('feature/nested/name')
   })
+
+  test.each(['abc1234', 'not-an-object-id'])(
+    'rejects a worktree HEAD that is not a complete object id: %s',
+    (headOid) => {
+      const out = ['worktree /repo', `HEAD ${headOid}`, 'branch refs/heads/main'].join(NUL) + NUL + NUL
+      expect(() => parseWorktrees(out)).toThrow('Invalid worktree HEAD')
+    },
+  )
 })

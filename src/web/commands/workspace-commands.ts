@@ -10,11 +10,9 @@ import { dispatchRetiredTerminalWorkspacePaneTabPresentationAction } from '#/web
 import { dispatchOpenWorkspacePaneTargetStaticTabAction } from '#/web/workspace-pane/workspace-pane-tab-open-action.ts'
 import {
   dispatchMoveWorkspacePaneTabAction,
-  dispatchSelectWorkspacePaneTabByIdentityAction,
   dispatchSelectWorkspacePaneTabByIndexAction,
 } from '#/web/workspace-pane/workspace-pane-tab-select-action.ts'
 import type { TerminalCreateTranslator } from '#/web/components/terminal/terminal-create-feedback.ts'
-import type { WorkspacePaneFilesystemTarget } from '#/web/workspace-pane/workspace-pane-filesystem-target.ts'
 import { isWorkspacePaneStaticTabProvider, workspacePaneTabProvider } from '#/web/workspace-pane/tab-providers.ts'
 import { workspacePaneActionOutcomeHandled } from '#/web/workspace-pane/workspace-pane-action-outcome.ts'
 import {
@@ -31,6 +29,8 @@ import {
   workspacePaneCommandCoordinates,
   workspacePaneCommandPaneTarget,
   workspacePaneCommandRouteTarget,
+  workspacePaneCommandRuntimeId,
+  workspacePaneCommandTargetHasFilesystem,
   workspacePaneCommandWorktreeHead,
   type WorkspacePaneCommandTarget,
 } from '#/web/workspace-pane/workspace-pane-command-target.ts'
@@ -126,13 +126,14 @@ async function showWorkspacePaneTabCommand({
   navigation,
 }: ShowWorkspacePaneTabCommandOptions): Promise<boolean> {
   if (!workspaceId) return false
-  const { branchName, filesystemTarget, workspacePaneRoute } = workspacePaneCommandCoordinates(target)
+  const { branchName, workspacePaneRoute } = workspacePaneCommandCoordinates(target)
   const provider = workspacePaneTabProvider(tab)
   if (isWorkspacePaneStaticTabProvider(provider)) {
     const outcome = await dispatchOpenWorkspacePaneTargetStaticTabAction({
       workspaceId,
+      workspaceRuntimeId: workspacePaneCommandRuntimeId(target),
       routeTarget: workspacePaneCommandRouteTarget(target),
-      paneTarget: workspacePaneCommandPaneTarget(workspaceId, target),
+      paneTarget: workspacePaneCommandPaneTarget(target),
       worktreeHead: workspacePaneCommandWorktreeHead(target),
       type: provider.type,
       workspacePaneRoute,
@@ -159,39 +160,25 @@ async function showWorkspacePaneTabCommand({
 }
 
 export async function runTerminalPrimaryActionCommand(options: TerminalPrimaryActionCommandOptions): Promise<boolean> {
-  const coordinates = workspacePaneCommandCoordinates(options.target)
-  return coordinates.filesystemTarget
-    ? await dispatchTerminalRuntimePrimaryAction({
-        ...options,
-        ...coordinates,
-        filesystemTarget: coordinates.filesystemTarget,
-      })
-    : coordinates.branchName
-      ? await dispatchTerminalRuntimePrimaryAction({
-          ...options,
-          ...coordinates,
-          branchName: coordinates.branchName,
-          filesystemTarget: null,
-        })
-      : false
+  const target = options.target
+  if (!workspacePaneCommandTargetHasFilesystem(target)) return false
+  return await dispatchTerminalRuntimePrimaryAction({
+    target,
+    currentWorkspaceId: options.workspaceId,
+    navigation: options.navigation,
+    t: options.t,
+  })
 }
 
 export async function runNewTerminalTabCommand(options: NewTerminalTabCommandOptions): Promise<boolean> {
-  const coordinates = workspacePaneCommandCoordinates(options.target)
-  return coordinates.filesystemTarget
-    ? await dispatchNewTerminalRuntimeTabAction({
-        ...options,
-        ...coordinates,
-        filesystemTarget: coordinates.filesystemTarget,
-      })
-    : coordinates.branchName
-      ? await dispatchNewTerminalRuntimeTabAction({
-          ...options,
-          ...coordinates,
-          branchName: coordinates.branchName,
-          filesystemTarget: null,
-        })
-      : false
+  const target = options.target
+  if (!workspacePaneCommandTargetHasFilesystem(target)) return false
+  return await dispatchNewTerminalRuntimeTabAction({
+    target,
+    currentWorkspaceId: options.workspaceId,
+    navigation: options.navigation,
+    t: options.t,
+  })
 }
 
 export async function runCloseWorkspacePaneTabCommand(options: CloseWorkspacePaneTabCommandOptions): Promise<boolean> {
@@ -203,9 +190,10 @@ export async function runCloseWorkspacePaneTabCommand(options: CloseWorkspacePan
   try {
     return dispatchCloseWorkspacePaneTabAction({
       ...options,
+      workspaceRuntimeId: workspacePaneCommandRuntimeId(options.target),
       ...workspacePaneCommandCoordinates(options.target),
       routeTarget: workspacePaneCommandRouteTarget(options.target),
-      paneTarget: workspacePaneCommandPaneTarget(options.workspaceId, options.target),
+      paneTarget: workspacePaneCommandPaneTarget(options.target),
       worktreeHead: workspacePaneCommandWorktreeHead(options.target),
     })
   } catch (error) {
@@ -225,9 +213,10 @@ export async function runCloseCurrentWorkspacePaneTabCommand(
   try {
     return dispatchCloseCurrentWorkspacePaneTabAction({
       ...options,
+      workspaceRuntimeId: workspacePaneCommandRuntimeId(options.target),
       ...workspacePaneCommandCoordinates(options.target),
       routeTarget: workspacePaneCommandRouteTarget(options.target),
-      paneTarget: workspacePaneCommandPaneTarget(options.workspaceId, options.target),
+      paneTarget: workspacePaneCommandPaneTarget(options.target),
       worktreeHead: workspacePaneCommandWorktreeHead(options.target),
     })
   } catch (error) {
@@ -248,11 +237,9 @@ export async function runConfirmCloseTerminalWorkspacePaneTabCommand(
     }
     return dispatchConfirmCloseTerminalWorkspacePaneTabAction({
       ...options,
+      workspaceRuntimeId: options.confirmedTerminal.base.target.workspaceRuntimeId,
       paneTarget,
-      worktreeHead:
-        options.confirmedTerminal.base.presentation.kind === 'git-worktree'
-          ? options.confirmedTerminal.base.presentation.head
-          : undefined,
+      worktreeHead: undefined,
     })
   } catch (error) {
     presentationEffects?.onAbandon()
@@ -263,12 +250,14 @@ export async function runConfirmCloseTerminalWorkspacePaneTabCommand(
 export function runRetiredTerminalWorkspacePaneTabPresentationCommand(
   options: RetiredTerminalWorkspacePaneTabPresentationCommandOptions,
 ): Promise<boolean> {
+  const routeTarget = workspacePaneCommandRouteTarget(options.target)
   return dispatchRetiredTerminalWorkspacePaneTabPresentationAction({
     ...options,
-    workspaceId: options.target.routeTarget.workspaceId,
+    workspaceRuntimeId: workspacePaneCommandRuntimeId(options.target),
+    workspaceId: routeTarget.workspaceId,
     ...workspacePaneCommandCoordinates(options.target),
-    routeTarget: workspacePaneCommandRouteTarget(options.target),
-    paneTarget: workspacePaneCommandPaneTarget(options.target.routeTarget.workspaceId, options.target),
+    routeTarget,
+    paneTarget: workspacePaneCommandPaneTarget(options.target),
     worktreeHead: workspacePaneCommandWorktreeHead(options.target),
   })
 }
@@ -279,8 +268,9 @@ export async function runSelectWorkspacePaneTabByIndexCommand(
   if (!options.workspaceId) return false
   return await dispatchSelectWorkspacePaneTabByIndexAction({
     ...options,
+    workspaceRuntimeId: workspacePaneCommandRuntimeId(options.target),
     routeTarget: workspacePaneCommandRouteTarget(options.target),
-    paneTarget: workspacePaneCommandPaneTarget(options.workspaceId, options.target),
+    paneTarget: workspacePaneCommandPaneTarget(options.target),
     worktreeHead: workspacePaneCommandWorktreeHead(options.target),
     workspacePaneRoute: options.target.workspacePaneRoute,
   })
@@ -290,8 +280,9 @@ export async function runMoveWorkspacePaneTabCommand(options: MoveWorkspacePaneT
   if (!options.workspaceId) return false
   return await dispatchMoveWorkspacePaneTabAction({
     ...options,
+    workspaceRuntimeId: workspacePaneCommandRuntimeId(options.target),
     routeTarget: workspacePaneCommandRouteTarget(options.target),
-    paneTarget: workspacePaneCommandPaneTarget(options.workspaceId, options.target),
+    paneTarget: workspacePaneCommandPaneTarget(options.target),
     worktreeHead: workspacePaneCommandWorktreeHead(options.target),
     workspacePaneRoute: options.target.workspacePaneRoute,
   })

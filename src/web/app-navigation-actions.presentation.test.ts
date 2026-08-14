@@ -1,30 +1,43 @@
-import { seedRepoWithReadModelForTest, createRepoBranch } from '#/web/test-utils/repo-store.ts'
+import {
+  seedRepoWithReadModelForTest,
+  createRepoBranch,
+  createRepoWorktreeSnapshotForTest,
+} from '#/web/test-utils/repo-store.ts'
 import { beforeEach, describe, expect, test, vi } from 'vitest'
 import { formatTerminalFilesystemTargetKeyForPath } from '#/shared/terminal-filesystem-target-key.ts'
 import type { WorkspaceId } from '#/shared/workspace-locator.ts'
-import { setTerminalSessionCommandBridge } from '#/web/components/terminal/terminal-session-command-bridge.ts'
 import { workspacesStore } from '#/web/stores/workspaces/store.ts'
 import { replaceWorkspace } from '#/web/stores/workspaces/workspace-state-factory.ts'
 import type { WorkspaceNavigationHistoryEntry } from '#/web/stores/workspaces/types.ts'
-import { workspacePaneStaticTabEntry } from '#/shared/workspace-pane.ts'
+import { workspacePaneRuntimeTabEntry, workspacePaneStaticTabEntry } from '#/shared/workspace-pane.ts'
 import { preferredWorkspacePaneTabForTarget } from '#/web/stores/workspaces/workspace-pane-preferences.ts'
 import { appQueryClient } from '#/web/app-query-client.ts'
-import { setRepoWorktreeStatusQueryData } from '#/web/repo-query-cache.ts'
+import {
+  getRepoSnapshotQueryData,
+  setRepoSnapshotQueryData,
+  setRepoWorktreeStatusQueryData,
+} from '#/web/repo-query-cache.ts'
 import { workspacePaneTabsQueryKey } from '#/web/workspace-pane/workspace-pane-tabs-query.ts'
+import { repoSnapshotQueryKey } from '#/web/repo-query-keys.ts'
 import {
   REPO_ID,
   OTHER_WORKSPACE_ID,
   BRANCH_NAME,
   presentationOptions,
   WORKTREE_PATH,
-  WORKTREE_KEY,
   setupAppNavigationActionsTests,
   preferredWorkspacePaneTab,
   createAppNavigationActions,
   markRepoGitUnavailable,
   routeNavigation,
   createPendingWorktreeSnapshot,
+  installTerminalSessionCommandBridgeForTest,
+  worktreeSnapshotForSessions,
+  WORKTREE_KEY,
+  branchSelectionLease,
+  worktreeSelectionLease,
 } from '#/web/app-navigation-actions.test-utils.ts'
+import { currentAppNavigationGeneration } from '#/web/app-navigation-lifecycle.ts'
 
 beforeEach(setupAppNavigationActionsTests)
 
@@ -94,6 +107,71 @@ describe('createAppNavigationActions presentation', () => {
     },
   )
 
+  test('falls back to Dashboard when the saved worktree target no longer exists', () => {
+    seedRepoWithReadModelForTest({
+      id: REPO_ID,
+      branches: [createRepoBranch(BRANCH_NAME)],
+      worktrees: [],
+      currentBranchName: BRANCH_NAME,
+    })
+    workspacesStore.getState().recordWorkspaceNavigation({
+      workspaceId: REPO_ID,
+      route: {
+        kind: 'worktree',
+        worktreePath: WORKTREE_PATH,
+        workspacePaneTab: 'files',
+        terminalSessionId: null,
+      },
+    })
+    const navigation = routeNavigation()
+    const actions = createAppNavigationActions({
+      currentWorkspaceId: OTHER_WORKSPACE_ID,
+      workspaceOrder: [OTHER_WORKSPACE_ID, REPO_ID],
+      closeWorkspace: vi.fn(),
+      routeNavigation: navigation,
+    })
+
+    actions.activateWorkspace(REPO_ID)
+
+    expect(navigation.openWorkspaceDashboard).toHaveBeenCalledWith(REPO_ID, presentationOptions())
+    expect(navigation.openRepoWorktreeTab).not.toHaveBeenCalled()
+  })
+
+  test('falls back to Dashboard when a saved worktree snapshot is unavailable', () => {
+    seedRepoWithReadModelForTest({
+      id: REPO_ID,
+      branches: [createRepoBranch(BRANCH_NAME)],
+      worktrees: [createRepoWorktreeSnapshotForTest(BRANCH_NAME, WORKTREE_PATH)],
+      currentBranchName: BRANCH_NAME,
+    })
+    workspacesStore.getState().recordWorkspaceNavigation({
+      workspaceId: REPO_ID,
+      route: {
+        kind: 'worktree',
+        worktreePath: WORKTREE_PATH,
+        workspacePaneTab: 'files',
+        terminalSessionId: null,
+      },
+    })
+    const workspace = workspacesStore.getState().workspaces[REPO_ID]
+    if (!workspace) throw new Error('missing test workspace')
+    appQueryClient.removeQueries({ queryKey: repoSnapshotQueryKey(REPO_ID, workspace.workspaceRuntimeId) })
+    const navigation = routeNavigation()
+    const actions = createAppNavigationActions({
+      currentWorkspaceId: OTHER_WORKSPACE_ID,
+      workspaceOrder: [OTHER_WORKSPACE_ID, REPO_ID],
+      closeWorkspace: vi.fn(),
+      routeNavigation: navigation,
+    })
+
+    actions.activateWorkspace(REPO_ID)
+
+    expect(navigation.openWorkspaceDashboard).toHaveBeenCalledWith(REPO_ID, presentationOptions())
+    expect(navigation.openRepoWorktree).not.toHaveBeenCalled()
+    expect(navigation.openRepoWorktreeTab).not.toHaveBeenCalled()
+    expect(navigation.openRepoWorktreeTerminal).not.toHaveBeenCalled()
+  })
+
   test('commits a filesystem route only while its workspace runtime remains current', async () => {
     const repo = seedRepoWithReadModelForTest({ id: REPO_ID, branches: [], currentBranchName: null })
     const routeCommit = Promise.withResolvers<boolean>()
@@ -114,7 +192,6 @@ describe('createAppNavigationActions presentation', () => {
       {
         routeTarget: { kind: 'workspace-root', workspaceId: REPO_ID },
         workspaceRuntimeId: repo.workspaceRuntimeId,
-        authority: { kind: 'workspace-runtime' },
       },
       { kind: 'static', tab: 'files' },
       { onAbandon },
@@ -139,12 +216,41 @@ describe('createAppNavigationActions presentation', () => {
     ).toBe(previousPreference)
   })
 
+  test('rejects an invalid filesystem commit lease before starting navigation', async () => {
+    seedRepoWithReadModelForTest({
+      id: REPO_ID,
+      branches: [createRepoBranch(BRANCH_NAME)],
+      worktrees: [],
+      currentBranchName: BRANCH_NAME,
+    })
+    const navigation = routeNavigation()
+    navigation.commitFilesystemWorkspacePaneRoute = vi.fn(async () => true)
+    const actions = createAppNavigationActions({
+      currentWorkspaceId: REPO_ID,
+      workspaceOrder: [REPO_ID],
+      closeWorkspace: vi.fn(),
+      routeNavigation: navigation,
+    })
+    const onAbandon = vi.fn()
+    const generation = currentAppNavigationGeneration()
+
+    await expect(
+      actions.commitFilesystemWorkspacePaneRoute(
+        worktreeSelectionLease(),
+        { kind: 'static', tab: 'files' },
+        { onAbandon },
+      ),
+    ).resolves.toBe(false)
+    expect(currentAppNavigationGeneration()).toBe(generation)
+    expect(onAbandon).toHaveBeenCalledOnce()
+    expect(navigation.commitFilesystemWorkspacePaneRoute).not.toHaveBeenCalled()
+  })
+
   test('abandons a committed worktree route when the authoritative worktree disappears', async () => {
     const repo = seedRepoWithReadModelForTest({
       id: REPO_ID,
-      branches: [
-        createRepoBranch('feature/worktree', { worktree: { path: WORKTREE_PATH, isPrimary: false, isLocked: false } }),
-      ],
+      branches: [createRepoBranch('feature/worktree')],
+      worktrees: [createRepoWorktreeSnapshotForTest('feature/worktree', WORKTREE_PATH)],
       status: [{ path: WORKTREE_PATH, branch: 'feature/worktree', isMain: false, entries: [] }],
       currentBranchName: 'feature/worktree',
     })
@@ -162,16 +268,13 @@ describe('createAppNavigationActions presentation', () => {
       {
         routeTarget: { kind: 'git-worktree', workspaceId: REPO_ID, worktreePath: WORKTREE_PATH },
         workspaceRuntimeId: repo.workspaceRuntimeId,
-        authority: { kind: 'branch', branchName: 'feature/worktree' },
       },
       { kind: 'static', tab: 'files' },
       { onAbandon },
     )
-    setRepoWorktreeStatusQueryData(REPO_ID, repo.workspaceRuntimeId, {
-      workspaceRuntimeId: repo.workspaceRuntimeId,
-      loadedAt: 2,
-      status: [],
-    })
+    const snapshot = getRepoSnapshotQueryData(REPO_ID, repo.workspaceRuntimeId)
+    if (!snapshot) throw new Error('expected seeded snapshot')
+    setRepoSnapshotQueryData(REPO_ID, repo.workspaceRuntimeId, { ...snapshot, worktrees: [] })
     routeCommit.resolve(true)
 
     await expect(commit).resolves.toBe(false)
@@ -198,7 +301,6 @@ describe('createAppNavigationActions presentation', () => {
         {
           routeTarget: { kind: 'workspace-root', workspaceId: REPO_ID },
           workspaceRuntimeId: repo.workspaceRuntimeId,
-          authority: { kind: 'workspace-runtime' },
         },
         { kind: 'static', tab: 'files' },
         { onAbandon },
@@ -303,8 +405,6 @@ describe('createAppNavigationActions presentation', () => {
       kind: 'branch',
       branchName: 'feature/stale',
       workspacePaneTab: null,
-      terminalFilesystemTargetKey: null,
-      terminalSessionId: null,
     },
     {
       kind: 'worktree',
@@ -343,9 +443,8 @@ describe('createAppNavigationActions presentation', () => {
   test('selects branches by resolving the branch workspace pane route', () => {
     seedRepoWithReadModelForTest({
       id: REPO_ID,
-      branches: [
-        createRepoBranch(BRANCH_NAME, { worktree: { path: WORKTREE_PATH, isPrimary: false, isLocked: false } }),
-      ],
+      branches: [createRepoBranch(BRANCH_NAME)],
+      worktrees: [createRepoWorktreeSnapshotForTest(BRANCH_NAME, WORKTREE_PATH)],
       currentBranchName: BRANCH_NAME,
       preferredWorkspacePaneTab: 'status',
       workspacePaneTabsByBranch: {
@@ -360,7 +459,7 @@ describe('createAppNavigationActions presentation', () => {
       routeNavigation: navigation,
     })
 
-    actions.selectRepoBranch(REPO_ID, BRANCH_NAME, { replace: true })
+    actions.selectRepoBranch(branchSelectionLease(), { replace: true })
 
     expect(navigation.openRepoBranchTab).toHaveBeenCalledWith(
       REPO_ID,
@@ -371,12 +470,179 @@ describe('createAppNavigationActions presentation', () => {
     expect(navigation.openRepoBranch).not.toHaveBeenCalled()
   })
 
+  test('selects an admitted worktree without rebuilding its target from coordinates', () => {
+    seedRepoWithReadModelForTest({
+      id: REPO_ID,
+      branches: [createRepoBranch(BRANCH_NAME)],
+      worktrees: [createRepoWorktreeSnapshotForTest(BRANCH_NAME, WORKTREE_PATH)],
+      currentBranchName: BRANCH_NAME,
+    })
+    const navigation = routeNavigation()
+    const actions = createAppNavigationActions({
+      currentWorkspaceId: REPO_ID,
+      workspaceOrder: [REPO_ID],
+      closeWorkspace: vi.fn(),
+      routeNavigation: navigation,
+    })
+
+    expect(actions.selectRepoWorktree(worktreeSelectionLease(), { replace: true })).toBe(true)
+    expect(navigation.openRepoWorktree).toHaveBeenCalledWith(
+      REPO_ID,
+      WORKTREE_PATH,
+      presentationOptions({ replace: true }),
+    )
+  })
+
+  test('rejects a worktree selection owned by a replaced workspace runtime before starting navigation', () => {
+    const repo = seedRepoWithReadModelForTest({
+      id: REPO_ID,
+      branches: [createRepoBranch(BRANCH_NAME)],
+      worktrees: [createRepoWorktreeSnapshotForTest(BRANCH_NAME, WORKTREE_PATH)],
+      currentBranchName: BRANCH_NAME,
+    })
+    const target = worktreeSelectionLease()
+    workspacesStore.setState((state) => ({
+      workspaces: {
+        ...state.workspaces,
+        [REPO_ID]: replaceWorkspace(repo, (draft) => {
+          draft.workspaceRuntimeId = 'replacement-runtime'
+        }),
+      },
+    }))
+    const navigation = routeNavigation()
+    const actions = createAppNavigationActions({
+      currentWorkspaceId: REPO_ID,
+      workspaceOrder: [REPO_ID],
+      closeWorkspace: vi.fn(),
+      routeNavigation: navigation,
+    })
+    const generation = currentAppNavigationGeneration()
+
+    expect(actions.selectRepoWorktree(target)).toBe(false)
+    expect(currentAppNavigationGeneration()).toBe(generation)
+    expect(navigation.openRepoWorktree).not.toHaveBeenCalled()
+  })
+
+  test('rejects a worktree selection missing from the current snapshot before starting navigation', () => {
+    seedRepoWithReadModelForTest({
+      id: REPO_ID,
+      branches: [createRepoBranch(BRANCH_NAME)],
+      worktrees: [],
+      currentBranchName: BRANCH_NAME,
+    })
+    const navigation = routeNavigation()
+    const actions = createAppNavigationActions({
+      currentWorkspaceId: REPO_ID,
+      workspaceOrder: [REPO_ID],
+      closeWorkspace: vi.fn(),
+      routeNavigation: navigation,
+    })
+    const generation = currentAppNavigationGeneration()
+
+    expect(actions.selectRepoWorktree(worktreeSelectionLease())).toBe(false)
+    expect(currentAppNavigationGeneration()).toBe(generation)
+    expect(navigation.openRepoWorktree).not.toHaveBeenCalled()
+  })
+
+  test('rejects a stale branch selection before starting navigation', () => {
+    const repo = seedRepoWithReadModelForTest({
+      id: REPO_ID,
+      branches: [createRepoBranch(BRANCH_NAME)],
+      currentBranchName: BRANCH_NAME,
+    })
+    const staleTarget = branchSelectionLease()
+    workspacesStore.setState((state) => ({
+      workspaces: {
+        ...state.workspaces,
+        [REPO_ID]: replaceWorkspace(repo, (draft) => {
+          draft.workspaceRuntimeId = 'replacement-runtime'
+        }),
+      },
+    }))
+    const navigation = routeNavigation()
+    const actions = createAppNavigationActions({
+      currentWorkspaceId: REPO_ID,
+      workspaceOrder: [REPO_ID],
+      closeWorkspace: vi.fn(),
+      routeNavigation: navigation,
+    })
+    const generation = currentAppNavigationGeneration()
+
+    expect(actions.selectRepoBranch(staleTarget)).toBe(false)
+    expect(currentAppNavigationGeneration()).toBe(generation)
+    expect(navigation.openRepoBranch).not.toHaveBeenCalled()
+    expect(navigation.openRepoBranchTab).not.toHaveBeenCalled()
+    expect(navigation.openRepoWorktreeTerminal).not.toHaveBeenCalled()
+  })
+
+  test('rejects a missing branch selection before starting navigation', () => {
+    seedRepoWithReadModelForTest({
+      id: REPO_ID,
+      branches: [createRepoBranch(BRANCH_NAME)],
+      currentBranchName: BRANCH_NAME,
+    })
+    const navigation = routeNavigation()
+    const actions = createAppNavigationActions({
+      currentWorkspaceId: REPO_ID,
+      workspaceOrder: [REPO_ID],
+      closeWorkspace: vi.fn(),
+      routeNavigation: navigation,
+    })
+    const generation = currentAppNavigationGeneration()
+
+    expect(actions.selectRepoBranch(branchSelectionLease('feature/missing'))).toBe(false)
+    expect(currentAppNavigationGeneration()).toBe(generation)
+    expect(navigation.openRepoBranch).not.toHaveBeenCalled()
+    expect(navigation.openRepoBranchTab).not.toHaveBeenCalled()
+    expect(navigation.openRepoWorktreeTerminal).not.toHaveBeenCalled()
+  })
+
+  test('selects a materialized branch through its active worktree terminal route', () => {
+    const terminalSessionId = 'term-111111111111111111111'
+    seedRepoWithReadModelForTest({
+      id: REPO_ID,
+      branches: [createRepoBranch(BRANCH_NAME)],
+      worktrees: [createRepoWorktreeSnapshotForTest(BRANCH_NAME, WORKTREE_PATH)],
+      currentBranchName: BRANCH_NAME,
+      preferredWorkspacePaneTab: 'terminal',
+      workspacePaneTabsByBranch: {
+        [BRANCH_NAME]: [workspacePaneRuntimeTabEntry('terminal', terminalSessionId)],
+      },
+    })
+    workspacesStore.getState().setSelectedTerminal(WORKTREE_KEY, terminalSessionId)
+    const terminalFilesystemTargetSnapshot = installTerminalSessionCommandBridgeForTest(
+      worktreeSnapshotForSessions([terminalSessionId]),
+    )
+    const navigation = routeNavigation()
+    navigation.openRepoWorktreeTerminal = vi.fn((_repoId, _worktreePath, _terminalSessionId, options) => {
+      options?.onCommit?.()
+      return true
+    })
+    const actions = createAppNavigationActions({
+      currentWorkspaceId: REPO_ID,
+      workspaceOrder: [REPO_ID],
+      closeWorkspace: vi.fn(),
+      routeNavigation: navigation,
+    })
+
+    actions.selectRepoBranch(branchSelectionLease(), { replace: true })
+
+    expect(navigation.openRepoWorktreeTerminal).toHaveBeenCalledWith(
+      REPO_ID,
+      WORKTREE_PATH,
+      terminalSessionId,
+      presentationOptions({ replace: true }),
+    )
+    expect(navigation.openRepoBranch).not.toHaveBeenCalled()
+    expect(navigation.openRepoBranchTab).not.toHaveBeenCalled()
+    expect(terminalFilesystemTargetSnapshot).toHaveBeenCalledWith(WORKTREE_KEY)
+  })
+
   test('opens the branch root while workspace pane tabs are still loading', () => {
     seedRepoWithReadModelForTest({
       id: REPO_ID,
-      branches: [
-        createRepoBranch(BRANCH_NAME, { worktree: { path: WORKTREE_PATH, isPrimary: false, isLocked: false } }),
-      ],
+      branches: [createRepoBranch(BRANCH_NAME)],
+      worktrees: [createRepoWorktreeSnapshotForTest(BRANCH_NAME, WORKTREE_PATH)],
       currentBranchName: BRANCH_NAME,
       preferredWorkspacePaneTab: 'status',
     })
@@ -388,19 +654,17 @@ describe('createAppNavigationActions presentation', () => {
       routeNavigation: navigation,
     })
 
-    actions.selectRepoBranch(REPO_ID, BRANCH_NAME, { replace: true })
+    actions.selectRepoBranch(branchSelectionLease(), { replace: true })
 
     expect(navigation.openRepoBranch).toHaveBeenCalledWith(REPO_ID, BRANCH_NAME, presentationOptions({ replace: true }))
     expect(navigation.openRepoBranchTab).not.toHaveBeenCalled()
-    expect(navigation.openRepoBranchTerminal).not.toHaveBeenCalled()
   })
 
   test('opens the branch root when workspace pane tab restoration failed', async () => {
     const repo = seedRepoWithReadModelForTest({
       id: REPO_ID,
-      branches: [
-        createRepoBranch(BRANCH_NAME, { worktree: { path: WORKTREE_PATH, isPrimary: false, isLocked: false } }),
-      ],
+      branches: [createRepoBranch(BRANCH_NAME)],
+      worktrees: [createRepoWorktreeSnapshotForTest(BRANCH_NAME, WORKTREE_PATH)],
       currentBranchName: BRANCH_NAME,
       preferredWorkspacePaneTab: 'status',
     })
@@ -422,19 +686,17 @@ describe('createAppNavigationActions presentation', () => {
       routeNavigation: navigation,
     })
 
-    actions.selectRepoBranch(REPO_ID, BRANCH_NAME)
+    actions.selectRepoBranch(branchSelectionLease())
 
     expect(navigation.openRepoBranch).toHaveBeenCalledWith(REPO_ID, BRANCH_NAME, presentationOptions())
     expect(navigation.openRepoBranchTab).not.toHaveBeenCalled()
-    expect(navigation.openRepoBranchTerminal).not.toHaveBeenCalled()
   })
 
   test('selects branches by falling back when the preferred workspace pane tab is stale', () => {
     seedRepoWithReadModelForTest({
       id: REPO_ID,
-      branches: [
-        createRepoBranch(BRANCH_NAME, { worktree: { path: WORKTREE_PATH, isPrimary: false, isLocked: false } }),
-      ],
+      branches: [createRepoBranch(BRANCH_NAME)],
+      worktrees: [createRepoWorktreeSnapshotForTest(BRANCH_NAME, WORKTREE_PATH)],
       currentBranchName: BRANCH_NAME,
       preferredWorkspacePaneTab: 'history',
       workspacePaneTabsByBranch: {
@@ -449,7 +711,7 @@ describe('createAppNavigationActions presentation', () => {
       routeNavigation: navigation,
     })
 
-    actions.selectRepoBranch(REPO_ID, BRANCH_NAME)
+    actions.selectRepoBranch(branchSelectionLease())
 
     expect(navigation.openRepoBranchTab).toHaveBeenCalledWith(REPO_ID, BRANCH_NAME, 'status', presentationOptions())
     expect(navigation.openRepoBranch).not.toHaveBeenCalled()
@@ -458,9 +720,8 @@ describe('createAppNavigationActions presentation', () => {
   test('selects branches with an intentional empty workspace pane route', () => {
     seedRepoWithReadModelForTest({
       id: REPO_ID,
-      branches: [
-        createRepoBranch(BRANCH_NAME, { worktree: { path: WORKTREE_PATH, isPrimary: false, isLocked: false } }),
-      ],
+      branches: [createRepoBranch(BRANCH_NAME)],
+      worktrees: [createRepoWorktreeSnapshotForTest(BRANCH_NAME, WORKTREE_PATH)],
       currentBranchName: BRANCH_NAME,
       preferredWorkspacePaneTab: null,
       workspacePaneTabsByBranch: {
@@ -475,65 +736,17 @@ describe('createAppNavigationActions presentation', () => {
       routeNavigation: navigation,
     })
 
-    actions.selectRepoBranch(REPO_ID, BRANCH_NAME)
+    actions.selectRepoBranch(branchSelectionLease())
 
     expect(navigation.openRepoBranch).toHaveBeenCalledWith(REPO_ID, BRANCH_NAME, presentationOptions())
     expect(navigation.openRepoBranchTab).not.toHaveBeenCalled()
-    expect(navigation.openRepoBranchTerminal).not.toHaveBeenCalled()
-  })
-
-  test('keeps command-owned route commits free of workspace pane supplements', async () => {
-    seedRepoWithReadModelForTest({
-      id: REPO_ID,
-      branches: [
-        createRepoBranch(BRANCH_NAME, { worktree: { path: WORKTREE_PATH, isPrimary: false, isLocked: false } }),
-      ],
-      currentBranchName: BRANCH_NAME,
-      preferredWorkspacePaneTab: 'status',
-    })
-    setTerminalSessionCommandBridge({
-      terminalFilesystemTargetSnapshot: () => createPendingWorktreeSnapshot(),
-      createTerminal: vi.fn(async () => 'term-111111111111111111111'),
-      createTerminalWithAdmission: vi.fn(async () => {
-        throw new Error('unexpected terminal creation')
-      }),
-      selectTerminal: vi.fn(),
-      focusTerminal: vi.fn(() => false),
-      closeTerminalByDescriptor: vi.fn(async () => ({ kind: 'not-committed' as const, message: null })),
-    })
-    const navigation = routeNavigation()
-    navigation.commitWorkspacePaneRoute = vi.fn(async (workspaceId, branchName, route, options) => {
-      if (route?.kind !== 'terminal') return false
-      return navigation.openRepoBranchTerminal(workspaceId, branchName, route.terminalSessionId, options)
-    })
-    const actions = createAppNavigationActions({
-      currentWorkspaceId: REPO_ID,
-      workspaceOrder: [REPO_ID],
-      closeWorkspace: vi.fn(),
-      routeNavigation: navigation,
-    })
-
-    const accepted = await actions.commitWorkspacePaneRoute(REPO_ID, BRANCH_NAME, {
-      kind: 'terminal',
-      terminalSessionId: 'term-111111111111111111111',
-    })
-
-    expect(accepted).toBe(true)
-    expect(navigation.openRepoBranchTerminal).toHaveBeenCalledWith(
-      REPO_ID,
-      BRANCH_NAME,
-      'term-111111111111111111111',
-      presentationOptions(),
-    )
-    expect(preferredWorkspacePaneTab()).toBe('status')
   })
 
   test('does not commit route supplements when operation-owned navigation settles', async () => {
     seedRepoWithReadModelForTest({
       id: REPO_ID,
-      branches: [
-        createRepoBranch(BRANCH_NAME, { worktree: { path: WORKTREE_PATH, isPrimary: false, isLocked: false } }),
-      ],
+      branches: [createRepoBranch(BRANCH_NAME)],
+      worktrees: [createRepoWorktreeSnapshotForTest(BRANCH_NAME, WORKTREE_PATH)],
       currentBranchName: BRANCH_NAME,
       preferredWorkspacePaneTab: 'status',
       workspacePaneTabsByBranch: {
@@ -564,9 +777,8 @@ describe('createAppNavigationActions presentation', () => {
   test('forwards operation abandonment to the route owner', async () => {
     seedRepoWithReadModelForTest({
       id: REPO_ID,
-      branches: [
-        createRepoBranch(BRANCH_NAME, { worktree: { path: WORKTREE_PATH, isPrimary: false, isLocked: false } }),
-      ],
+      branches: [createRepoBranch(BRANCH_NAME)],
+      worktrees: [createRepoWorktreeSnapshotForTest(BRANCH_NAME, WORKTREE_PATH)],
       currentBranchName: BRANCH_NAME,
     })
     const navigation = routeNavigation()
@@ -589,9 +801,8 @@ describe('createAppNavigationActions presentation', () => {
   test('blocks workspace history restore before mutating history while terminal creation is pending', async () => {
     seedRepoWithReadModelForTest({
       id: REPO_ID,
-      branches: [
-        createRepoBranch(BRANCH_NAME, { worktree: { path: WORKTREE_PATH, isPrimary: false, isLocked: false } }),
-      ],
+      branches: [createRepoBranch(BRANCH_NAME)],
+      worktrees: [createRepoWorktreeSnapshotForTest(BRANCH_NAME, WORKTREE_PATH)],
       currentBranchName: BRANCH_NAME,
       preferredWorkspacePaneTab: 'status',
     })
@@ -599,28 +810,18 @@ describe('createAppNavigationActions presentation', () => {
       workspaceId: REPO_ID,
       route: { kind: 'dashboard' },
     } satisfies WorkspaceNavigationHistoryEntry
-    const branch = {
+    const worktree = {
       workspaceId: REPO_ID,
       route: {
-        kind: 'branch',
-        branchName: BRANCH_NAME,
+        kind: 'worktree',
+        worktreePath: WORKTREE_PATH,
         workspacePaneTab: 'status',
-        terminalFilesystemTargetKey: WORKTREE_KEY,
         terminalSessionId: null,
       },
     } satisfies WorkspaceNavigationHistoryEntry
     workspacesStore.getState().recordWorkspaceNavigation(dashboard)
-    workspacesStore.getState().recordWorkspaceNavigation(branch)
-    setTerminalSessionCommandBridge({
-      terminalFilesystemTargetSnapshot: () => createPendingWorktreeSnapshot(),
-      createTerminal: vi.fn(async () => 'term-111111111111111111111'),
-      createTerminalWithAdmission: vi.fn(async () => {
-        throw new Error('unexpected terminal creation')
-      }),
-      selectTerminal: vi.fn(),
-      focusTerminal: vi.fn(() => false),
-      closeTerminalByDescriptor: vi.fn(async () => ({ kind: 'not-committed' as const, message: null })),
-    })
+    workspacesStore.getState().recordWorkspaceNavigation(worktree)
+    installTerminalSessionCommandBridgeForTest(createPendingWorktreeSnapshot())
     const peekWorkspaceNavigation = vi.fn((workspaceId: WorkspaceId, direction: 'back' | 'forward') =>
       workspacesStore.getState().peekWorkspaceNavigation(workspaceId, direction),
     )
@@ -638,6 +839,6 @@ describe('createAppNavigationActions presentation', () => {
 
     expect(peekWorkspaceNavigation).not.toHaveBeenCalled()
     expect(navigation.openWorkspaceDashboard).not.toHaveBeenCalled()
-    expect(workspacesStore.getState().navigationHistoryByWorkspace[REPO_ID]?.current).toEqual(branch)
+    expect(workspacesStore.getState().navigationHistoryByWorkspace[REPO_ID]?.current).toEqual(worktree)
   })
 })

@@ -2,6 +2,13 @@ import * as v from 'valibot'
 import { WorkspaceIdSchema } from '#/shared/workspace-locator-schema.ts'
 import { ExecResultResponseSchema, WorktreeBootstrapSummaryResponseSchema } from '#/shared/http-response-schema.ts'
 import { RemoteTrackingBranchIdentitySchema } from '#/shared/worktree-create.ts'
+import { isSafeBranchName } from '#/shared/refnames.ts'
+import {
+  GIT_OBJECT_ID_OR_PREFIX_RE,
+  gitOperationRequiresDetachedHead,
+  hasUniqueRepoWorktreeMaterializedBranches,
+  isFullGitObjectId,
+} from '#/shared/git-types.ts'
 
 const StringArraySchema = v.array(v.string())
 const NullableNumberSchema = v.nullable(v.number())
@@ -12,8 +19,8 @@ export const CloneRepoResponseSchema = v.strictObject({
 })
 
 const LogEntrySchema = v.strictObject({
-  hash: v.string(),
-  shortHash: v.string(),
+  hash: v.pipe(v.string(), v.check(isFullGitObjectId, 'invalid Git object ID')),
+  shortHash: v.pipe(v.string(), v.regex(GIT_OBJECT_ID_OR_PREFIX_RE)),
   refs: v.string(),
   message: v.string(),
   author: v.string(),
@@ -44,25 +51,17 @@ const PullRequestSchema = v.strictObject({
   mergeable: v.optional(v.picklist(['MERGEABLE', 'CONFLICTING', 'UNKNOWN'])),
 })
 const BranchSnapshotSchema = v.strictObject({
-  name: v.string(),
-  isCurrent: v.boolean(),
+  name: v.pipe(v.string(), v.check(isSafeBranchName)),
   isDefault: v.optional(v.boolean()),
   tracking: v.optional(v.string()),
   trackingGone: v.optional(v.boolean()),
   ahead: v.number(),
   behind: v.number(),
-  lastCommitHash: v.string(),
-  lastCommitShortHash: v.string(),
+  lastCommitHash: v.pipe(v.string(), v.check(isFullGitObjectId, 'invalid Git object ID')),
+  lastCommitShortHash: v.pipe(v.string(), v.regex(GIT_OBJECT_ID_OR_PREFIX_RE)),
   lastCommitMessage: v.string(),
   lastCommitDate: v.string(),
   lastCommitAuthor: v.string(),
-  worktree: v.optional(
-    v.strictObject({
-      path: v.string(),
-      isPrimary: v.boolean(),
-      isLocked: v.boolean(),
-    }),
-  ),
   mergedToDefault: v.optional(v.boolean()),
 })
 const RepoRemoteInfoSchema = v.strictObject({
@@ -73,15 +72,65 @@ const RepoRemoteInfoSchema = v.strictObject({
   remoteProviders: v.record(v.string(), v.picklist(['github', 'gitlab', 'external'])),
   hasGitHubRemote: v.boolean(),
 })
-const RepoSnapshotSchema = v.strictObject({
+const GitHeadSchema = v.variant('kind', [
+  v.strictObject({ kind: v.literal('branch'), branchName: v.string() }),
+  v.strictObject({ kind: v.literal('detached') }),
+])
+const GitOperationSchema = v.variant('kind', [
+  v.strictObject({ kind: v.literal('rebase') }),
+  v.strictObject({ kind: v.literal('merge') }),
+  v.strictObject({ kind: v.literal('cherry-pick') }),
+  v.strictObject({ kind: v.literal('revert') }),
+  v.strictObject({ kind: v.literal('bisect') }),
+])
+const RepoSnapshotObjectSchema = v.strictObject({
   branches: v.array(BranchSnapshotSchema),
+  worktrees: v.array(
+    v.strictObject({
+      path: v.string(),
+      head: GitHeadSchema,
+      headOid: v.nullable(v.pipe(v.string(), v.check(isFullGitObjectId, 'invalid Git object ID'))),
+      operation: v.nullable(GitOperationSchema),
+      materializedBranch: v.nullable(v.string()),
+      isPrimary: v.boolean(),
+      isLocked: v.boolean(),
+    }),
+  ),
   current: v.string(),
-  currentHEAD: v.optional(v.string()),
   remote: RepoRemoteInfoSchema,
 })
+const RepoSnapshotSchema = v.pipe(
+  RepoSnapshotObjectSchema,
+  v.check(hasValidWorktreeProjection, 'invalid worktree projection'),
+)
 export const RepoSnapshotResponseSchema = v.strictObject({
   snapshot: RepoSnapshotSchema,
 })
+
+function hasValidWorktreeProjection(snapshot: v.InferOutput<typeof RepoSnapshotObjectSchema>): boolean {
+  if (snapshot.current !== '' && !isSafeBranchName(snapshot.current)) return false
+  if (!hasUniqueRepoWorktreeMaterializedBranches(snapshot.worktrees)) return false
+  if (snapshot.worktrees.filter((worktree) => worktree.isPrimary).length > 1) return false
+  if (new Set(snapshot.branches.map((branch) => branch.name)).size !== snapshot.branches.length) return false
+  const worktreePaths = new Set<string>()
+  const branchNames = new Set(snapshot.branches.map((branch) => branch.name))
+  return snapshot.worktrees.every((worktree) => {
+    if (worktreePaths.has(worktree.path)) return false
+    worktreePaths.add(worktree.path)
+    const branchName = worktree.materializedBranch
+    if (branchName !== null && !isSafeBranchName(branchName)) return false
+    if (worktree.headOid !== null && branchName !== null && !branchNames.has(branchName)) return false
+    if (worktree.head.kind === 'branch' && branchName !== worktree.head.branchName) return false
+    if (worktree.head.kind === 'branch' && gitOperationRequiresDetachedHead(worktree.operation)) return false
+    if (worktree.head.kind === 'detached' && worktree.operation === null && branchName !== null) return false
+    if (worktree.headOid === null) {
+      if (worktree.head.kind !== 'branch' || worktree.operation !== null) return false
+      const { branchName: unbornBranchName } = worktree.head
+      if (snapshot.branches.some((branch) => branch.name === unbornBranchName)) return false
+    }
+    return true
+  })
+}
 export const RepoPullRequestsResponseSchema = v.strictObject({
   pullRequests: v.nullable(v.array(v.strictObject({ branch: v.string(), pullRequest: PullRequestSchema }))),
 })

@@ -15,7 +15,11 @@ import {
   repoClientMocks,
   staticEntry,
 } from '#/web/test-utils/git-workspace-pane-content.tsx'
-import { seedRepoWithReadModelForTest, createBranchSnapshot } from '#/web/test-utils/repo-store.ts'
+import {
+  createRepoWorktreeSnapshotForTest,
+  seedRepoWithReadModelForTest,
+  createBranchSnapshot,
+} from '#/web/test-utils/repo-store.ts'
 import { screen, waitFor } from '@testing-library/vue'
 import { flushTestUpdates } from '#/test-utils/render.tsx'
 import { describe, expect, test, vi } from 'vitest'
@@ -36,10 +40,9 @@ describe('GitWorkspacePaneContent status-history', () => {
     const worktreePath = '/tmp/changes-worktree'
     const repo = seedRepoWithReadModelForTest({
       id: REPO_ID,
-      branchSnapshots: [
-        createBranchSnapshot('feature/changes', {
-          worktree: { path: worktreePath, isPrimary: false, isLocked: false },
-        }),
+      branchSnapshots: [createBranchSnapshot('feature/changes')],
+      worktrees: [
+        createRepoWorktreeSnapshotForTest('feature/changes', worktreePath, { isPrimary: false, isLocked: false }),
       ],
       currentBranchName: 'feature/changes',
       preferredWorkspacePaneTab: 'status',
@@ -115,10 +118,9 @@ describe('GitWorkspacePaneContent status-history', () => {
     const worktreePath = '/tmp/copy-success-worktree'
     const repo = seedRepoWithReadModelForTest({
       id: REPO_ID,
-      branchSnapshots: [
-        createBranchSnapshot('feature/copy-success', {
-          worktree: { path: worktreePath, isPrimary: false, isLocked: false },
-        }),
+      branchSnapshots: [createBranchSnapshot('feature/copy-success')],
+      worktrees: [
+        createRepoWorktreeSnapshotForTest('feature/copy-success', worktreePath, { isPrimary: false, isLocked: false }),
       ],
       currentBranchName: 'feature/copy-success',
       preferredWorkspacePaneTab: 'status',
@@ -181,10 +183,9 @@ describe('GitWorkspacePaneContent status-history', () => {
     const worktreePath = '/tmp/clean-worktree'
     const repo = seedRepoWithReadModelForTest({
       id: REPO_ID,
-      branchSnapshots: [
-        createBranchSnapshot('feature/clean', {
-          worktree: { path: worktreePath, isPrimary: false, isLocked: false },
-        }),
+      branchSnapshots: [createBranchSnapshot('feature/clean')],
+      worktrees: [
+        createRepoWorktreeSnapshotForTest('feature/clean', worktreePath, { isPrimary: false, isLocked: false }),
       ],
       currentBranchName: 'feature/clean',
       preferredWorkspacePaneTab: 'status',
@@ -223,17 +224,12 @@ describe('GitWorkspacePaneContent status-history', () => {
 
   test('opens files from the status row as a new tab and returns to status when it closes', async () => {
     const worktreePath = '/tmp/status-links-worktree'
-    const showRepoBranchWorkspacePaneTab = vi.fn((repoId, branch, tab) => {
-      workspacesStore.getState().setWorkspacePaneTab(repoId, branch, tab)
-      return true
-    })
     const showRepoBranchEmptyWorkspacePane = vi.fn(() => true)
     const repo = seedRepoWithReadModelForTest({
       id: REPO_ID,
-      branchSnapshots: [
-        createBranchSnapshot('feature/status-links', {
-          worktree: { path: worktreePath, isPrimary: false, isLocked: false },
-        }),
+      branchSnapshots: [createBranchSnapshot('feature/status-links')],
+      worktrees: [
+        createRepoWorktreeSnapshotForTest('feature/status-links', worktreePath, { isPrimary: false, isLocked: false }),
       ],
       currentBranchName: 'feature/status-links',
       preferredWorkspacePaneTab: 'status',
@@ -250,7 +246,7 @@ describe('GitWorkspacePaneContent status-history', () => {
       ],
     })
     const detail = getTestGitWorkspacePanePresentation(gitWorkspacePaneProjection(repo))
-    const navigation = navigationWith({ showRepoBranchWorkspacePaneTab, showRepoBranchEmptyWorkspacePane })
+    const navigation = navigationWith({ showRepoBranchEmptyWorkspacePane })
 
     const { container } = renderInJsdom(
       <TerminalSessionReadScope value={emptyTerminalReadContext}>
@@ -283,7 +279,7 @@ describe('GitWorkspacePaneContent status-history', () => {
       await Promise.resolve()
     })
     await waitFor(() =>
-      expect(showRepoBranchWorkspacePaneTab).toHaveBeenCalledWith(REPO_ID, 'feature/status-links', 'files'),
+      expect(preferenceBackedWorkspacePaneTabModel(REPO_ID, 'feature/status-links')?.renderedTab).toBe('files'),
     )
     expect(
       workspacePaneTabOpener(
@@ -297,7 +293,6 @@ describe('GitWorkspacePaneContent status-history', () => {
       ),
     ).toBe('workspace-pane:status')
 
-    showRepoBranchWorkspacePaneTab.mockClear()
     observeWorkspacePaneRouteForTest({
       workspaceId: REPO_ID,
       workspaceRuntimeId: repo.workspaceRuntimeId,
@@ -310,7 +305,6 @@ describe('GitWorkspacePaneContent status-history', () => {
       await runCloseWorkspacePaneTabCommand({
         workspaceId: REPO_ID,
         target: {
-          routeTarget: { kind: 'git-branch', workspaceId: REPO_ID, branchName: 'feature/status-links' },
           workspacePaneRoute: { kind: 'static', tab: 'files' },
           filesystemTarget: gitWorktreeFilesystemTarget(repo, worktreePath, 'feature/status-links'),
         },
@@ -318,19 +312,17 @@ describe('GitWorkspacePaneContent status-history', () => {
         navigation,
       }),
     ).toBe(true)
-    expect(showRepoBranchWorkspacePaneTab).toHaveBeenCalledWith(REPO_ID, 'feature/status-links', 'status')
+    expect(preferenceBackedWorkspacePaneTabModel(REPO_ID, 'feature/status-links')?.renderedTab).toBe('status')
     expect(showRepoBranchEmptyWorkspacePane).not.toHaveBeenCalled()
   })
 
   test('opens changes from the status row', async () => {
     const worktreePath = '/tmp/status-links-worktree'
-    const showRepoBranchWorkspacePaneTab = vi.fn(() => true)
     const repo = seedRepoWithReadModelForTest({
       id: REPO_ID,
-      branchSnapshots: [
-        createBranchSnapshot('feature/status-links', {
-          worktree: { path: worktreePath, isPrimary: false, isLocked: false },
-        }),
+      branchSnapshots: [createBranchSnapshot('feature/status-links')],
+      worktrees: [
+        createRepoWorktreeSnapshotForTest('feature/status-links', worktreePath, { isPrimary: false, isLocked: false }),
       ],
       currentBranchName: 'feature/status-links',
       preferredWorkspacePaneTab: 'status',
@@ -355,7 +347,7 @@ describe('GitWorkspacePaneContent status-history', () => {
             repo={gitWorkspacePaneProjection(repo)}
             detail={detail}
             workspacePaneId="workspace"
-            navigation={navigationWith({ showRepoBranchWorkspacePaneTab })}
+            navigation={navigationWith({})}
           />
         </BranchActionSurfaceProvider>
       </TerminalSessionReadScope>,
@@ -379,7 +371,7 @@ describe('GitWorkspacePaneContent status-history', () => {
       await Promise.resolve()
     })
     await waitFor(() =>
-      expect(showRepoBranchWorkspacePaneTab).toHaveBeenCalledWith(REPO_ID, 'feature/status-links', 'changes'),
+      expect(preferenceBackedWorkspacePaneTabModel(REPO_ID, 'feature/status-links')?.renderedTab).toBe('changes'),
     )
   })
 
@@ -462,10 +454,9 @@ describe('GitWorkspacePaneContent status-history', () => {
     const worktreePath = '/tmp/visibility-worktree'
     const repo = seedRepoWithReadModelForTest({
       id: REPO_ID,
-      branchSnapshots: [
-        createBranchSnapshot('feature/hidden', {
-          worktree: { path: worktreePath, isPrimary: false, isLocked: false },
-        }),
+      branchSnapshots: [createBranchSnapshot('feature/hidden')],
+      worktrees: [
+        createRepoWorktreeSnapshotForTest('feature/hidden', worktreePath, { isPrimary: false, isLocked: false }),
       ],
       currentBranchName: 'feature/hidden',
       preferredWorkspacePaneTab: 'status',
@@ -511,10 +502,9 @@ describe('GitWorkspacePaneContent status-history', () => {
     const worktreePath = '/tmp/changes-panel-worktree'
     const repo = seedRepoWithReadModelForTest({
       id: REPO_ID,
-      branchSnapshots: [
-        createBranchSnapshot('feature/changes-panel', {
-          worktree: { path: worktreePath, isPrimary: false, isLocked: false },
-        }),
+      branchSnapshots: [createBranchSnapshot('feature/changes-panel')],
+      worktrees: [
+        createRepoWorktreeSnapshotForTest('feature/changes-panel', worktreePath, { isPrimary: false, isLocked: false }),
       ],
       currentBranchName: 'feature/changes-panel',
       preferredWorkspacePaneTab: 'changes',
@@ -564,10 +554,9 @@ describe('GitWorkspacePaneContent status-history', () => {
     const worktreePath = '/tmp/stale-changes-panel-worktree'
     const repo = seedRepoWithReadModelForTest({
       id: REPO_ID,
-      branchSnapshots: [
-        createBranchSnapshot('feature/stale-changes', {
-          worktree: { path: worktreePath, isPrimary: false, isLocked: false },
-        }),
+      branchSnapshots: [createBranchSnapshot('feature/stale-changes')],
+      worktrees: [
+        createRepoWorktreeSnapshotForTest('feature/stale-changes', worktreePath, { isPrimary: false, isLocked: false }),
       ],
       currentBranchName: 'feature/stale-changes',
       preferredWorkspacePaneTab: 'changes',
@@ -703,8 +692,8 @@ describe('GitWorkspacePaneContent status-history', () => {
       expect(repoClientMocks.getRepoLog).toHaveBeenCalledWith(
         REPO_ID,
         repo.workspaceRuntimeId,
-        'feature/history',
-        expect.objectContaining({ count: 100 }),
+        { kind: 'branch', branchName: 'feature/history' },
+        expect.objectContaining({ count: 100, skip: 0 }),
       ),
     )
     await waitFor(() => {
@@ -735,9 +724,11 @@ describe('GitWorkspacePaneContent status-history', () => {
   test('labels worktree history panels with the static tab id', async () => {
     const repo = seedRepoWithReadModelForTest({
       id: REPO_ID,
-      branchSnapshots: [
-        createBranchSnapshot('feature/history', {
-          worktree: { path: '/tmp/history-worktree', isPrimary: false, isLocked: false },
+      branchSnapshots: [createBranchSnapshot('feature/history')],
+      worktrees: [
+        createRepoWorktreeSnapshotForTest('feature/history', '/tmp/history-worktree', {
+          isPrimary: false,
+          isLocked: false,
         }),
       ],
       currentBranchName: 'feature/history',

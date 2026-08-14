@@ -13,6 +13,7 @@ import {
 } from '#/system/ssh/invocation.ts'
 import { REMOTE_WORKTREE_BOOTSTRAP_RECORD_TAGS } from '#/system/ssh/worktree-bootstrap-protocol.ts'
 import { loadRemoteWorktreeBootstrapScript } from '#/system/ssh/remote-worktree-bootstrap-script.ts'
+import { remoteGitOperationStateScript } from '#/system/ssh/remote-git-operation-state-script.ts'
 
 const SSH_COMMAND_TIMEOUT_MS = 15_000
 /** Boot-probe timeout for the placeholder-tab hydrate path. Shorter than
@@ -35,14 +36,22 @@ export type RemoteCommandKind =
   | { type: 'directoryChildren'; path: string; prefix?: string }
   | { type: 'gitDirectoryChildren'; path: string; prefix?: string }
   | { type: 'revParseTopLevel'; path: string }
+  | { type: 'resolveGitWorkspacePath'; path: string }
   | { type: 'resolvePhysicalWorktreeIdentity'; path: string }
   | { type: 'resolveRepoCommonDir'; path: string }
   | { type: 'gitSnapshot'; path: string }
   | { type: 'gitLocalBranches'; path: string }
   | { type: 'gitPatch'; path: string }
   | { type: 'gitWorktreeList'; path: string }
+  | {
+      type: 'gitOperationState'
+      path: string
+      commonDir: string
+      isPrimary: boolean
+      attachedBranch: string | null
+    }
   | { type: 'gitStatus'; path: string }
-  | { type: 'gitLog'; path: string; branch: string; count?: number; skip?: number }
+  | { type: 'gitLog'; path: string; revision: string; count?: number; skip?: number }
   | { type: 'gitFetchRemote'; path: string; remote: string }
   | { type: 'gitStatusAll'; path: string }
   | { type: 'gitDiffNoIndex'; path: string; filePath: string }
@@ -329,6 +338,18 @@ function scriptForCommand(command: RemoteCommandKind): string {
         `root=$(git -C ${shellQuote(command.path)} rev-parse --show-toplevel) || exit $?`,
         `cd "$root" && pwd -P`,
       ].join('\n')
+    case 'resolveGitWorkspacePath': {
+      const repo = shellQuote(command.path)
+      return [
+        `bare=$(git -C ${repo} rev-parse --is-bare-repository) || exit $?`,
+        'if [ "$bare" = true ]; then',
+        `  root=$(git -C ${repo} rev-parse --absolute-git-dir) || exit $?`,
+        'else',
+        `  root=$(git -C ${repo} rev-parse --show-toplevel) || exit $?`,
+        'fi',
+        `cd "$root" && pwd -P`,
+      ].join('\n')
+    }
     case 'resolvePhysicalWorktreeIdentity':
       return remotePhysicalWorktreeIdentityScript(command.path)
     case 'resolveRepoCommonDir':
@@ -374,6 +395,8 @@ function scriptForCommand(command: RemoteCommandKind): string {
       ].join('; ')
     case 'gitWorktreeList':
       return `git -C ${shellQuote(command.path)} worktree list --porcelain -z`
+    case 'gitOperationState':
+      return remoteGitOperationStateScript(command.commonDir, command.path, command.isPrimary, command.attachedBranch)
     case 'gitStatus':
       return `git -C ${shellQuote(command.path)} status --porcelain -z`
     case 'gitLog': {
@@ -386,7 +409,7 @@ function scriptForCommand(command: RemoteCommandKind): string {
         `--format=${shellQuote(format)}`,
         `--max-count=${count}`,
         `--skip=${skip}`,
-        shellQuote(command.branch),
+        shellQuote(command.revision),
         '--',
       ].join(' ')
     }

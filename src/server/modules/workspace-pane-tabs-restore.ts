@@ -7,6 +7,7 @@ import type { WorkspaceId } from '#/shared/workspace-locator.ts'
 import type { ServerWorkspaceMatchOutcome } from '#/server/modules/settings-source.ts'
 import type { ServerWorkspacePaneTabsHost } from '#/server/workspace-pane/workspace-pane-tabs-host.ts'
 import type { WorkspaceRuntimeMembershipCapability } from '#/server/modules/workspace-runtimes.ts'
+import { repoWorktreeMaterializedBranch } from '#/shared/git-types.ts'
 
 interface WorkspacePaneTabsRestoreInput {
   userId: string
@@ -88,12 +89,20 @@ type WorkspacePaneLayoutRestoreAdmission =
 
 function workspacePaneLayoutRestoreAdmission(workspace: RestoredWorkspaceRuntime): WorkspacePaneLayoutRestoreAdmission {
   if (workspace.repoSnapshot) {
-    const gitTargets = workspace.repoSnapshot.branches.flatMap((branch) => {
-      const target: RestorableWorkspacePaneTarget | null = branch.worktree
-        ? restorableWorktreeTarget(workspace.workspaceId, branch.worktree.path)
-        : { kind: 'git-branch', branch: branch.name }
+    const worktreeTargets = workspace.repoSnapshot.worktrees.flatMap((worktree) => {
+      const target = restorableWorktreeTarget(workspace.workspaceId, worktree.path)
       return target ? [target] : []
     })
+    const materializedBranches = new Set(
+      workspace.repoSnapshot.worktrees.flatMap((worktree) => {
+        const branchName = repoWorktreeMaterializedBranch(worktree)
+        return branchName ? [branchName] : []
+      }),
+    )
+    const branchTargets: RestorableWorkspacePaneTarget[] = workspace.repoSnapshot.branches
+      .filter((branch) => !materializedBranches.has(branch.name))
+      .map((branch) => ({ kind: 'git-branch', branch: branch.name }))
+    const gitTargets = [...worktreeTargets, ...branchTargets]
     return { kind: 'ready', targets: [{ kind: 'workspace-root' }, ...gitTargets] }
   }
   return workspace.workspaceProbe.status === 'ready'

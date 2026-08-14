@@ -1,10 +1,10 @@
-// Branch list row wrapper. Resolves `terminalBellCount` from the
+// Git workspace navigator branch-row wrapper. Resolves `terminalBellCount` from the
 // terminal session projection and delegates rendering to BranchRow.
 
 import { computed, defineComponent } from 'vue'
 import type { PropType } from 'vue'
-import { BranchRow } from '#/web/components/branch-navigator/BranchRow.tsx'
-import type { BranchRowProps } from '#/web/components/branch-navigator/BranchRow.tsx'
+import { BranchRow } from '#/web/components/workspace-navigator/BranchRow.tsx'
+import type { BranchRowProps } from '#/web/components/workspace-navigator/BranchRow.tsx'
 import type { BranchSnapshotInfo } from '#/shared/git-types.ts'
 import { formatTerminalFilesystemTargetKeyForPath } from '#/shared/terminal-filesystem-target-key.ts'
 import {
@@ -13,9 +13,10 @@ import {
 } from '#/web/components/terminal/terminal-session-store.ts'
 import { branchActionDisplayPhase } from '#/web/hooks/branch-action-state.ts'
 import type { BranchActionRepo } from '#/web/hooks/branch-action-state.ts'
+import { repoWorktreeForBranch } from '#/shared/git-types.ts'
 
-export const BranchListRow = defineComponent<BranchRowProps>({
-  name: 'BranchListRow',
+export const GitWorkspaceNavigatorBranchRow = defineComponent<BranchRowProps>({
+  name: 'GitWorkspaceNavigatorBranchRow',
   props: {
     repo: { type: Object as PropType<BranchActionRepo>, required: true },
     branch: { type: Object as PropType<BranchSnapshotInfo>, required: true },
@@ -28,11 +29,11 @@ export const BranchListRow = defineComponent<BranchRowProps>({
   },
 
   setup(props) {
-    const terminalSessionId = computed(() =>
-      props.branch.worktree?.path
-        ? formatTerminalFilesystemTargetKeyForPath(props.repo.id, props.branch.worktree.path)
-        : null,
-    )
+    const terminalSessionId = computed(() => {
+      const worktree = repoWorktreeForBranch(props.repo.snapshot.worktrees, props.branch.name)
+      return worktree ? formatTerminalFilesystemTargetKeyForPath(props.repo.id, worktree.path) : null
+    })
+    const worktree = computed(() => repoWorktreeForBranch(props.repo.snapshot.worktrees, props.branch.name))
     const terminalBellCount = useTerminalFilesystemTargetBellCount(terminalSessionId)
     const terminalOutputActive = useTerminalFilesystemTargetOutputActive(terminalSessionId)
 
@@ -40,6 +41,7 @@ export const BranchListRow = defineComponent<BranchRowProps>({
       <BranchRow
         repo={props.repo}
         branch={props.branch}
+        worktree={worktree.value}
         selected={props.selected}
         onSelectBranch={props.onSelectBranch}
         onOpenBranchStatus={props.onOpenBranchStatus}

@@ -1,6 +1,10 @@
 // @vitest-environment jsdom
 
-import { seedRepoWithReadModelForTest, createBranchSnapshot } from '#/web/test-utils/repo-store.ts'
+import {
+  createBranchSnapshot,
+  createRepoWorktreeSnapshotForTest,
+  seedRepoWithReadModelForTest,
+} from '#/web/test-utils/repo-store.ts'
 import { screen, waitFor } from '@testing-library/vue'
 import { flushTestUpdates } from '#/test-utils/render.tsx'
 import { VueQueryClientScope } from '#/web/test-utils/VueQueryClientScope.tsx'
@@ -13,12 +17,7 @@ import {
   TerminalSessionReadScope,
 } from '#/web/components/terminal/terminal-session-context.ts'
 import type { TerminalSessionReadContextValue } from '#/web/components/terminal/types.ts'
-import {
-  terminalExecutionPath,
-  terminalPresentationBranch,
-  terminalSessionCoordinates,
-  type TerminalSessionBase,
-} from '#/shared/terminal-types.ts'
+import { terminalExecutionPath, terminalSessionCoordinates, type TerminalSessionBase } from '#/shared/terminal-types.ts'
 import type { AppNavigationActions } from '#/web/app-navigation-actions.ts'
 import { AppNavigationProvider } from '#/web/app-navigation.tsx'
 import { terminalProjectionHydrationStore } from '#/web/stores/terminal-projection-hydration.ts'
@@ -345,7 +344,7 @@ describe('WorkspacePane terminal routes', () => {
       branchSnapshots: [],
       currentBranchName: null,
     })
-    const onBackToBranchNavigator = vi.fn()
+    const onBackToGitWorkspaceNavigator = vi.fn()
 
     render(
       <VueQueryClientScope client={appQueryClient}>
@@ -356,7 +355,7 @@ describe('WorkspacePane terminal routes', () => {
                 workspaceId={REPO_ID}
                 currentBranchName="feature/removed"
                 workspacePaneRouteContext={{ kind: 'routed', route: null }}
-                onBackToBranchNavigator={onBackToBranchNavigator}
+                onBackToGitWorkspaceNavigator={onBackToGitWorkspaceNavigator}
               />
             </TerminalSessionReadScope>
           </TerminalSessionCommandScope>
@@ -365,17 +364,16 @@ describe('WorkspacePane terminal routes', () => {
     )
 
     screen.getByRole('button', { name: 'branches.back-to-list' }).click()
-    expect(onBackToBranchNavigator).toHaveBeenCalledOnce()
+    expect(onBackToGitWorkspaceNavigator).toHaveBeenCalledOnce()
   })
 
   test('records workspace history when creating a terminal from the status tab', async () => {
     const worktreePath = '/tmp/repo-workspace-container-repo-a'
-    const branch = createBranchSnapshot('feature/a', {
-      worktree: { path: worktreePath, isPrimary: false, isLocked: false },
-    })
+    const branch = createBranchSnapshot('feature/a')
     const repo = seedRepoWithReadModelForTest({
       id: REPO_ID,
       branchSnapshots: [branch],
+      worktrees: [createRepoWorktreeSnapshotForTest(branch.name, worktreePath)],
       currentBranchName: 'feature/a',
       preferredWorkspacePaneTab: 'status',
       workspacePaneTabsByBranch: {
@@ -388,20 +386,18 @@ describe('WorkspacePane terminal routes', () => {
     const statusEntry = {
       workspaceId: REPO_ID,
       route: {
-        kind: 'branch' as const,
-        branchName: 'feature/a',
+        kind: 'worktree' as const,
+        worktreePath,
         workspacePaneTab: 'status' as const,
-        terminalFilesystemTargetKey,
         terminalSessionId: null,
       },
     }
     const terminalEntry = {
       workspaceId: REPO_ID,
       route: {
-        kind: 'branch' as const,
-        branchName: 'feature/a',
+        kind: 'worktree' as const,
+        worktreePath,
         workspacePaneTab: 'terminal' as const,
-        terminalFilesystemTargetKey,
         terminalSessionId: 'term-111111111111111111111',
       },
     }
@@ -425,12 +421,10 @@ describe('WorkspacePane terminal routes', () => {
     const createTerminal = vi.fn(async (base: TerminalSessionBase) => {
       const terminalSessionId = 'term-111111111111111111111'
       const coordinates = terminalSessionCoordinates(base)
-      const branchName = terminalPresentationBranch(base.presentation)
-      if (!branchName) throw new Error('expected Git worktree terminal fixture')
+      if (base.target.kind !== 'git-worktree') throw new Error('expected Git worktree terminal fixture')
       workspacePaneTabsTestBridge.addRuntimeTab({
         workspaceId: coordinates.workspaceId,
         workspaceRuntimeId: coordinates.workspaceRuntimeId,
-        branchName,
         worktreePath: terminalExecutionPath(base.target),
         terminalSessionId,
       })
@@ -457,8 +451,8 @@ describe('WorkspacePane terminal routes', () => {
             <TerminalSessionReadScope value={nextReadContext}>
               <WorkspacePane
                 workspaceId={REPO_ID}
-                currentBranchName="feature/a"
-                workspacePaneRouteContext={{ kind: 'routed', route: workspacePaneRoute }}
+                currentBranchName={null}
+                workspacePaneRouteContext={{ kind: 'git-worktree', worktreePath, route: workspacePaneRoute }}
               />
             </TerminalSessionReadScope>
           </TerminalSessionCommandScope>
@@ -475,9 +469,9 @@ describe('WorkspacePane terminal routes', () => {
       screen.getByRole('button', { name: 'terminal.new' }).click()
       await waitForNextMacrotask()
     })
-    expect(route.openRepoBranchTerminal).toHaveBeenCalledWith(
+    expect(route.openRepoWorktreeTerminal).toHaveBeenCalledWith(
       REPO_ID,
-      'feature/a',
+      '/tmp/repo-workspace-container-repo-a',
       'term-111111111111111111111',
       presentationOptions(),
     )
@@ -498,6 +492,6 @@ describe('WorkspacePane terminal routes', () => {
       testNavigation.goBack(REPO_ID)
     })
 
-    expect(route.openRepoBranchTab).toHaveBeenCalledWith(REPO_ID, 'feature/a', 'status', historyRestoreOptions())
+    expect(route.openRepoWorktreeTab).toHaveBeenCalledWith(REPO_ID, worktreePath, 'status', historyRestoreOptions())
   })
 })

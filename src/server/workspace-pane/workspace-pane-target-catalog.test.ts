@@ -8,7 +8,12 @@ const WORKSPACE_ID = workspaceIdForTest('goblin+file:///repo')
 describe('WorkspacePaneTargetCatalog', () => {
   test('captures only identity data for a Git runtime', async () => {
     const readIdentities = vi.fn(async () => [
-      { kind: 'git-worktree' as const, worktreePath: '/repo', head: { kind: 'branch' as const, branchName: 'main' } },
+      {
+        kind: 'git-worktree' as const,
+        worktreePath: '/repo',
+        head: { kind: 'branch' as const, branchName: 'main' },
+        materializedBranch: 'main',
+      },
       { kind: 'git-branch' as const, branchName: 'feature/no-worktree' },
     ])
     const catalog = new WorkspacePaneTargetCatalog({
@@ -24,7 +29,6 @@ describe('WorkspacePaneTargetCatalog', () => {
           workspaceRuntimeId: 'runtime-a',
         },
         nativeWorktreePath: '/repo',
-        canonicalBranch: null,
       },
       {
         target: {
@@ -34,7 +38,6 @@ describe('WorkspacePaneTargetCatalog', () => {
           root: 'goblin+file:///repo',
         },
         nativeWorktreePath: '/repo',
-        canonicalBranch: 'main',
       },
       {
         target: {
@@ -44,7 +47,6 @@ describe('WorkspacePaneTargetCatalog', () => {
           branch: 'feature/no-worktree',
         },
         nativeWorktreePath: null,
-        canonicalBranch: 'feature/no-worktree',
       },
     ])
     expect(readIdentities).toHaveBeenCalledOnce()
@@ -67,7 +69,14 @@ describe('WorkspacePaneTargetCatalog', () => {
   test('retains a detached worktree even when the repository has no branch refs', async () => {
     const catalog = new WorkspacePaneTargetCatalog({
       hasGitCapability: () => true,
-      readIdentities: async () => [{ kind: 'git-worktree', worktreePath: '/repo', head: { kind: 'detached' } }],
+      readIdentities: async () => [
+        {
+          kind: 'git-worktree',
+          worktreePath: '/repo',
+          head: { kind: 'detached' },
+          materializedBranch: null,
+        },
+      ],
     })
     await expect(catalog.captureTargets('user-a', WORKSPACE_ID, 'goblin+file:///repo\0runtime-a')).resolves.toEqual([
       {
@@ -77,7 +86,6 @@ describe('WorkspacePaneTargetCatalog', () => {
           workspaceRuntimeId: 'runtime-a',
         },
         nativeWorktreePath: '/repo',
-        canonicalBranch: null,
       },
       {
         target: {
@@ -87,8 +95,33 @@ describe('WorkspacePaneTargetCatalog', () => {
           root: 'goblin+file:///repo',
         },
         nativeWorktreePath: '/repo',
-        canonicalBranch: null,
       },
     ])
+  })
+
+  test('retains the canonical target for a detached worktree', async () => {
+    const catalog = new WorkspacePaneTargetCatalog({
+      hasGitCapability: () => true,
+      readIdentities: async () => [
+        {
+          kind: 'git-worktree',
+          worktreePath: '/repo',
+          head: { kind: 'detached' },
+          materializedBranch: 'feature/in-progress',
+        },
+      ],
+    })
+
+    const targets = await catalog.captureTargets('user-a', WORKSPACE_ID, 'goblin+file:///repo\0runtime-a')
+
+    expect(targets[1]).toEqual({
+      target: {
+        kind: 'git-worktree',
+        workspaceId: 'goblin+file:///repo',
+        workspaceRuntimeId: 'runtime-a',
+        root: 'goblin+file:///repo',
+      },
+      nativeWorktreePath: '/repo',
+    })
   })
 })

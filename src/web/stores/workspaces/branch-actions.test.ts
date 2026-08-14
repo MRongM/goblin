@@ -4,6 +4,7 @@ import {
   resetWorkspacesStore,
   seedRepoWithReadModelForTest,
   createBranchSnapshot,
+  createRepoWorktreeSnapshotForTest,
 } from '#/web/test-utils/repo-store.ts'
 import { beforeEach, describe, expect, test } from 'vitest'
 import { waitForNextMacrotask } from '#/test-utils/microtasks.ts'
@@ -70,6 +71,13 @@ async function flushAsyncWork() {
   await waitForNextMacrotask()
 }
 
+function runRepoBranchActionForTest(action: RepoBranchAction) {
+  const actions = workspacesStore.getState()
+  return action.kind === 'createWorktree'
+    ? actions.runCreateWorktreeAction(REPO_ID, action)
+    : actions.runBranchAction(REPO_ID, action)
+}
+
 beforeEach(() => {
   resetWorkspacesStore()
   seedRepoWithReadModelForTest({
@@ -130,19 +138,22 @@ function installSuccessfulCreateWorktreeBridge(options?: { onResponse?: () => vo
   installGoblinTestBridge({
     'repo.createWorktree': async () => {
       options?.onResponse?.()
-      return { ok: true, message: 'ok' }
+      return {
+        ok: true,
+        message: 'ok',
+        worktreePath: '/private/tmp/goblin-branch-actions-test-worktree',
+      }
     },
   })
 }
 
 describe('branch action capabilities', () => {
   test('gates remote-only actions when a repo transitions to local-only', async () => {
-    const branch = createRepoBranch('feature/local', {
-      worktree: { path: '/tmp/goblin-branch-actions-test-worktree', isPrimary: false, isLocked: false },
-    })
+    const branch = createRepoBranch('feature/local')
     seedRepoWithReadModelForTest({
       id: REPO_ID,
       branches: [branch],
+      worktrees: [createRepoWorktreeSnapshotForTest(branch.name, '/tmp/goblin-branch-actions-test-worktree')],
       remote: {
         remotes: [testRemote('origin')],
         hasRemotes: true,
@@ -179,23 +190,29 @@ describe('branch action capabilities', () => {
   })
 
   test('uses canonical worktree state to gate primary worktree removal', () => {
-    const branch = createRepoBranch('feature/main-worktree', {
-      worktree: { path: REPO_WORKTREE_PATH, isPrimary: false, isLocked: false },
-    })
+    const branch = createRepoBranch('feature/main-worktree')
     const repo = seedRepoWithReadModelForTest({
       id: REPO_ID,
       branches: [branch],
-      branchSnapshots: [
-        createBranchSnapshot('feature/main-worktree', {
-          worktree: { path: REPO_WORKTREE_PATH, isPrimary: true, isLocked: false },
-        }),
-      ],
+      worktrees: [createRepoWorktreeSnapshotForTest(branch.name, REPO_WORKTREE_PATH, { isPrimary: true })],
       currentBranch: 'main',
     })
 
-    expect(branch.worktree).toEqual({ path: REPO_WORKTREE_PATH, isPrimary: false, isLocked: false })
     const authoritativeBranch = repoGitPresentationForTest(repo).snapshot.branches[0]!
     expect(getBranchActionCapabilities(repoGitPresentationForTest(repo), authoritativeBranch)).toMatchObject({
+      canRemoveWorktree: false,
+    })
+  })
+
+  test('does not offer removal for a locked worktree', () => {
+    const branch = createRepoBranch('feature/locked')
+    const repo = seedRepoWithReadModelForTest({
+      id: REPO_ID,
+      branches: [branch],
+      worktrees: [createRepoWorktreeSnapshotForTest(branch.name, REPO_WORKTREE_PATH, { isLocked: true })],
+    })
+
+    expect(getBranchActionCapabilities(repoGitPresentationForTest(repo), branch)).toMatchObject({
       canRemoveWorktree: false,
     })
   })
@@ -203,12 +220,11 @@ describe('branch action capabilities', () => {
   test('allows removing the current branch when it belongs to a linked worktree', () => {
     const worktreePath = '/tmp/goblin-current-linked-worktree'
     const workspaceId = workspaceIdForTest('goblin+file:///tmp/goblin-current-linked-worktree')
-    const branch = createRepoBranch('feature/current-linked', {
-      worktree: { path: worktreePath, isPrimary: false, isLocked: false },
-    })
+    const branch = createRepoBranch('feature/current-linked')
     const repo = seedRepoWithReadModelForTest({
       id: workspaceId,
       branches: [branch],
+      worktrees: [createRepoWorktreeSnapshotForTest(branch.name, worktreePath)],
       currentBranch: 'feature/current-linked',
     })
 
@@ -218,10 +234,29 @@ describe('branch action capabilities', () => {
     })
   })
 
+  test.each(['rebase', 'merge', 'cherry-pick', 'revert', 'bisect'] as const)(
+    'does not offer worktree removal during %s',
+    (kind) => {
+      const branch = createRepoBranch('feature/operation')
+      const repo = seedRepoWithReadModelForTest({
+        id: REPO_ID,
+        branches: [branch],
+        worktrees: [
+          {
+            ...createRepoWorktreeSnapshotForTest(branch.name, REPO_WORKTREE_PATH, { operation: { kind } }),
+            ...(kind === 'rebase' ? { head: { kind: 'detached' as const } } : {}),
+          },
+        ],
+      })
+
+      expect(getBranchActionCapabilities(repoGitPresentationForTest(repo), branch)).toMatchObject({
+        canRemoveWorktree: false,
+      })
+    },
+  )
+
   test('allows terminal and editor actions for remote worktrees', async () => {
-    const branch = createRepoBranch('feature/remote', {
-      worktree: { path: '/srv/repo-feature', isPrimary: false, isLocked: false },
-    })
+    const branch = createRepoBranch('feature/remote')
     const target = normalizeRemoteTarget({
       alias: 'example',
       host: 'example.com',
@@ -233,6 +268,7 @@ describe('branch action capabilities', () => {
     seedRepoWithReadModelForTest({
       id: target!.id,
       branches: [branch],
+      worktrees: [createRepoWorktreeSnapshotForTest(branch.name, '/srv/repo-feature')],
       remoteLifecycle: { kind: 'ready', target: target! },
       remote: {
         remotes: [testRemote('origin')],
@@ -636,7 +672,12 @@ describe('runBranchAction', () => {
         [ipcPath]: () => {
           actionCalls += 1
           return new Promise((resolve) => {
-            resolveAction = () => resolve({ ok: true, message: 'ok' })
+            resolveAction = () =>
+              resolve({
+                ok: true,
+                message: 'ok',
+                ...(action.kind === 'createWorktree' ? { worktreePath: action.input.worktreePath } : {}),
+              })
           })
         },
         'repo.snapshot': () => {
@@ -653,7 +694,7 @@ describe('runBranchAction', () => {
 
       const statusWork = requestRepoSnapshotRefresh(refreshStoreAccess, REPO_ID)
       await flushAsyncWork()
-      const actionWork = workspacesStore.getState().runBranchAction(REPO_ID, action)
+      const actionWork = runRepoBranchActionForTest(action)
       await flushAsyncWork()
 
       expect(actionCalls).toBe(1)
@@ -684,7 +725,7 @@ describe('runBranchAction', () => {
         }),
     })
 
-    const work = workspacesStore.getState().runBranchAction(REPO_ID, createWorktreeAction())
+    const work = workspacesStore.getState().runCreateWorktreeAction(REPO_ID, createWorktreeAction())
     const running = workspacesStore.getState().workspaces[REPO_ID]
 
     expect(requireGitWorkspaceForTest(running).capability.git.operations.branchAction).toMatchObject({
@@ -728,11 +769,16 @@ describe('runBranchAction', () => {
       installGoblinTestBridge({
         [ipcPath]: () =>
           new Promise((resolve) => {
-            resolveResponse = () => resolve({ ok: true, message: 'ok' })
+            resolveResponse = () =>
+              resolve({
+                ok: true,
+                message: 'ok',
+                ...(action.kind === 'createWorktree' ? { worktreePath: action.input.worktreePath } : {}),
+              })
           }),
       })
 
-      const work = workspacesStore.getState().runBranchAction(REPO_ID, action)
+      const work = runRepoBranchActionForTest(action)
       await flushAsyncWork()
 
       expect(
@@ -770,7 +816,7 @@ describe('runBranchAction', () => {
       'repo.createWorktree': async () => ({ ok: false, message: 'error.invalid-path' }),
     })
 
-    await workspacesStore.getState().runBranchAction(REPO_ID, createWorktreeAction(), {
+    await workspacesStore.getState().runCreateWorktreeAction(REPO_ID, createWorktreeAction(), {
       workspaceRuntimeId: 'repo-runtime-test',
     })
 
@@ -796,7 +842,7 @@ describe('runBranchAction', () => {
       }),
     })
 
-    await workspacesStore.getState().runBranchAction(REPO_ID, createWorktreeAction(), {
+    await workspacesStore.getState().runCreateWorktreeAction(REPO_ID, createWorktreeAction(), {
       workspaceRuntimeId: 'repo-runtime-test',
     })
 
@@ -816,10 +862,14 @@ describe('runBranchAction', () => {
     setBranchViewModeForTest('all')
     installSuccessfulCreateWorktreeBridge()
 
-    await workspacesStore
+    const result = await workspacesStore
       .getState()
-      .runBranchAction(REPO_ID, createWorktreeAction(), { workspaceRuntimeId: 'repo-runtime-test' })
+      .runCreateWorktreeAction(REPO_ID, createWorktreeAction(), { workspaceRuntimeId: 'repo-runtime-test' })
 
+    expect(result).toMatchObject({
+      ok: true,
+      worktreePath: '/private/tmp/goblin-branch-actions-test-worktree',
+    })
     expect(workspacesStore.getState().branchViewModeByWorkspace?.[REPO_ID]).toBe('all')
   })
 
@@ -829,7 +879,7 @@ describe('runBranchAction', () => {
 
     await workspacesStore
       .getState()
-      .runBranchAction(REPO_ID, createWorktreeAction(), { workspaceRuntimeId: 'repo-runtime-test' })
+      .runCreateWorktreeAction(REPO_ID, createWorktreeAction(), { workspaceRuntimeId: 'repo-runtime-test' })
 
     expect(workspacesStore.getState().branchViewModeByWorkspace?.[REPO_ID]).toBe('worktrees')
   })
@@ -843,7 +893,7 @@ describe('runBranchAction', () => {
       'repo.createWorktree': async () => result,
     })
 
-    await workspacesStore.getState().runBranchAction(REPO_ID, createWorktreeAction(), {
+    await workspacesStore.getState().runCreateWorktreeAction(REPO_ID, createWorktreeAction(), {
       workspaceRuntimeId: 'repo-runtime-test',
     })
 
@@ -866,7 +916,7 @@ describe('runBranchAction', () => {
 
     await workspacesStore
       .getState()
-      .runBranchAction(REPO_ID, createWorktreeAction(), { workspaceRuntimeId: 'repo-runtime-test' })
+      .runCreateWorktreeAction(REPO_ID, createWorktreeAction(), { workspaceRuntimeId: 'repo-runtime-test' })
 
     const repo = workspacesStore.getState().workspaces[REPO_ID]
     expect(repo?.workspaceRuntimeId).toBe('repo-runtime-test-2')
@@ -879,12 +929,8 @@ describe('runBranchAction', () => {
       'repo.deleteBranch': async () => ({ ok: true, message: 'ok' }),
       'repo.snapshot': async () =>
         repoSnapshotResponse({
-          branches: [
-            createBranchSnapshot('feature/a'),
-            createBranchSnapshot('feature/new', {
-              worktree: { path: '/tmp/goblin-branch-actions-test-worktree', isPrimary: false, isLocked: false },
-            }),
-          ],
+          branches: [createBranchSnapshot('feature/a'), createBranchSnapshot('feature/new')],
+          worktrees: [createRepoWorktreeSnapshotForTest('feature/new', '/tmp/goblin-branch-actions-test-worktree')],
           current: 'feature/a',
         }),
     })

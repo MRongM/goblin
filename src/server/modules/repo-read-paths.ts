@@ -1,4 +1,5 @@
-import { runWithRepoSource, type RepoSource, type WorkspacePaneTargetIdentity } from '#/server/modules/repo-source.ts'
+import { runWithRepoSource, type RepoSource } from '#/server/modules/repo-source.ts'
+import type { WorkspacePaneTargetIdentity } from '#/shared/git-types.ts'
 import type { RepoSourceRuntimeContext } from '#/server/modules/remote-repo-execution.ts'
 import {
   getRepoLastSuccessfulFetchAt,
@@ -11,6 +12,7 @@ import {
   DEFAULT_REPOSITORY_LOG_COUNT,
   type ExecResult,
   type LogEntry,
+  type RepoLogTarget,
   type WorktreeStatus,
 } from '#/shared/git-types.ts'
 import type {
@@ -86,14 +88,13 @@ export async function getRepoPullRequests(
 
 export async function getRepoLog(
   cwd: WorkspaceId,
-  branch: string,
+  target: RepoLogTarget,
   options?: { count?: number; skip?: number; signal?: AbortSignal; workspaceRuntimeId?: string },
 ): Promise<LogEntry[]> {
-  if (typeof branch !== 'string' || branch.length === 0) return []
   return await runWithRepoSource(
     cwd,
     async (source) =>
-      await source.getLog(branch, {
+      await source.getLog(target, {
         count: options?.count ?? DEFAULT_REPOSITORY_LOG_COUNT,
         skip: options?.skip ?? 0,
         signal: options?.signal,

@@ -3,21 +3,20 @@ import {
   seedRepoQueryDataForTest,
   seedRepoWithReadModelForTest,
   createRepoBranch,
+  createRepoWorktreeSnapshotForTest,
 } from '#/web/test-utils/repo-store.ts'
 import { beforeEach, describe, expect, test, vi } from 'vitest'
 import { workspaceIdForTest } from '#/test-utils/workspace-id.ts'
 import {
   beginWorkspacePaneDestinationPresentation,
   commitWorkspacePaneDestinationRoute,
-  dispatchWorkspacePaneDestinationRoute,
   resetWorkspacePaneDestinationPresentationForTest,
 } from '#/web/workspace-pane/workspace-pane-destination-navigation.ts'
-import type { WorkspacePaneRouteCommitActions } from '#/web/app-navigation-actions.ts'
+import type {
+  FilesystemWorkspacePaneRouteCommitActions,
+  WorkspacePaneRouteCommitActions,
+} from '#/web/app-navigation-actions.ts'
 import { resolveWorkspacePaneDestinationTargetLease } from '#/web/workspace-pane/workspace-pane-tab-target.ts'
-import {
-  resetWorkspacePaneActionQueueForTest,
-  runWorkspacePaneAction,
-} from '#/web/workspace-pane/workspace-pane-action-queue.ts'
 import { appQueryClient } from '#/web/app-query-client.ts'
 import { repoSnapshotQueryKey } from '#/web/repo-query-keys.ts'
 import { workspacesStore } from '#/web/stores/workspaces/store.ts'
@@ -39,78 +38,10 @@ const DESTINATION_ROUTE = { kind: 'static' as const, tab: 'status' as const }
 beforeEach(() => {
   appQueryClient.clear()
   resetWorkspacesStore()
-  resetWorkspacePaneActionQueueForTest()
   resetWorkspacePaneDestinationPresentationForTest()
 })
 
 describe('workspace pane destination navigation', () => {
-  test('commits branch-scoped tabs for a destination without a worktree', async () => {
-    seedNoWorktreeRepo()
-    const commitWorkspacePaneRoute = acceptedRouteCommit()
-    const setWorkspacePaneTab = vi.spyOn(workspacesStore.getState(), 'setWorkspacePaneTab')
-
-    await expect(
-      dispatchWorkspacePaneDestinationRoute({
-        workspaceId: REPO_ID,
-        branchName: 'feature/no-worktree',
-        route: DESTINATION_ROUTE,
-        navigation: { commitWorkspacePaneRoute },
-      }),
-    ).resolves.toEqual({ kind: 'completed', changed: true, presentation: 'router-settled' })
-    expect(commitWorkspacePaneRoute).toHaveBeenCalledOnce()
-    expect(setWorkspacePaneTab).toHaveBeenCalledWith(REPO_ID, 'feature/no-worktree', 'status')
-  })
-
-  test('fails fast when the destination target is already running an action', async () => {
-    const repo = seedDestinationRepo()
-    const started = Promise.withResolvers<void>()
-    const release = Promise.withResolvers<void>()
-    const occupied = runWorkspacePaneAction(
-      {
-        kind: 'git-worktree',
-        workspaceId: REPO_ID,
-        workspaceRuntimeId: repo.workspaceRuntimeId,
-        worktreePath: DESTINATION_WORKTREE,
-      },
-      async () => {
-        started.resolve()
-        await release.promise
-      },
-    )
-    await started.promise
-    const commitWorkspacePaneRoute = acceptedRouteCommit()
-    const currentNavigation = beginAppNavigation()
-
-    await expect(
-      dispatchWorkspacePaneDestinationRoute({
-        workspaceId: REPO_ID,
-        branchName: 'feature/destination',
-        route: DESTINATION_ROUTE,
-        navigation: { commitWorkspacePaneRoute },
-      }),
-    ).resolves.toEqual({ kind: 'blocked' })
-    expect(commitWorkspacePaneRoute).not.toHaveBeenCalled()
-    expect(appNavigationIsCurrent(currentNavigation)).toBe(true)
-
-    release.resolve()
-    await occupied
-  })
-
-  test('rejects worktree-scoped tabs for a destination without a worktree', async () => {
-    seedNoWorktreeRepo()
-    const commitWorkspacePaneRoute = acceptedRouteCommit()
-
-    await expect(
-      dispatchWorkspacePaneDestinationRoute({
-        workspaceId: REPO_ID,
-        branchName: 'feature/no-worktree',
-        route: { kind: 'static', tab: 'changes' },
-        navigation: { commitWorkspacePaneRoute },
-      }),
-    ).resolves.toEqual({ kind: 'unsupported', reason: 'worktree-required' })
-    expect(commitWorkspacePaneRoute).not.toHaveBeenCalled()
-  })
-
   test('rejects a stale runtime lease before route commit', async () => {
     seedDestinationRepo()
     const presentation = beginPresentation('feature/destination')
@@ -124,7 +55,7 @@ describe('workspace pane destination navigation', () => {
     const commitWorkspacePaneRoute = acceptedRouteCommit()
 
     await expect(
-      commitWorkspacePaneDestinationRoute(presentation, DESTINATION_ROUTE, { commitWorkspacePaneRoute }),
+      commitWorkspacePaneDestinationRoute(presentation, DESTINATION_ROUTE, testNavigation(commitWorkspacePaneRoute)),
     ).resolves.toEqual({ kind: 'superseded' })
     expect(commitWorkspacePaneRoute).not.toHaveBeenCalled()
   })
@@ -135,18 +66,17 @@ describe('workspace pane destination navigation', () => {
     const routeCommit = Promise.withResolvers<boolean>()
     const routeNavigation = deferredRouteCommit(routeCommit.promise)
     const setWorkspacePaneTab = vi.spyOn(workspacesStore.getState(), 'setWorkspacePaneTab')
-    const committed = commitWorkspacePaneDestinationRoute(presentation, DESTINATION_ROUTE, {
-      commitWorkspacePaneRoute: routeNavigation.commit,
-    })
+    const committed = commitWorkspacePaneDestinationRoute(
+      presentation,
+      DESTINATION_ROUTE,
+      testNavigation(routeNavigation.commit, routeNavigation.commitFilesystem),
+    )
     await routeNavigation.started
     seedRepoQueryDataForTest(repo, {
-      branches: [
-        createRepoBranch('feature/current', {
-          worktree: { path: CURRENT_WORKTREE, isPrimary: false, isLocked: false },
-        }),
-        createRepoBranch('feature/destination', {
-          worktree: { path: '/tmp/goblin-replaced-worktree', isPrimary: false, isLocked: false },
-        }),
+      branches: [createRepoBranch('feature/current'), createRepoBranch('feature/destination')],
+      worktrees: [
+        createRepoWorktreeSnapshotForTest('feature/current', CURRENT_WORKTREE),
+        createRepoWorktreeSnapshotForTest('feature/destination', '/tmp/goblin-replaced-worktree'),
       ],
       currentBranch: 'feature/current',
     })
@@ -156,15 +86,16 @@ describe('workspace pane destination navigation', () => {
     expect(setWorkspacePaneTab).not.toHaveBeenCalled()
   })
 
-  test('commits accepted branch data after a background refresh failure', async () => {
+  test('keeps an accepted worktree destination after a background refresh failure', async () => {
     const repo = seedDestinationRepo()
     const presentation = beginPresentation('feature/destination')
     const routeCommit = Promise.withResolvers<boolean>()
     const routeNavigation = deferredRouteCommit(routeCommit.promise)
-    const setWorkspacePaneTab = vi.spyOn(workspacesStore.getState(), 'setWorkspacePaneTab')
-    const committed = commitWorkspacePaneDestinationRoute(presentation, DESTINATION_ROUTE, {
-      commitWorkspacePaneRoute: routeNavigation.commit,
-    })
+    const committed = commitWorkspacePaneDestinationRoute(
+      presentation,
+      DESTINATION_ROUTE,
+      testNavigation(routeNavigation.commit, routeNavigation.commitFilesystem),
+    )
     await routeNavigation.started
     const queryKey = repoSnapshotQueryKey(REPO_ID, repo.workspaceRuntimeId)
     const query = appQueryClient.getQueryCache().find({ queryKey, exact: true })
@@ -173,7 +104,8 @@ describe('workspace pane destination navigation', () => {
     routeCommit.resolve(true)
 
     await expect(committed).resolves.toEqual({ kind: 'completed', changed: true, presentation: 'router-settled' })
-    expect(setWorkspacePaneTab).toHaveBeenCalledWith(REPO_ID, 'feature/destination', 'status')
+    expect(routeNavigation.commit).not.toHaveBeenCalled()
+    expect(routeNavigation.commitFilesystem).toHaveBeenCalledOnce()
   })
 
   test('uses a app presentation generation so the latest destination wins', async () => {
@@ -181,16 +113,20 @@ describe('workspace pane destination navigation', () => {
     const first = beginPresentation('feature/current')
     const firstCommit = Promise.withResolvers<boolean>()
     const firstNavigation = deferredRouteCommit(firstCommit.promise)
-    const firstWork = commitWorkspacePaneDestinationRoute(first, DESTINATION_ROUTE, {
-      commitWorkspacePaneRoute: firstNavigation.commit,
-    })
+    const firstWork = commitWorkspacePaneDestinationRoute(
+      first,
+      DESTINATION_ROUTE,
+      testNavigation(firstNavigation.commit, firstNavigation.commitFilesystem),
+    )
     await firstNavigation.started
 
     const second = beginPresentation('feature/destination')
     await expect(
-      commitWorkspacePaneDestinationRoute(second, DESTINATION_ROUTE, {
-        commitWorkspacePaneRoute: acceptedRouteCommit(),
-      }),
+      commitWorkspacePaneDestinationRoute(
+        second,
+        DESTINATION_ROUTE,
+        testNavigation(acceptedRouteCommit(), acceptedFilesystemRouteCommit()),
+      ),
     ).resolves.toEqual({ kind: 'completed', changed: true, presentation: 'router-settled' })
     firstCommit.resolve(true)
     await expect(firstWork).resolves.toEqual({ kind: 'superseded' })
@@ -201,9 +137,11 @@ describe('workspace pane destination navigation', () => {
     const presentation = beginPresentation('feature/destination')
     const routeCommit = Promise.withResolvers<boolean>()
     const routeNavigation = deferredRouteCommit(routeCommit.promise)
-    const committed = commitWorkspacePaneDestinationRoute(presentation, DESTINATION_ROUTE, {
-      commitWorkspacePaneRoute: routeNavigation.commit,
-    })
+    const committed = commitWorkspacePaneDestinationRoute(
+      presentation,
+      DESTINATION_ROUTE,
+      testNavigation(routeNavigation.commit, routeNavigation.commitFilesystem),
+    )
     await routeNavigation.started
 
     beginAppNavigation()
@@ -217,9 +155,11 @@ describe('workspace pane destination navigation', () => {
     const presentation = beginPresentation('feature/destination')
     const routeCommit = Promise.withResolvers<boolean>()
     const routeNavigation = deferredRouteCommit(routeCommit.promise)
-    const committed = commitWorkspacePaneDestinationRoute(presentation, DESTINATION_ROUTE, {
-      commitWorkspacePaneRoute: routeNavigation.commit,
-    })
+    const committed = commitWorkspacePaneDestinationRoute(
+      presentation,
+      DESTINATION_ROUTE,
+      testNavigation(routeNavigation.commit, routeNavigation.commitFilesystem),
+    )
     await routeNavigation.started
 
     primaryNavigationActions().actions.openSettings('general')
@@ -233,9 +173,11 @@ describe('workspace pane destination navigation', () => {
     const presentation = beginPresentation('feature/destination')
     const routeCommit = Promise.withResolvers<boolean>()
     const routeNavigation = deferredRouteCommit(routeCommit.promise)
-    const committed = commitWorkspacePaneDestinationRoute(presentation, DESTINATION_ROUTE, {
-      commitWorkspacePaneRoute: routeNavigation.commit,
-    })
+    const committed = commitWorkspacePaneDestinationRoute(
+      presentation,
+      DESTINATION_ROUTE,
+      testNavigation(routeNavigation.commit, routeNavigation.commitFilesystem),
+    )
     await routeNavigation.started
 
     primaryNavigationActions().actions.activateWorkspace(workspaceIdForTest('goblin+file:///tmp/another-repo'))
@@ -249,9 +191,11 @@ describe('workspace pane destination navigation', () => {
     const presentation = beginPresentation('feature/destination')
     const routeCommit = Promise.withResolvers<boolean>()
     const routeNavigation = deferredRouteCommit(routeCommit.promise)
-    const committed = commitWorkspacePaneDestinationRoute(presentation, DESTINATION_ROUTE, {
-      commitWorkspacePaneRoute: routeNavigation.commit,
-    })
+    const committed = commitWorkspacePaneDestinationRoute(
+      presentation,
+      DESTINATION_ROUTE,
+      testNavigation(routeNavigation.commit, routeNavigation.commitFilesystem),
+    )
     await routeNavigation.started
 
     observeAppHistoryNavigation({
@@ -267,8 +211,8 @@ describe('workspace pane destination navigation', () => {
   test('a destination commit consumes its own route observation without self-superseding', async () => {
     seedDestinationRepo()
     const { actions, routeNavigation } = primaryNavigationActions()
-    vi.mocked(routeNavigation.commitWorkspacePaneRoute).mockImplementation(
-      async (_repoId, _branchName, _route, options) => {
+    vi.mocked(routeNavigation.commitFilesystemWorkspacePaneRoute).mockImplementation(
+      async (_target, _route, options) => {
         const generation = options?.navigationGeneration
         if (!generation) return false
         const href = '/workspace/destination/tab/status'
@@ -297,8 +241,10 @@ function primaryNavigationActions() {
     openWorkspaceRootPane: vi.fn(),
     openRepoBranch: vi.fn(() => true),
     openRepoBranchTab: vi.fn(() => true),
-    openRepoBranchTerminal: vi.fn(() => true),
     commitWorkspacePaneRoute: acceptedRouteCommit(),
+    commitFilesystemWorkspacePaneRoute: vi.fn<AppRouteNavigation['commitFilesystemWorkspacePaneRoute']>(
+      async () => true,
+    ),
     openRepoNewWorktree: vi.fn(),
     openSettings: vi.fn(),
   }
@@ -332,43 +278,67 @@ function acceptedRouteCommit() {
   )
 }
 
-function deferredRouteCommit(completion: Promise<boolean>) {
-  const started = Promise.withResolvers<void>()
-  const commit = vi.fn<WorkspacePaneRouteCommitActions['commitWorkspacePaneRoute']>(
-    async (_repoId, _branchName, _route, options) => {
-      started.resolve()
-      const accepted = await completion
-      if (accepted && (!options?.navigationGeneration || appNavigationIsCurrent(options.navigationGeneration))) {
+function acceptedFilesystemRouteCommit() {
+  return vi.fn<FilesystemWorkspacePaneRouteCommitActions['commitFilesystemWorkspacePaneRoute']>(
+    async (_target, _route, options) => {
+      if (!options?.navigationGeneration || appNavigationIsCurrent(options.navigationGeneration)) {
         options?.onCommit?.()
       }
-      return accepted
+      return true
     },
   )
-  return { commit, started: started.promise }
 }
 
-function seedNoWorktreeRepo() {
-  const branch = createRepoBranch('feature/no-worktree')
-  const repo = seedRepoWithReadModelForTest({
-    id: REPO_ID,
-    branches: [branch],
-    currentBranchName: branch.name,
-  })
-  seedRepoQueryDataForTest(repo, { branches: [branch], currentBranch: branch.name })
+function testNavigation(
+  commitWorkspacePaneRoute: WorkspacePaneRouteCommitActions['commitWorkspacePaneRoute'],
+  commitFilesystemWorkspacePaneRoute: FilesystemWorkspacePaneRouteCommitActions['commitFilesystemWorkspacePaneRoute'] = vi.fn(
+    async () => {
+      throw new Error('Unexpected filesystem route commit')
+    },
+  ),
+): FilesystemWorkspacePaneRouteCommitActions {
+  return { commitWorkspacePaneRoute, commitFilesystemWorkspacePaneRoute }
+}
+
+function deferredRouteCommit(completion: Promise<boolean>) {
+  const started = Promise.withResolvers<void>()
+  const settle = async (
+    options:
+      | {
+          navigationGeneration?: ReturnType<typeof beginAppNavigation>
+          onCommit?: () => void
+        }
+      | undefined,
+  ) => {
+    started.resolve()
+    const accepted = await completion
+    if (accepted && (!options?.navigationGeneration || appNavigationIsCurrent(options.navigationGeneration))) {
+      options?.onCommit?.()
+    }
+    return accepted
+  }
+  const commit = vi.fn<WorkspacePaneRouteCommitActions['commitWorkspacePaneRoute']>(
+    async (_repoId, _branchName, _route, options) => await settle(options),
+  )
+  const commitFilesystem = vi.fn<FilesystemWorkspacePaneRouteCommitActions['commitFilesystemWorkspacePaneRoute']>(
+    async (_target, _route, options) => await settle(options),
+  )
+  return { commit, commitFilesystem, started: started.promise }
 }
 
 function seedDestinationRepo() {
-  const current = createRepoBranch('feature/current', {
-    worktree: { path: CURRENT_WORKTREE, isPrimary: false, isLocked: false },
-  })
-  const destination = createRepoBranch('feature/destination', {
-    worktree: { path: DESTINATION_WORKTREE, isPrimary: false, isLocked: false },
-  })
+  const current = createRepoBranch('feature/current')
+  const destination = createRepoBranch('feature/destination')
+  const worktrees = [
+    createRepoWorktreeSnapshotForTest(current.name, CURRENT_WORKTREE),
+    createRepoWorktreeSnapshotForTest(destination.name, DESTINATION_WORKTREE),
+  ]
   const repo = seedRepoWithReadModelForTest({
     id: REPO_ID,
     branches: [current, destination],
+    worktrees,
     currentBranchName: current.name,
   })
-  seedRepoQueryDataForTest(repo, { branches: [current, destination], currentBranch: current.name })
+  seedRepoQueryDataForTest(repo, { branches: [current, destination], worktrees, currentBranch: current.name })
   return repo
 }

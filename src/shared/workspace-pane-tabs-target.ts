@@ -1,4 +1,8 @@
-import type { RestorableWorkspacePaneTarget, RuntimeWorkspacePaneTarget } from '#/shared/workspace-runtime.ts'
+import type {
+  RestorableWorkspacePaneTarget,
+  RuntimeWorkspacePaneTarget,
+  WorkspacePaneFilesystemExecutionTarget,
+} from '#/shared/workspace-runtime.ts'
 import { isValidBranchInput } from '#/shared/refnames.ts'
 import {
   canonicalWorkspaceLocator,
@@ -27,6 +31,8 @@ export interface RootWorkspacePaneTabsTarget {
 
 export type WorkspacePaneTabsTarget =
   RootWorkspacePaneTabsTarget | GitBranchWorkspacePaneTabsTarget | GitWorktreeWorkspacePaneTabsTarget
+
+export type FilesystemWorkspacePaneTabsTarget = RootWorkspacePaneTabsTarget | GitWorktreeWorkspacePaneTabsTarget
 
 /** Returns a branch target's stable identity; this is never a worktree HEAD presentation. */
 export function workspacePaneTabsBranchIdentity(target: WorkspacePaneTabsTarget): string | null {
@@ -201,6 +207,10 @@ export function workspacePaneTabsTargetFromRestorable(
   return { kind: 'git-worktree', workspaceId: workspaceId, worktreePath: root.path }
 }
 
+export function workspacePaneTabsTargetFromRuntime(
+  target: WorkspacePaneFilesystemExecutionTarget,
+): FilesystemWorkspacePaneTabsTarget | null
+export function workspacePaneTabsTargetFromRuntime(target: RuntimeWorkspacePaneTarget): WorkspacePaneTabsTarget | null
 export function workspacePaneTabsTargetFromRuntime(target: RuntimeWorkspacePaneTarget): WorkspacePaneTabsTarget | null {
   if (!target.workspaceId || !target.workspaceRuntimeId) return null
   if (target.kind === 'workspace-root') {
@@ -214,6 +224,14 @@ export function workspacePaneTabsTargetFromRuntime(target: RuntimeWorkspacePaneT
   return { kind: 'git-worktree', workspaceId: target.workspaceId, worktreePath: root.path }
 }
 
+export function runtimeWorkspacePaneTarget(
+  target: FilesystemWorkspacePaneTabsTarget,
+  workspaceRuntimeId: string,
+): WorkspacePaneFilesystemExecutionTarget | null
+export function runtimeWorkspacePaneTarget(
+  target: WorkspacePaneTabsTarget,
+  workspaceRuntimeId: string,
+): RuntimeWorkspacePaneTarget | null
 export function runtimeWorkspacePaneTarget(
   target: WorkspacePaneTabsTarget,
   workspaceRuntimeId: string,

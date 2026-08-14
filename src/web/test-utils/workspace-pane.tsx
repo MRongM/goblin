@@ -204,8 +204,14 @@ export function routeNavigation(): AppRouteNavigation {
     options?.onCommit?.()
     return true
   })
-  const openRepoBranchTerminal: AppRouteNavigation['openRepoBranchTerminal'] = vi.fn(
-    (_repoId, _branchName, _sessionId, options) => {
+  const openRepoWorktreeTerminal: AppRouteNavigation['openRepoWorktreeTerminal'] = vi.fn(
+    (_repoId, _worktreePath, _sessionId, options) => {
+      options?.onCommit?.()
+      return true
+    },
+  )
+  const openRepoWorktreeTab: AppRouteNavigation['openRepoWorktreeTab'] = vi.fn(
+    (_repoId, _worktreePath, _tab, options) => {
       options?.onCommit?.()
       return true
     },
@@ -221,27 +227,29 @@ export function routeNavigation(): AppRouteNavigation {
     openWorkspaceRootPane: vi.fn(),
     openWorkspaceRootTab: vi.fn(),
     openWorkspaceRootTerminal: vi.fn(),
-    commitFilesystemWorkspacePaneRoute: vi.fn(async () => {
-      throw new Error('Unexpected workspace-root route commit in test')
+    commitFilesystemWorkspacePaneRoute: vi.fn(async (target, paneRoute, options) => {
+      if (target.kind === 'workspace-root') {
+        if (paneRoute === null) return true
+        return paneRoute.kind === 'static'
+          ? true
+          : openRepoWorktreeTerminal(target.workspaceId, '', paneRoute.terminalSessionId, options)
+      }
+      if (paneRoute === null) return true
+      return paneRoute.kind === 'static'
+        ? openRepoWorktreeTab(target.workspaceId, target.worktreePath, paneRoute.tab, options)
+        : openRepoWorktreeTerminal(target.workspaceId, target.worktreePath, paneRoute.terminalSessionId, options)
     }),
     openRepoBranch,
     openRepoBranchTab,
-    openRepoBranchTerminal,
     openRepoWorktree: vi.fn((_repoId, _worktreePath, options) => {
       options?.onCommit?.()
       return true
     }),
-    openRepoWorktreeTerminal: vi.fn(() => {
-      throw new Error('Unexpected worktree terminal navigation in test')
-    }),
-    openRepoWorktreeTab: vi.fn(() => {
-      throw new Error('Unexpected worktree tab navigation in test')
-    }),
+    openRepoWorktreeTerminal,
+    openRepoWorktreeTab,
     commitWorkspacePaneRoute: vi.fn(async (workspaceId, branchName, route, options) => {
       if (route === null) return openRepoBranch(workspaceId, branchName, options)
-      return route.kind === 'static'
-        ? openRepoBranchTab(workspaceId, branchName, route.tab, options)
-        : openRepoBranchTerminal(workspaceId, branchName, route.terminalSessionId, options)
+      return openRepoBranchTab(workspaceId, branchName, route.tab, options)
     }),
     openRepoNewWorktree: vi.fn(),
     cancelRepoNewWorktree: vi.fn(),

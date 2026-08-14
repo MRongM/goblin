@@ -3,11 +3,11 @@ import {
   seedRepoQueryDataForTest,
   seedRepoWithReadModelForTest,
   createRepoBranch,
+  createRepoWorktreeSnapshotForTest,
 } from '#/web/test-utils/repo-store.ts'
 import { beforeEach, describe, expect, test, vi } from 'vitest'
 import {
   beginWorkspacePaneCloseActiveTabPresentationLease,
-  commitWorkspacePaneCommittedRuntimeTargetRoute,
   commitWorkspacePaneControllerCloseBackTarget,
   commitWorkspacePaneControllerRoute,
   commitWorkspacePaneExactTargetRoute,
@@ -33,7 +33,7 @@ import type {
 } from '#/web/workspace-pane/workspace-pane-tab-model.ts'
 import { appQueryClient } from '#/web/app-query-client.ts'
 import { workspacesStore } from '#/web/stores/workspaces/store.ts'
-import { beginAppNavigation } from '#/web/app-navigation-lifecycle.ts'
+import { beginAppNavigation, currentAppNavigationGeneration } from '#/web/app-navigation-lifecycle.ts'
 import { workspaceIdForTest } from '#/test-utils/workspace-id.ts'
 
 const SOURCE_ROUTE = { kind: 'static' as const, tab: 'files' as const }
@@ -45,15 +45,38 @@ describe('workspace pane tab controller transactions', () => {
     appQueryClient.clear()
     resetWorkspacesStore()
     seedRepoWithReadModelForTest({
+      worktrees: [createRepoWorktreeSnapshotForTest('feature/a', '/worktree-a')],
       id: WORKSPACE_ID,
       workspaceRuntimeId: 'repo-runtime-1',
-      branches: [
-        createRepoBranch('feature/a', { worktree: { path: '/worktree-a', isPrimary: false, isLocked: false } }),
-      ],
+      branches: [createRepoBranch('feature/a'), createRepoBranch('feature/bare')],
       status: [{ path: '/worktree-a', branch: 'feature/a', isMain: false, entries: [] }],
       currentBranchName: 'feature/a',
       preferredWorkspacePaneTab: 'files',
     })
+  })
+
+  test('rejects a stale target before starting selection or close navigation', async () => {
+    const target = workspacePaneTarget()
+    workspacesStore.setState((state) => ({
+      workspaces: {
+        ...state.workspaces,
+        [WORKSPACE_ID]: { ...state.workspaces[WORKSPACE_ID]!, workspaceRuntimeId: 'repo-runtime-replaced' },
+      },
+    }))
+    const generation = currentAppNavigationGeneration()
+
+    await expect(selectWorkspacePaneControllerTab(target, staticTab('status'), controllerNavigation({}))).resolves.toBe(
+      false,
+    )
+    expect(
+      beginWorkspacePaneCloseActiveTabPresentationLease({
+        target,
+        closingEntry: workspacePaneStaticTabEntry('files'),
+        nextEntry: workspacePaneStaticTabEntry('status'),
+        workspacePaneRoute: SOURCE_ROUTE,
+      }),
+    ).toBeNull()
+    expect(currentAppNavigationGeneration()).toBe(generation)
   })
 
   test('commits an exact target route without feature observation', async () => {
@@ -61,7 +84,7 @@ describe('workspace pane tab controller transactions', () => {
     await expect(
       commitWorkspacePaneExactTargetRoute(workspacePaneTarget(), SOURCE_ROUTE, TARGET_ROUTE, committingNavigation()),
     ).resolves.toBe(true)
-    expect(setWorkspacePaneTab).toHaveBeenCalledWith(WORKSPACE_ID, 'feature/a', 'status')
+    expect(setWorkspacePaneTab).toHaveBeenCalledWith(WORKSPACE_ID, 'feature/bare', 'status')
   })
 
   test('passes the observed route as a compare-and-set precondition', async () => {
@@ -74,7 +97,7 @@ describe('workspace pane tab controller transactions', () => {
     ).resolves.toBe(false)
     expect(commitWorkspacePaneRoute).toHaveBeenCalledWith(
       WORKSPACE_ID,
-      'feature/a',
+      'feature/bare',
       TARGET_ROUTE,
       expect.objectContaining({ routePrecondition: { kind: 'exact-route', route: SOURCE_ROUTE } }),
     )
@@ -97,7 +120,7 @@ describe('workspace pane tab controller transactions', () => {
     ).resolves.toBe(true)
     expect(commitWorkspacePaneRoute).toHaveBeenCalledWith(
       WORKSPACE_ID,
-      'feature/a',
+      'feature/bare',
       TARGET_ROUTE,
       expect.objectContaining({ routePrecondition: { kind: 'current-workspace-target' } }),
     )
@@ -135,7 +158,6 @@ describe('workspace pane tab controller transactions', () => {
       {
         routeTarget: { kind: 'workspace-root', workspaceId: WORKSPACE_ID },
         workspaceRuntimeId: 'repo-runtime-1',
-        authority: { kind: 'workspace-runtime' },
       },
       { kind: 'static', tab: 'files' },
       expect.objectContaining({ navigationGeneration: expect.any(Number) }),
@@ -162,6 +184,8 @@ describe('workspace pane tab controller transactions', () => {
         {
           ...workspacePaneTarget(),
           routeTarget: { kind: 'git-worktree', workspaceId: WORKSPACE_ID, worktreePath: '/worktree-a' },
+          branchName: 'feature/a',
+          worktreePath: '/worktree-a',
           paneTarget: {
             kind: 'git-worktree',
             workspaceId: WORKSPACE_ID,
@@ -227,6 +251,8 @@ describe('workspace pane tab controller transactions', () => {
     const target = {
       ...workspacePaneTarget(),
       routeTarget: { kind: 'git-worktree' as const, workspaceId: WORKSPACE_ID, worktreePath: '/worktree-a' },
+      branchName: 'feature/a',
+      worktreePath: '/worktree-a',
       paneTarget: {
         kind: 'git-worktree' as const,
         workspaceId: WORKSPACE_ID,
@@ -245,48 +271,6 @@ describe('workspace pane tab controller transactions', () => {
       ),
     ).resolves.toBe(false)
     expect(commitFilesystemWorkspacePaneRoute).not.toHaveBeenCalled()
-  })
-
-  test('commits a server-created runtime route while the local branch label is stale', async () => {
-    const navigation = committingNavigation()
-
-    await expect(
-      commitWorkspacePaneCommittedRuntimeTargetRoute(
-        {
-          workspaceId: WORKSPACE_ID,
-          workspaceRuntimeId: 'repo-runtime-1',
-          routeTarget: {
-            kind: 'git-branch',
-            workspaceId: WORKSPACE_ID,
-            branchName: 'feature/renamed',
-          },
-          branchName: 'feature/renamed',
-          worktreePath: '/worktree-a',
-          paneTarget: {
-            kind: 'git-worktree',
-            workspaceId: WORKSPACE_ID,
-            worktreePath: '/worktree-a',
-          },
-        },
-        { kind: 'terminal', terminalSessionId: 'term-111111111111111111111' },
-        navigation,
-      ),
-    ).resolves.toBe(true)
-
-    expect(navigation.commitWorkspacePaneRoute).toHaveBeenCalledWith(
-      WORKSPACE_ID,
-      'feature/renamed',
-      { kind: 'terminal', terminalSessionId: 'term-111111111111111111111' },
-      expect.any(Object),
-    )
-    const targetKey = workspacePaneTabsTargetIdentityKey({
-      kind: 'git-worktree' as const,
-      workspaceId: WORKSPACE_ID,
-      worktreePath: '/worktree-a',
-    })
-    expect(workspacesStore.getState().workspaces[WORKSPACE_ID]?.ui.preferredWorkspacePaneTabByTarget[targetKey]).toBe(
-      'terminal',
-    )
   })
 
   test('rejects exact target completion after its runtime is replaced', async () => {
@@ -393,9 +377,8 @@ describe('workspace pane tab controller transactions', () => {
     )
     const repo = workspacesStore.getState().workspaces[WORKSPACE_ID]!
     seedRepoQueryDataForTest(repo, {
-      branches: [
-        createRepoBranch('feature/a', { worktree: { path: '/worktree-b', isPrimary: false, isLocked: false } }),
-      ],
+      branches: [createRepoBranch('feature/a')],
+      worktrees: [createRepoWorktreeSnapshotForTest('feature/a', '/worktree-b')],
       currentBranch: 'feature/a',
       status: [],
     })
@@ -443,10 +426,10 @@ function workspacePaneTarget(): WorkspacePaneTabModel {
   return {
     workspaceId: WORKSPACE_ID,
     workspaceRuntimeId: 'repo-runtime-1',
-    routeTarget: { kind: 'git-branch', workspaceId: WORKSPACE_ID, branchName: 'feature/a' },
-    branchName: 'feature/a',
-    worktreePath: '/worktree-a',
-    paneTarget: { kind: 'git-worktree', workspaceId: WORKSPACE_ID, worktreePath: '/worktree-a' },
+    routeTarget: { kind: 'git-branch', workspaceId: WORKSPACE_ID, branchName: 'feature/bare' },
+    branchName: 'feature/bare',
+    worktreePath: null,
+    paneTarget: { kind: 'git-branch', workspaceId: WORKSPACE_ID, branchName: 'feature/bare' },
   } as WorkspacePaneTabModel
 }
 

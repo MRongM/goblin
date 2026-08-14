@@ -1,11 +1,7 @@
 import { computed, toValue } from 'vue'
 import type { ComputedRef, MaybeRefOrGetter } from 'vue'
-import type {
-  CurrentGitWorkspacePanePresentation,
-  GitWorkspacePaneProjection,
-} from '#/web/components/repo-workspace/model.ts'
+import type { CurrentGitWorkspacePanePresentation } from '#/web/components/repo-workspace/model.ts'
 import type { WorkspaceId } from '#/shared/workspace-locator.ts'
-import type { WorkspaceUiState } from '#/web/stores/workspaces/types.ts'
 import type { ParsedWorkspacePaneRoute } from '#/web/App.tsx'
 import {
   createWorkspacePaneTabModel,
@@ -16,6 +12,7 @@ import {
   type WorkspacePaneTabModelInput,
 } from '#/web/workspace-pane/workspace-pane-tab-model.ts'
 import { preferredWorkspacePaneTabForTarget } from '#/web/stores/workspaces/workspace-pane-preferences.ts'
+import type { WorkspacePanePreferenceState } from '#/web/stores/workspaces/workspace-pane-preferences.ts'
 import {
   useWorkspacePaneTabsQuery,
   workspacePaneTabsForTargetFromQueryData,
@@ -34,13 +31,13 @@ import {
 export interface WorkspacePaneModelWorkspace {
   id: WorkspaceId
   workspaceRuntimeId: string
-  ui: Pick<WorkspaceUiState, 'preferredWorkspacePaneTabByTarget'>
+  ui: WorkspacePanePreferenceState
 }
 
 export type WorkspacePaneRuntimeContext = Pick<WorkspacePaneModelWorkspace, 'workspaceRuntimeId' | 'ui'>
 
 export function useGitWorkspacePaneTabModel(
-  gitWorkspace: MaybeRefOrGetter<Pick<GitWorkspacePaneProjection, 'id' | 'workspaceRuntimeId' | 'ui'>>,
+  gitWorkspace: MaybeRefOrGetter<WorkspacePaneModelWorkspace>,
   detail: MaybeRefOrGetter<CurrentGitWorkspacePanePresentation>,
   workspacePaneRoute: MaybeRefOrGetter<ParsedWorkspacePaneRoute | null | undefined>,
 ): ComputedRef<WorkspacePaneTabModel> {
@@ -54,13 +51,13 @@ export function useGitWorkspacePaneTabModel(
  * projection.
  */
 export function useGitWorkspacePaneTabModelInput(
-  gitWorkspace: MaybeRefOrGetter<Pick<GitWorkspacePaneProjection, 'id' | 'workspaceRuntimeId' | 'ui'>>,
+  gitWorkspace: MaybeRefOrGetter<WorkspacePaneModelWorkspace>,
   detail: MaybeRefOrGetter<CurrentGitWorkspacePanePresentation>,
   workspacePaneRoute: MaybeRefOrGetter<ParsedWorkspacePaneRoute | null | undefined>,
 ): ComputedRef<WorkspacePaneTabModelInput> {
   const workspace = computed(() => toValue(gitWorkspace))
   const branchName = computed(() => toValue(detail).branch?.name ?? null)
-  const worktreePath = computed(() => toValue(detail).branch?.worktree?.path ?? null)
+  const worktreePath = computed(() => toValue(detail).worktree?.path ?? null)
   const runtimeProjection = useWorkspacePaneRuntimeTabTargetProjection({
     workspaceId: () => workspace.value.id,
     workspaceRuntimeId: () => workspace.value.workspaceRuntimeId,
@@ -86,6 +83,7 @@ export function useGitWorkspacePaneTabModelInput(
     const target = currentBranchName
       ? requiredGitWorkspacePaneTabsTarget(currentWorkspace.id, currentBranchName, currentWorktreePath)
       : null
+    const routedWorktree = target?.kind === 'git-worktree'
     const tabEntries = workspacePaneTabsForTargetFromQueryData(
       workspacePaneTabsQuery.data.value ?? { revision: 0, entries: [] },
       target ?? {
@@ -100,22 +98,20 @@ export function useGitWorkspacePaneTabModelInput(
         ? route.tab
         : route?.kind === 'terminal'
           ? 'terminal'
-          : route?.kind === 'invalid-static' || route === null
+          : route?.kind === 'invalid-static' || (route === null && !routedWorktree)
             ? null
             : (preferredWorkspacePaneTabForTarget(currentWorkspace.ui, target) ?? tabEntries[0]?.type ?? null)
     return {
       workspaceId: currentWorkspace.id,
       workspaceRuntimeId: currentWorkspace.workspaceRuntimeId,
-      routeTarget: currentBranchName
-        ? { kind: 'git-branch', workspaceId: currentWorkspace.id, branchName: currentBranchName }
-        : { kind: 'inactive', workspaceId: currentWorkspace.id },
+      routeTarget: target ?? { kind: 'inactive', workspaceId: currentWorkspace.id },
       paneTarget: target ?? { kind: 'inactive', workspaceId: currentWorkspace.id },
       worktreeHead:
         currentBranchName && currentWorktreePath
           ? { kind: 'branch' as const, branchName: currentBranchName }
           : undefined,
       preferredTab,
-      allowPreferredTabFallback: route === undefined,
+      allowPreferredTabFallback: route === undefined || (route === null && routedWorktree),
       tabEntries,
       tabEntriesProjectionPhase: workspacePaneTabsProjectionPhase(workspacePaneTabsQuery.status.value),
       runtimeTabViews: runtimeProjection.value.runtimeTabViews,

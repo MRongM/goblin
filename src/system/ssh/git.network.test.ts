@@ -23,7 +23,7 @@ import {
 
 describe('remote git network', () => {
   test('pullRemoteBranch reports missing upstream remote explicitly', async () => {
-    const run = vi.fn<RemoteGitRunner>(async (command: { type: string }) => {
+    const run = vi.fn<RemoteGitRunner>(async (command: { type: string; attachedBranch?: string | null }) => {
       switch (command.type) {
         case 'gitSnapshot':
           return okRemoteResult(MAIN_EMPTY_BRANCHES_SNAPSHOT_OUTPUT)
@@ -35,6 +35,10 @@ describe('remote git network', () => {
           )
         case 'gitWorktreeList':
           return okRemoteResult(PRIMARY_WORKTREE_OUTPUT)
+        case 'resolveRepoCommonDir':
+          return okRemoteResult('/srv/repo/.git\0')
+        case 'gitOperationState':
+          return okRemoteResult(`operation none\nmaterialized-branch ${command.attachedBranch ?? ''}\n`)
         case 'gitStatus':
           return okRemoteResult('')
         default:
@@ -261,7 +265,15 @@ describe('remote git network', () => {
         return okRemoteResult(MAIN_EMPTY_BRANCHES_SNAPSHOT_OUTPUT)
       }
       if (command.type === 'gitWorktreeList') {
-        return okRemoteResult(worktreePorcelain('worktree /srv/repo\nHEAD f00ba40\nbranch refs/heads/main'))
+        return okRemoteResult(
+          worktreePorcelain(
+            'worktree /srv/repo\nHEAD f00ba40000000000000000000000000000000000\nbranch refs/heads/main',
+          ),
+        )
+      }
+      if (command.type === 'resolveRepoCommonDir') return okRemoteResult('/srv/repo/.git\0')
+      if (command.type === 'gitOperationState') {
+        return okRemoteResult(`operation none\nmaterialized-branch ${command.attachedBranch ?? ''}\n`)
       }
       if (command.type === 'gitUpstream') return okRemoteResult(NUL.repeat(3))
       if (command.type === 'gitIsAncestor') return failRemoteResult('merge read failed')

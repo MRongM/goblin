@@ -2,6 +2,7 @@ import {
   resetWorkspacesStore,
   seedRepoWithReadModelForTest,
   createBranchSnapshot,
+  createRepoWorktreeSnapshotForTest,
 } from '#/web/test-utils/repo-store.ts'
 import { flushTestUpdates } from '#/test-utils/render.tsx'
 import { defineComponent } from 'vue'
@@ -57,12 +58,7 @@ import { setClientBridgeForTests } from '#/web/client-bridge.ts'
 import { workspacesStore } from '#/web/stores/workspaces/store.ts'
 import { terminalProjectionHydrationStore } from '#/web/stores/terminal-projection-hydration.ts'
 import type { WorkspacePaneRoute } from '#/web/App.tsx'
-import {
-  terminalExecutionPath,
-  terminalPresentationBranch,
-  terminalSessionCoordinates,
-  type TerminalSessionBase,
-} from '#/shared/terminal-types.ts'
+import { terminalExecutionPath, terminalSessionCoordinates, type TerminalSessionBase } from '#/shared/terminal-types.ts'
 import { canonicalWorkspaceLocator } from '#/shared/workspace-locator.ts'
 import { hostInfoStore } from '#/web/stores/host-info.ts'
 import { installWorkspacePaneTabsTestBridge } from '#/web/test-utils/workspace-pane-bridge.ts'
@@ -181,7 +177,14 @@ type GitWorkspacePaneToolbarHarnessProps = Omit<
 
 const GitWorkspacePaneToolbarHarness = defineComponent<GitWorkspacePaneToolbarHarnessProps>({
   name: 'GitWorkspacePaneToolbarHarness',
-  props: ['repo', 'detail', 'workspacePaneId', 'workspacePaneRoute', 'trafficLightOffset', 'onBackToBranchNavigator'],
+  props: [
+    'repo',
+    'detail',
+    'workspacePaneId',
+    'workspacePaneRoute',
+    'trafficLightOffset',
+    'onBackToGitWorkspaceNavigator',
+  ],
 
   setup(props) {
     const workspacePaneTabModel = useGitWorkspacePaneTabModel(
@@ -197,7 +200,7 @@ const GitWorkspacePaneToolbarHarness = defineComponent<GitWorkspacePaneToolbarHa
         workspacePaneRoute={props.workspacePaneRoute}
         workspacePaneTabModel={workspacePaneTabModel.value}
         trafficLightOffset={props.trafficLightOffset}
-        onBackToBranchNavigator={props.onBackToBranchNavigator}
+        onBackToGitWorkspaceNavigator={props.onBackToGitWorkspaceNavigator}
       />
     )
   },
@@ -316,18 +319,15 @@ export function renderToolbar(options: {
     scrollToBottom: ReturnType<typeof vi.fn>
     closeTerminalByDescriptor: ReturnType<typeof vi.fn>
     showRepoBranchWorkspacePaneTab: ReturnType<typeof vi.fn>
-    showRepoBranchTerminalSession: ReturnType<typeof vi.fn>
   }
 } {
   const branchName = options.worktree === false ? 'feature/no-worktree' : 'feature/worktree'
-  const branch = createBranchSnapshot(
-    branchName,
-    options.worktree === false ? {} : { worktree: { path: WORKTREE_PATH, isPrimary: false, isLocked: false } },
-  )
+  const branch = createBranchSnapshot(branchName)
   const repo = seedRepoWithReadModelForTest({
     id: REPO_ID,
     workspaceRuntimeId: options.workspaceRuntimeId,
     branchSnapshots: [branch],
+    worktrees: options.worktree === false ? [] : [createRepoWorktreeSnapshotForTest(branchName, WORKTREE_PATH)],
     currentBranchName: branchName,
     preferredWorkspacePaneTab: options.preferredWorkspacePaneTab ?? 'status',
     workspacePaneTabsByBranch:
@@ -384,7 +384,7 @@ export function renderToolbar(options: {
           workspaceRuntimeId: repo.workspaceRuntimeId,
           root: canonicalWorkspaceLocator(`goblin+file://${WORKTREE_PATH}`)!,
         },
-        presentation: { kind: 'git-worktree' as const, head: { kind: 'branch' as const, branchName: branchName } },
+        presentation: { kind: 'git-worktree' as const },
       }
     : null
   const terminalFilesystemTargetSnapshot: TerminalFilesystemTargetSnapshot = {
@@ -410,12 +410,10 @@ export function renderToolbar(options: {
   const createTerminal = vi.fn(async (base: TerminalSessionBase) => {
     const terminalSessionId = 'term-111111111111111111111'
     const coordinates = terminalSessionCoordinates(base)
-    const branchName = terminalPresentationBranch(base.presentation)
-    if (!branchName) throw new Error('expected Git worktree terminal fixture')
+    if (base.target.kind !== 'git-worktree') throw new Error('expected Git worktree terminal fixture')
     workspacePaneTabsTestBridge.addRuntimeTab({
       workspaceId: coordinates.workspaceId,
       workspaceRuntimeId: coordinates.workspaceRuntimeId,
-      branchName,
       worktreePath: terminalExecutionPath(base.target),
       terminalSessionId,
     })
@@ -425,7 +423,6 @@ export function renderToolbar(options: {
   const scrollToBottom = vi.fn()
   const closeTerminalByDescriptor = vi.fn(async () => ({ kind: 'committed' as const, projection: 'applied' as const }))
   const showRepoBranchWorkspacePaneTab = vi.fn(options.navigation.showRepoBranchWorkspacePaneTab)
-  const showRepoBranchTerminalSession = vi.fn(options.navigation.showRepoBranchTerminalSession)
   const commandContext: TerminalSessionContextValue = terminalSessionContextWithCreatedAdmissionForTest({
     createTerminal,
     selectTerminal,
@@ -474,7 +471,6 @@ export function renderToolbar(options: {
   const navigation = navigationWith({
     ...options.navigation,
     showRepoBranchWorkspacePaneTab,
-    showRepoBranchTerminalSession,
   })
   const { container, rerender } = renderInJsdom(
     <VueQueryClientScope client={queryClient}>
@@ -495,13 +491,12 @@ export function renderToolbar(options: {
   )
 
   const rerenderWorktreePath = async (worktreePath: string) => {
-    const nextBranch = createBranchSnapshot(branchName, {
-      worktree: { path: worktreePath, isPrimary: false, isLocked: false },
-    })
+    const nextBranch = createBranchSnapshot(branchName)
     const nextRepo = seedRepoWithReadModelForTest({
       id: REPO_ID,
       workspaceRuntimeId: repo.workspaceRuntimeId,
       branchSnapshots: [nextBranch],
+      worktrees: [createRepoWorktreeSnapshotForTest(branchName, worktreePath)],
       currentBranchName: branchName,
       preferredWorkspacePaneTab,
     })
@@ -560,7 +555,6 @@ export function renderToolbar(options: {
       scrollToBottom,
       closeTerminalByDescriptor,
       showRepoBranchWorkspacePaneTab,
-      showRepoBranchTerminalSession,
     },
   }
 }
@@ -584,7 +578,6 @@ export function navigationWith(overrides: AppNavigationOverridesForTest): Observ
     selectRepoBranch: () => true,
     showRepoBranchEmptyWorkspacePane: () => true,
     showRepoBranchWorkspacePaneTab: () => true,
-    showRepoBranchTerminalSession: () => true,
     goBack: () => {},
     goForward: () => {},
     openSettings: () => {},
@@ -621,6 +614,7 @@ export function tabsFor(branchName: string): WorkspacePaneTabEntry[] {
         {
           workspaceId: repo.id,
           branches: getRepoSnapshotQueryData(repo.id, repo.workspaceRuntimeId)?.branches ?? [],
+          worktrees: getRepoSnapshotQueryData(repo.id, repo.workspaceRuntimeId)?.worktrees ?? [],
         },
         branchName,
       )
@@ -711,7 +705,7 @@ export function externalAppLauncherTarget(repo: WorkspaceState, worktreePath: st
     workspaceId: repo.id,
     workspaceRuntimeId: repo.workspaceRuntimeId,
     worktreePath,
-    head: { kind: 'branch', branchName: 'feature/worktree' },
+    head: { kind: 'detached' },
     capabilities: projection.probe.capabilities,
   })
 }

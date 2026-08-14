@@ -19,13 +19,25 @@ import {
 import { workspacePaneRuntimeTabEntry, workspacePaneStaticTabEntry } from '#/shared/workspace-pane.ts'
 import { setWorkspacePaneTabsForTargetQueryData } from '#/web/test-utils/workspace-pane-tabs.ts'
 import { terminalProjectionHydrationStore } from '#/web/stores/terminal-projection-hydration.ts'
-import { dispatchRetiredTerminalWorkspacePaneTabPresentationAction } from '#/web/workspace-pane/workspace-pane-tab-close-presentation.ts'
+import {
+  dispatchRetiredTerminalWorkspacePaneTabPresentationAction as dispatchRetiredTerminalWorkspacePaneTabPresentationActionRaw,
+  type RetiredTerminalWorkspacePaneTabPresentationOptions,
+} from '#/web/workspace-pane/workspace-pane-tab-close-presentation.ts'
+import { workspacesStore } from '#/web/stores/workspaces/store.ts'
 
 const feedbackMocks = vi.hoisted(() => ({ warning: vi.fn() }))
 
 vi.mock('vue-sonner', () => ({ toast: { error: vi.fn(), warning: feedbackMocks.warning } }))
 
 const REPO_ID = workspaceIdForTest('goblin+file:///tmp/workspace-pane-tab-close-presentation-repo')
+
+function dispatchRetiredTerminalWorkspacePaneTabPresentationAction(
+  options: Omit<RetiredTerminalWorkspacePaneTabPresentationOptions, 'workspaceRuntimeId'>,
+) {
+  const workspaceRuntimeId = workspacesStore.getState().workspaces[options.workspaceId]?.workspaceRuntimeId
+  if (!workspaceRuntimeId) throw new Error('missing workspace runtime fixture')
+  return dispatchRetiredTerminalWorkspacePaneTabPresentationActionRaw({ ...options, workspaceRuntimeId })
+}
 
 beforeEach(() => {
   feedbackMocks.warning.mockClear()
@@ -175,7 +187,6 @@ function navigationWith(overrides: AppNavigationOverridesForTest = {}): AppNavig
     selectRepoBranch: vi.fn(() => true),
     showRepoBranchEmptyWorkspacePane: vi.fn(() => true),
     showRepoBranchWorkspacePaneTab: vi.fn(() => true),
-    showRepoBranchTerminalSession: vi.fn(() => true),
     showWorkspaceRootPaneTab: vi.fn((_repoId, _presentation, options) => {
       options?.onCommit?.()
       return true

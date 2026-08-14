@@ -23,21 +23,15 @@ import {
 import { readWorkspacePaneTabsForTarget } from '#/web/workspace-pane/workspace-pane-tabs-query.ts'
 import { workspacePaneStaticTabsFromEntries } from '#/web/workspace-pane/workspace-pane-tabs.ts'
 import { terminalProjectionHydrationStore } from '#/web/stores/terminal-projection-hydration.ts'
-import type { AppNavigationActions } from '#/web/app-navigation-actions.ts'
 import type { TerminalFilesystemTargetSnapshot } from '#/web/components/terminal/types.ts'
 import type { WorkspacePaneCommandTarget } from '#/web/workspace-pane/workspace-pane-command-target.ts'
 import { getRepoSnapshotQueryData } from '#/web/repo-query-cache.ts'
+import { repoWorktreeForBranch } from '#/shared/git-types.ts'
 import {
   gitWorktreePaneFilesystemTarget,
-  workspacePaneFilesystemRootPath,
   workspaceRootPaneFilesystemTarget,
 } from '#/web/workspace-pane/workspace-pane-filesystem-target.ts'
-import {
-  terminalPresentationBranch,
-  terminalExecutionPath,
-  terminalSessionCoordinates,
-  type TerminalSessionBase,
-} from '#/shared/terminal-types.ts'
+import { terminalExecutionPath, terminalSessionCoordinates, type TerminalSessionBase } from '#/shared/terminal-types.ts'
 import { canonicalWorkspaceLocator } from '#/shared/workspace-locator.ts'
 import type { WorkspacePaneTabEntry } from '#/shared/workspace-pane.ts'
 import { workspacePaneRuntimeTabEntry } from '#/shared/workspace-pane.ts'
@@ -50,10 +44,10 @@ import { resetWorkspacePaneActionQueueForTest } from '#/web/workspace-pane/works
 import {
   observedAppNavigationActionsForTest,
   observedWorkspacePaneRouteForTarget,
+  observeWorkspacePaneRouteForTest,
   seedInitialObservedWorkspacePaneRouteForTest,
   type ObservedAppNavigationActionsForTest,
   type AppNavigationOverridesForTest,
-  type WorkspacePaneNavigationObservation,
 } from '#/web/test-utils/workspace-pane-navigation.ts'
 import { resetAppNavigationForTest } from '#/web/app-navigation-lifecycle.ts'
 import { resetTerminalAutoFocusForTest } from '#/web/terminal-focus.ts'
@@ -68,25 +62,10 @@ interface WorkspaceCommandFixtureOptions {
 
 function commandTargetForFixture(options: WorkspaceCommandFixtureOptions): WorkspacePaneCommandTarget {
   if (options.filesystemTarget) {
-    return options.branchName
-      ? {
-          routeTarget: {
-            kind: 'git-branch',
-            workspaceId: options.filesystemTarget.workspaceId,
-            branchName: options.branchName,
-          },
-          workspacePaneRoute: options.workspacePaneRoute,
-          filesystemTarget: options.filesystemTarget,
-        }
-      : {
-          routeTarget: {
-            kind: 'git-worktree',
-            workspaceId: options.filesystemTarget.workspaceId,
-            worktreePath: workspacePaneFilesystemRootPath(options.filesystemTarget),
-          },
-          workspacePaneRoute: options.workspacePaneRoute,
-          filesystemTarget: options.filesystemTarget,
-        }
+    return {
+      workspacePaneRoute: options.workspacePaneRoute,
+      filesystemTarget: options.filesystemTarget,
+    }
   }
   if (options.branchName) {
     const repo = options.workspaceId ? workspacesStore.getState().workspaces[options.workspaceId] : null
@@ -95,21 +74,32 @@ function commandTargetForFixture(options: WorkspaceCommandFixtureOptions): Works
           (candidate) => candidate.name === options.branchName,
         )
       : null
-    if (repo?.capability.kind === 'git' && branch?.worktree) {
+    const worktree =
+      branch && repo
+        ? repoWorktreeForBranch(
+            getRepoSnapshotQueryData(repo.id, repo.workspaceRuntimeId)?.worktrees ?? [],
+            branch.name,
+          )
+        : undefined
+    if (repo?.capability.kind === 'git' && worktree) {
       return {
-        routeTarget: { kind: 'git-branch', workspaceId: repo.id, branchName: options.branchName },
         workspacePaneRoute: options.workspacePaneRoute,
         filesystemTarget: gitWorktreePaneFilesystemTarget({
           workspaceId: repo.id,
           workspaceRuntimeId: repo.workspaceRuntimeId,
-          worktreePath: branch.worktree.path,
+          worktreePath: worktree.path,
           head: { kind: 'branch', branchName: options.branchName },
           capabilities: repo.capability.probe.capabilities,
         }),
       }
     }
     if (!options.workspaceId) throw new Error('expected workspace id for branch command fixture')
+    if (!repo) throw new Error('expected workspace for branch command fixture')
+    if (options.workspacePaneRoute?.kind === 'terminal') {
+      throw new Error('branch command fixture cannot present a runtime tab')
+    }
     return {
+      workspaceRuntimeId: repo.workspaceRuntimeId,
       routeTarget: {
         kind: 'git-branch',
         workspaceId: workspaceIdForTest(options.workspaceId),
@@ -122,7 +112,6 @@ function commandTargetForFixture(options: WorkspaceCommandFixtureOptions): Works
   const repo = options.workspaceId ? workspacesStore.getState().workspaces[options.workspaceId] : null
   if (!repo || repo.capability.probe.status !== 'ready') throw new Error('expected ready workspace command fixture')
   return {
-    routeTarget: { kind: 'workspace-root', workspaceId: repo.id },
     workspacePaneRoute: options.workspacePaneRoute,
     filesystemTarget: workspaceRootPaneFilesystemTarget({
       workspaceId: repo.id,
@@ -178,7 +167,6 @@ export const WORKTREE_PANE_TARGET = {
   kind: 'git-worktree' as const,
   workspaceId: REPO_ID,
   worktreePath: WORKTREE_PATH,
-  head: { kind: 'branch' as const, branchName: 'feature/worktree' },
 }
 export const WORKTREE_KEY = formatTerminalFilesystemTargetKeyForPath(REPO_ID, WORKTREE_PATH)
 export let workspacePaneTabsTestBridge: ReturnType<typeof installWorkspacePaneTabsTestBridge>
@@ -216,6 +204,7 @@ export function preferredWorkspacePaneTab(branch = 'feature/worktree') {
           {
             workspaceId: repo.id,
             branches: getRepoSnapshotQueryData(repo.id, repo.workspaceRuntimeId)?.branches ?? [],
+            worktrees: getRepoSnapshotQueryData(repo.id, repo.workspaceRuntimeId)?.worktrees ?? [],
           },
           branch,
         ),
@@ -234,6 +223,7 @@ export function tabsFor(branch: string): WorkspacePaneTabEntry[] {
         {
           workspaceId: repo.id,
           branches: getRepoSnapshotQueryData(repo.id, repo.workspaceRuntimeId)?.branches ?? [],
+          worktrees: getRepoSnapshotQueryData(repo.id, repo.workspaceRuntimeId)?.worktrees ?? [],
         },
         branch,
       )
@@ -256,7 +246,7 @@ export function expectedTerminalBase(): TerminalSessionBase {
       workspaceRuntimeId: workspaceRuntimeId,
       root: canonicalWorkspaceLocator('goblin+file:///tmp/goblin-workspace-command-worktree')!,
     },
-    presentation: { kind: 'git-worktree' as const, head: { kind: 'branch' as const, branchName: 'feature/worktree' } },
+    presentation: { kind: 'git-worktree' as const },
   }
 }
 
@@ -290,12 +280,10 @@ export function recordCreatedTerminalSelection(base: TerminalSessionBase, termin
       formatTerminalFilesystemTargetKey(coordinates.workspaceId, coordinates.executionRootId),
       terminalSessionId,
     )
-  const branchName = terminalPresentationBranch(base.presentation)
-  if (!branchName) return
+  if (base.target.kind !== 'git-worktree') return
   workspacePaneTabsTestBridge.addRuntimeTab({
     workspaceId: coordinates.workspaceId,
     workspaceRuntimeId: coordinates.workspaceRuntimeId,
-    branchName,
     worktreePath: terminalExecutionPath(base.target),
     terminalSessionId,
   })
@@ -303,12 +291,10 @@ export function recordCreatedTerminalSelection(base: TerminalSessionBase, termin
 
 export function removeTerminalFromWorkspacePaneTabsServer(base: TerminalSessionBase, terminalSessionId: string): void {
   const coordinates = terminalSessionCoordinates(base)
-  const branchName = terminalPresentationBranch(base.presentation)
-  if (!branchName) throw new Error('expected Git worktree terminal fixture')
+  if (base.target.kind !== 'git-worktree') throw new Error('expected Git worktree terminal fixture')
   workspacePaneTabsTestBridge.removeRuntimeTab({
     workspaceId: coordinates.workspaceId,
     workspaceRuntimeId: coordinates.workspaceRuntimeId,
-    branchName,
     worktreePath: terminalExecutionPath(base.target),
     terminalSessionId,
   })
@@ -338,7 +324,6 @@ export function navigationWith(
       state.setWorkspacePaneTab(canonicalWorkspaceId, branch, tab)
       return true
     },
-    showRepoBranchTerminalSession: () => true,
     showWorkspaceRootPaneTab: (workspaceId, presentation, options) => {
       workspacesStore
         .getState()
@@ -350,9 +335,6 @@ export function navigationWith(
       return true
     },
     commitFilesystemWorkspacePaneRoute: async (target, route, options) => {
-      if (target.routeTarget.kind !== 'workspace-root') {
-        throw new Error('unexpected detached-worktree route commit in workspace command fixture')
-      }
       workspacesStore
         .getState()
         .setWorkspacePaneTabForTarget(
@@ -360,6 +342,15 @@ export function navigationWith(
           route?.kind === 'terminal' ? 'terminal' : route?.kind === 'static' ? route.tab : null,
         )
       options?.onCommit?.()
+      if (target.routeTarget.kind === 'git-worktree') {
+        observeWorkspacePaneRouteForTest({
+          workspaceId: target.routeTarget.workspaceId,
+          workspaceRuntimeId: target.workspaceRuntimeId,
+          branchName: '',
+          worktreePath: target.routeTarget.worktreePath,
+          route,
+        })
+      }
       return true
     },
     goBack: () => {},

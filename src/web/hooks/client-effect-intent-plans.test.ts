@@ -1,4 +1,5 @@
 import {
+  createRepoWorktreeSnapshotForTest,
   resetWorkspacesStore,
   seedRepoWithReadModelForTest,
   createBranchSnapshot,
@@ -12,7 +13,7 @@ import {
   createWorkspaceIntentPlan,
 } from '#/web/hooks/client-effect-intent-plans.ts'
 import { getRepoSnapshotQueryData, getRepoWorktreeStatusQueryData } from '#/web/repo-query-cache.ts'
-import type { BranchSnapshotInfo, WorktreeStatus } from '#/shared/git-types.ts'
+import type { BranchSnapshotInfo, RepoWorktreeSnapshot, WorktreeStatus } from '#/shared/git-types.ts'
 import type { WorkspaceState } from '#/web/stores/workspaces/types.ts'
 import { workspaceIdForTest } from '#/test-utils/workspace-id.ts'
 import { workspaceRootPaneFilesystemTarget } from '#/web/workspace-pane/workspace-pane-filesystem-target.ts'
@@ -31,10 +32,15 @@ const CURRENT_GIT_REPO = {
   },
 }
 
-function repositoryFacts(branches: BranchSnapshotInfo[], status: WorktreeStatus[] | undefined) {
+function repositoryFacts(
+  branches: BranchSnapshotInfo[],
+  status: WorktreeStatus[] | undefined,
+  worktrees: RepoWorktreeSnapshot[] = [],
+) {
   return {
     snapshot: {
       branches,
+      worktrees,
       current: 'main',
       remote: {
         remotes: [],
@@ -58,6 +64,7 @@ const GIT_WORKSPACE_ID = CURRENT_GIT_REPO.id
 const DETACHED_WORKSPACE_ID = workspaceIdForTest('goblin+file:///workspace/example-repo')
 const MAIN_COMMAND_TARGET = {
   routeTarget: { kind: 'git-branch' as const, workspaceId: GIT_WORKSPACE_ID, branchName: 'main' },
+  workspaceRuntimeId: CURRENT_GIT_REPO.workspaceRuntimeId,
   workspacePaneRoute: null,
   filesystemTarget: null,
 }
@@ -81,14 +88,10 @@ describe('client effect intent plans', () => {
       id: 'goblin+file:///tmp/repo',
       currentBranch: 'main',
       currentBranchName: 'main',
-      branchSnapshots: [
-        createBranchSnapshot('main', {
-          isCurrent: true,
-          worktree: { path: '/tmp/repo-main', isPrimary: false, isLocked: false },
-        }),
-        createBranchSnapshot('feature/test', {
-          worktree: { path: '/tmp/repo-feature', isPrimary: false, isLocked: false },
-        }),
+      branchSnapshots: [createBranchSnapshot('main'), createBranchSnapshot('feature/test')],
+      worktrees: [
+        createRepoWorktreeSnapshotForTest('main', '/tmp/repo-main', { isPrimary: false, isLocked: false }),
+        createRepoWorktreeSnapshotForTest('feature/test', '/tmp/repo-feature', { isPrimary: false, isLocked: false }),
       ],
     })
 
@@ -102,7 +105,7 @@ describe('client effect intent plans', () => {
           workspaceRuntimeId: repo.workspaceRuntimeId,
           root: workspaceIdForTest('goblin+file:///tmp/repo-feature'),
         },
-        presentation: { kind: 'git-worktree', head: { kind: 'branch', branchName: 'feature/test' } },
+        presentation: { kind: 'git-worktree' },
       },
     })
 
@@ -129,12 +132,8 @@ describe('client effect intent plans', () => {
       id: 'goblin+file:///tmp/repo',
       currentBranch: 'main',
       currentBranchName: 'main',
-      branchSnapshots: [
-        createBranchSnapshot('main', {
-          isCurrent: true,
-          worktree: { path: '/tmp/repo', isPrimary: false, isLocked: false },
-        }),
-      ],
+      branchSnapshots: [createBranchSnapshot('main')],
+      worktrees: [createRepoWorktreeSnapshotForTest('main', '/tmp/repo', { isPrimary: false, isLocked: false })],
     })
 
     const plan = createTerminalBellIntentPlan(repo, repositoryFactsForTest(repo), {
@@ -147,7 +146,7 @@ describe('client effect intent plans', () => {
           workspaceRuntimeId: repo.workspaceRuntimeId,
           root: repo.id,
         },
-        presentation: { kind: 'git-worktree', head: { kind: 'branch', branchName: 'main' } },
+        presentation: { kind: 'git-worktree' },
       },
     })
 
@@ -168,7 +167,7 @@ describe('client effect intent plans', () => {
             workspaceRuntimeId: 'workspace-runtime-test',
             root: workspaceIdForTest('goblin+file:///tmp/repo-feature'),
           },
-          presentation: { kind: 'git-worktree', head: { kind: 'branch', branchName: 'feature/test' } },
+          presentation: { kind: 'git-worktree' },
         },
       },
     )
@@ -180,7 +179,21 @@ describe('client effect intent plans', () => {
     const worktreePath = '/workspace/detached'
     const plan = createTerminalBellIntentPlan(
       { id: DETACHED_WORKSPACE_ID, workspaceRuntimeId: 'workspace-runtime-test' },
-      repositoryFacts([], [{ path: worktreePath, isMain: false, entries: [] }]),
+      repositoryFacts(
+        [],
+        [{ path: worktreePath, isMain: false, entries: [] }],
+        [
+          {
+            path: worktreePath,
+            head: { kind: 'detached' },
+            headOid: '0123456789abcdef0123456789abcdef01234567',
+            operation: null,
+            materializedBranch: null,
+            isPrimary: false,
+            isLocked: false,
+          },
+        ],
+      ),
       {
         type: 'terminal-bell-click',
         terminalSessionId: 'term-333333333333333333333',
@@ -191,7 +204,7 @@ describe('client effect intent plans', () => {
             workspaceRuntimeId: 'workspace-runtime-test',
             root: workspaceIdForTest('goblin+file:///workspace/detached'),
           },
-          presentation: { kind: 'git-worktree', head: { kind: 'detached' } },
+          presentation: { kind: 'git-worktree' },
         },
       },
     )
@@ -204,12 +217,9 @@ describe('client effect intent plans', () => {
     const plan = createTerminalBellIntentPlan(
       { id: DETACHED_WORKSPACE_ID, workspaceRuntimeId: 'workspace-runtime-test' },
       repositoryFacts(
-        [
-          createBranchSnapshot('feature/later', {
-            worktree: { path: worktreePath, isPrimary: false, isLocked: false },
-          }),
-        ],
+        [createBranchSnapshot('feature/later')],
         [{ path: worktreePath, isMain: false, entries: [] }],
+        [createRepoWorktreeSnapshotForTest('feature/later', worktreePath)],
       ),
       {
         type: 'terminal-bell-click',
@@ -221,7 +231,7 @@ describe('client effect intent plans', () => {
             workspaceRuntimeId: 'workspace-runtime-test',
             root: workspaceIdForTest('goblin+file:///workspace/detached'),
           },
-          presentation: { kind: 'git-worktree', head: { kind: 'detached' } },
+          presentation: { kind: 'git-worktree' },
         },
       },
     )
@@ -253,22 +263,18 @@ describe('client effect intent plans', () => {
       id: 'goblin+file:///tmp/repo',
       currentBranch: 'main',
       currentBranchName: 'main',
-      branchSnapshots: [
-        createBranchSnapshot('feature/test', {
-          worktree: { path: '/tmp/repo-feature', isPrimary: false, isLocked: false },
-        }),
+      branchSnapshots: [createBranchSnapshot('feature/test')],
+      worktrees: [
+        createRepoWorktreeSnapshotForTest('feature/test', '/tmp/repo-feature', { isPrimary: false, isLocked: false }),
       ],
     })
     const otherPath = '/tmp/repo-other'
     const plan = createTerminalBellIntentPlan(
       repo,
       repositoryFacts(
-        [
-          createBranchSnapshot('feature/test', {
-            worktree: { path: '/tmp/repo-feature', isPrimary: false, isLocked: false },
-          }),
-        ],
+        [createBranchSnapshot('feature/test')],
         [{ path: otherPath, isMain: false, entries: [] }],
+        [createRepoWorktreeSnapshotForTest('feature/test', '/tmp/repo-feature')],
       ),
       {
         type: 'terminal-bell-click',
@@ -280,7 +286,7 @@ describe('client effect intent plans', () => {
             workspaceRuntimeId: repo.workspaceRuntimeId,
             root: workspaceIdForTest('goblin+file:///tmp/repo-other'),
           },
-          presentation: { kind: 'git-worktree', head: { kind: 'branch', branchName: 'feature/test' } },
+          presentation: { kind: 'git-worktree' },
         },
       },
     )
@@ -430,7 +436,6 @@ describe('client effect intent plans', () => {
         currentWorkspaceCapability: { kind: 'filesystem', probe: CURRENT_DIRECTORY_REPO.workspaceProbe },
         currentWorkspaceCanExecute: true,
         currentWorkspacePaneCommandTarget: {
-          routeTarget: { kind: 'workspace-root', workspaceId: CURRENT_DIRECTORY_REPO.id },
           workspacePaneRoute: null,
           filesystemTarget: workspaceRootPaneFilesystemTarget({
             workspaceId: CURRENT_DIRECTORY_REPO.id,
@@ -596,7 +601,6 @@ describe('client effect intent plans', () => {
         currentWorkspaceCapability: { kind: 'filesystem', probe: CURRENT_DIRECTORY_REPO.workspaceProbe },
         currentWorkspaceCanExecute: true,
         currentWorkspacePaneCommandTarget: {
-          routeTarget: { kind: 'workspace-root', workspaceId: CURRENT_DIRECTORY_REPO.id },
           workspacePaneRoute: null,
           filesystemTarget: workspaceRootPaneFilesystemTarget({
             workspaceId: CURRENT_DIRECTORY_REPO.id,

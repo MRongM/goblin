@@ -3,6 +3,7 @@
 import { flushTestUpdates } from '#/test-utils/render.tsx'
 import { describe, expect, test, vi } from 'vitest'
 import { terminalSessionBaseForTest } from '#/web/test-utils/terminal-model.ts'
+import type { AppNavigationActions } from '#/web/app-navigation-actions.ts'
 import {
   REPO_ID,
   WORKTREE_PATH,
@@ -199,10 +200,18 @@ describe('GitWorkspacePaneToolbar presentation', () => {
 
   test('lands on the adjacent terminal after closing the active status tab', async () => {
     const showRepoBranchWorkspacePaneTab = vi.fn(() => true)
-    const showRepoBranchTerminalSession = vi.fn(() => true)
+    const commitFilesystemWorkspacePaneRoute = vi.fn<AppNavigationActions['commitFilesystemWorkspacePaneRoute']>(
+      async (_target, _route, options) => {
+        options?.onCommit?.()
+        return true
+      },
+    )
     const { container: c } = renderToolbar({
       terminalCount: 1,
-      navigation: navigationWith({ showRepoBranchWorkspacePaneTab, showRepoBranchTerminalSession }),
+      navigation: navigationWith({
+        showRepoBranchWorkspacePaneTab,
+        commitFilesystemWorkspacePaneRoute,
+      }),
     })
 
     const statusCloseButton = closeButtonFor(c, 'workspace-pane:status')
@@ -214,10 +223,12 @@ describe('GitWorkspacePaneToolbar presentation', () => {
     await flush()
 
     expect(openTabsFor('feature/worktree')).toEqual([])
-    expect(showRepoBranchTerminalSession).toHaveBeenCalledWith(
-      REPO_ID,
-      'feature/worktree',
-      'term-111111111111111111111',
+    expect(commitFilesystemWorkspacePaneRoute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        routeTarget: { kind: 'git-worktree', workspaceId: REPO_ID, worktreePath: WORKTREE_PATH },
+      }),
+      { kind: 'terminal', terminalSessionId: 'term-111111111111111111111' },
+      expect.any(Object),
     )
     expect(showRepoBranchWorkspacePaneTab).not.toHaveBeenCalled()
   })

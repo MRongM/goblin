@@ -56,7 +56,9 @@ describe('repo source runtime failure classification', () => {
     })
     const { getRepoLog } = await import('#/server/modules/repo-read-paths.ts')
 
-    await expect(getRepoLog(target.id, 'main', { workspaceRuntimeId: 'repo-runtime-test' })).rejects.toMatchObject({
+    await expect(
+      getRepoLog(target.id, { kind: 'branch', branchName: 'main' }, { workspaceRuntimeId: 'repo-runtime-test' }),
+    ).rejects.toMatchObject({
       name: 'RemoteWorkspaceRuntimeFailureError',
       workspaceId: target.id,
       workspaceRuntimeId: 'repo-runtime-test',
@@ -124,7 +126,9 @@ describe('repo source runtime failure classification', () => {
           return okRemoteResult(`${target.remotePath}/.git\0`)
         case 'gitWorktreeList':
           return okRemoteResult(
-            worktreePorcelain(`worktree ${target.remotePath}\nHEAD f00ba40\nbranch refs/heads/main`),
+            worktreePorcelain(
+              `worktree ${target.remotePath}\nHEAD f00ba40000000000000000000000000000000000\nbranch refs/heads/main`,
+            ),
           )
         case 'gitRemoteVerbose':
           return okRemoteResult(
@@ -165,42 +169,50 @@ describe('repo source runtime failure classification', () => {
   })
 
   test('carries a confirmed local branch deletion from raw SSH results', async () => {
-    mocks.runRemoteCommand.mockImplementation(async (_target, command: { type: string }) => {
-      switch (command.type) {
-        case 'gitWorktreeList':
-          return okRemoteResult(
-            worktreePorcelain(`worktree ${target.remotePath}\nHEAD f00ba40\nbranch refs/heads/main`),
-          )
-        case 'gitSnapshot':
-          return okRemoteResult(
-            [
-              '__GOBLIN_REMOTE_CURRENT__',
-              'value main',
-              '__GOBLIN_REMOTE_DEFAULT__',
-              'value main',
-              '__GOBLIN_REMOTE_BRANCHES__',
-              '',
-            ].join('\n'),
-          )
-        case 'gitRemoteVerbose':
-          return okRemoteResult('')
-        case 'gitUpstream':
-          return okRemoteResult(upstreamOutput('origin', 'feature/test'))
-        case 'gitBranchDelete':
-          return okRemoteResult('deleted local branch')
-        case 'gitPushDeleteBranch':
-          return {
-            ok: false,
-            stdout: '',
-            stderr: '',
-            transportStderr: 'client_loop: send disconnect: Broken pipe',
-            message: 'connection lost',
-            remoteStarted: true,
-          }
-        default:
-          throw new Error(`unexpected remote command: ${command.type}`)
-      }
-    })
+    mocks.runRemoteCommand.mockImplementation(
+      async (_target, command: { type: string; attachedBranch?: string | null }) => {
+        switch (command.type) {
+          case 'gitWorktreeList':
+            return okRemoteResult(
+              worktreePorcelain(
+                `worktree ${target.remotePath}\nHEAD f00ba40000000000000000000000000000000000\nbranch refs/heads/main`,
+              ),
+            )
+          case 'resolveRepoCommonDir':
+            return okRemoteResult('/srv/repo/.git\0')
+          case 'gitOperationState':
+            return okRemoteResult(`operation none\nmaterialized-branch ${command.attachedBranch ?? ''}\n`)
+          case 'gitSnapshot':
+            return okRemoteResult(
+              [
+                '__GOBLIN_REMOTE_CURRENT__',
+                'value main',
+                '__GOBLIN_REMOTE_DEFAULT__',
+                'value main',
+                '__GOBLIN_REMOTE_BRANCHES__',
+                '',
+              ].join('\n'),
+            )
+          case 'gitRemoteVerbose':
+            return okRemoteResult('')
+          case 'gitUpstream':
+            return okRemoteResult(upstreamOutput('origin', 'feature/test'))
+          case 'gitBranchDelete':
+            return okRemoteResult('deleted local branch')
+          case 'gitPushDeleteBranch':
+            return {
+              ok: false,
+              stdout: '',
+              stderr: '',
+              transportStderr: 'client_loop: send disconnect: Broken pipe',
+              message: 'connection lost',
+              remoteStarted: true,
+            }
+          default:
+            throw new Error(`unexpected remote command: ${command.type}`)
+        }
+      },
+    )
     const { runWithRepoSource } = await import('#/server/modules/repo-source.ts')
 
     await expect(
@@ -228,54 +240,60 @@ describe('repo source runtime failure classification', () => {
   test('carries confirmed worktree and branch milestones from raw SSH results', async () => {
     const linkedPath = `${target.remotePath}-feature`
     const linkedWorkspaceId = workspaceIdForTest('goblin+ssh://prod/home/alice/service-feature')
-    mocks.runRemoteCommand.mockImplementation(async (_target, command: { type: string }) => {
-      switch (command.type) {
-        case 'gitWorktreeList':
-          return okRemoteResult(
-            worktreePorcelain(
+    mocks.runRemoteCommand.mockImplementation(
+      async (_target, command: { type: string; attachedBranch?: string | null }) => {
+        switch (command.type) {
+          case 'gitWorktreeList':
+            return okRemoteResult(
+              worktreePorcelain(
+                [
+                  `worktree ${target.remotePath}`,
+                  'HEAD f00ba40000000000000000000000000000000000',
+                  'branch refs/heads/main',
+                  '',
+                  `worktree ${linkedPath}`,
+                  'HEAD ba5eba1000000000000000000000000000000000',
+                  'branch refs/heads/feature/test',
+                ].join('\n'),
+              ),
+            )
+          case 'gitStatus':
+            return okRemoteResult('')
+          case 'resolveRepoCommonDir':
+            return okRemoteResult('/srv/repo/.git\0')
+          case 'gitOperationState':
+            return okRemoteResult(`operation none\nmaterialized-branch ${command.attachedBranch ?? ''}\n`)
+          case 'gitSnapshot':
+            return okRemoteResult(
               [
-                `worktree ${target.remotePath}`,
-                'HEAD f00ba40',
-                'branch refs/heads/main',
+                '__GOBLIN_REMOTE_CURRENT__',
+                'value main',
+                '__GOBLIN_REMOTE_DEFAULT__',
+                'value main',
+                '__GOBLIN_REMOTE_BRANCHES__',
                 '',
-                `worktree ${linkedPath}`,
-                'HEAD ba5eba1',
-                'branch refs/heads/feature/test',
               ].join('\n'),
-            ),
-          )
-        case 'gitStatus':
-          return okRemoteResult('')
-        case 'gitSnapshot':
-          return okRemoteResult(
-            [
-              '__GOBLIN_REMOTE_CURRENT__',
-              'value main',
-              '__GOBLIN_REMOTE_DEFAULT__',
-              'value main',
-              '__GOBLIN_REMOTE_BRANCHES__',
-              '',
-            ].join('\n'),
-          )
-        case 'gitUpstream':
-          return okRemoteResult(upstreamOutput('origin', 'feature/test'))
-        case 'gitWorktreeRemove':
-          return okRemoteResult('removed worktree')
-        case 'gitBranchDelete':
-          return okRemoteResult('deleted local branch')
-        case 'gitPushDeleteBranch':
-          return {
-            ok: false,
-            stdout: '',
-            stderr: '',
-            transportStderr: 'client_loop: send disconnect: Broken pipe',
-            message: 'connection lost',
-            remoteStarted: true,
-          }
-        default:
-          throw new Error(`unexpected remote command: ${command.type}`)
-      }
-    })
+            )
+          case 'gitUpstream':
+            return okRemoteResult(upstreamOutput('origin', 'feature/test'))
+          case 'gitWorktreeRemove':
+            return okRemoteResult('removed worktree')
+          case 'gitBranchDelete':
+            return okRemoteResult('deleted local branch')
+          case 'gitPushDeleteBranch':
+            return {
+              ok: false,
+              stdout: '',
+              stderr: '',
+              transportStderr: 'client_loop: send disconnect: Broken pipe',
+              message: 'connection lost',
+              remoteStarted: true,
+            }
+          default:
+            throw new Error(`unexpected remote command: ${command.type}`)
+        }
+      },
+    )
     const { runWithRepoSource } = await import('#/server/modules/repo-source.ts')
 
     await expect(
@@ -324,14 +342,16 @@ describe('repo source runtime failure classification', () => {
     })
     const { getRepoLog } = await import('#/server/modules/repo-read-paths.ts')
 
-    await expect(getRepoLog(target.id, 'main')).rejects.toThrow('connection refused')
+    await expect(getRepoLog(target.id, { kind: 'branch', branchName: 'main' })).rejects.toThrow('connection refused')
   })
 
   test('throws a typed remote runtime failure when target resolution fails under runtime context', async () => {
     mocks.resolveRemoteTarget.mockRejectedValueOnce(new Error('error.ssh-config-changed'))
     const { getRepoLog } = await import('#/server/modules/repo-read-paths.ts')
 
-    await expect(getRepoLog(target.id, 'main', { workspaceRuntimeId: 'repo-runtime-test' })).rejects.toMatchObject({
+    await expect(
+      getRepoLog(target.id, { kind: 'branch', branchName: 'main' }, { workspaceRuntimeId: 'repo-runtime-test' }),
+    ).rejects.toMatchObject({
       name: 'RemoteWorkspaceRuntimeFailureError',
       workspaceId: target.id,
       workspaceRuntimeId: 'repo-runtime-test',

@@ -1,5 +1,6 @@
 import type { RepoSnapshot, RepoSnapshotResponse } from '#/shared/api-types.ts'
 import type { BranchSnapshotInfo, RepoRemoteInfo } from '#/shared/git-types.ts'
+import type { CreateWorktreeAction } from '#/web/stores/workspaces/branch-action-types.ts'
 import {
   createBranchSnapshot,
   resetWorkspacesStore,
@@ -18,7 +19,6 @@ export const ipcHandlers: Record<string, IpcTestHandler> = {}
 export const refreshStoreAccess = { get: workspacesStore.getState, set: workspacesStore.setState }
 
 type TestRepo = NonNullable<ReturnType<typeof workspacesStore.getState>['workspaces'][string]>
-type TestCreateWorktreeAction = Parameters<ReturnType<typeof workspacesStore.getState>['runBranchAction']>[1]
 
 export function updateRepoForTest(mutator: (repo: TestRepo) => void): void {
   workspacesStore.setState((state) => {
@@ -48,7 +48,7 @@ export function cachedRepoStatus(workspaceRuntimeId: string): WorktreeStatus[] |
   return getRepoWorktreeStatusQueryData(REPO_ID, workspaceRuntimeId, appQueryClient)?.status
 }
 
-export function createWorktreeAction(): TestCreateWorktreeAction {
+export function createWorktreeAction(): CreateWorktreeAction {
   return {
     kind: 'createWorktree',
     input: {
@@ -64,16 +64,31 @@ export function branch(name: string, options: Partial<BranchSnapshotInfo> = {}):
 }
 
 export function repoSnapshotResponse(
-  snapshot: Omit<RepoSnapshot, 'remote'> & { remote?: RepoRemoteInfo },
+  snapshot: Omit<RepoSnapshot, 'branches' | 'remote' | 'worktrees'> & {
+    branches: BranchSnapshotInfo[]
+    remote?: RepoRemoteInfo
+    worktrees?: RepoSnapshot['worktrees']
+  },
 ): RepoSnapshotResponse {
-  return { snapshot: { ...snapshot, remote: snapshot.remote ?? testRemoteInfo() } }
+  return {
+    snapshot: {
+      ...snapshot,
+      worktrees: snapshot.worktrees ?? [],
+      remote: snapshot.remote ?? testRemoteInfo(),
+    },
+  }
 }
 
-export function seedRepo(branches: BranchSnapshotInfo[], workspaceRuntimeId = 'repo-runtime-test'): string {
+export function seedRepo(
+  branches: BranchSnapshotInfo[],
+  workspaceRuntimeId = 'repo-runtime-test',
+  worktrees: RepoSnapshot['worktrees'] = [],
+): string {
   return seedRepoWithReadModelForTest({
     id: REPO_ID,
     branchSnapshots: branches,
     currentBranch: branches[0]?.name ?? '',
+    worktrees,
     workspaceRuntimeId,
     remote: {
       remotes: [

@@ -1,4 +1,4 @@
-// Single source of truth for the persistent and zen-mode branch lists.
+// Single source of truth for the persistent and zen-mode Git workspace navigator.
 
 import { computed, defineComponent } from 'vue'
 import type { WorkspaceId } from '#/shared/workspace-locator.ts'
@@ -6,29 +6,32 @@ import { useAppNavigation } from '#/web/app-navigation.tsx'
 import { EmptyState } from '#/web/components/Layout.tsx'
 import { RepoReadNotice } from '#/web/components/RepoReadNotice.tsx'
 import { RepoStatusFailureView } from '#/web/components/RepoStatusFailureView.tsx'
-import { BranchNavigatorSkeleton } from '#/web/components/Skeleton.tsx'
-import { BranchList } from '#/web/components/branch-navigator/BranchList.tsx'
-import { useBranchListReadModel } from '#/web/components/branch-navigator/use-branch-list-data.ts'
-import type { BranchListRepoShell } from '#/web/components/branch-navigator/use-branch-list-data.ts'
+import { GitWorkspaceNavigatorSkeleton } from '#/web/components/Skeleton.tsx'
+import { GitWorkspaceNavigatorList } from '#/web/components/workspace-navigator/GitWorkspaceNavigatorList.tsx'
+import { useGitWorkspaceNavigatorReadModel } from '#/web/components/workspace-navigator/use-git-workspace-navigator-data.ts'
+import type { GitWorkspaceNavigatorRepoShell } from '#/web/components/workspace-navigator/use-git-workspace-navigator-data.ts'
 import { repoQueryReadFailure } from '#/web/repo-read-failure.ts'
 import { useStoreSelector } from '#/web/stores/store-selector.ts'
 import { useT } from '#/web/stores/i18n-vue.ts'
-import { branchViewModeForWorkspace, visibleBranches } from '#/web/stores/workspaces/branch-view-mode.ts'
+import { branchViewModeForWorkspace } from '#/web/stores/workspaces/branch-view-mode.ts'
 import { workspacesStore } from '#/web/stores/workspaces/store.ts'
 import { refreshRepoWorktreeStatus } from '#/web/stores/workspaces/worktree-status-refresh.ts'
 import { dispatchShowWorkspacePaneStaticTabAction } from '#/web/workspace-pane/workspace-pane-tab-open-action.ts'
+import { gitBranchPaneTargetLease, gitWorktreePaneTargetLease } from '#/web/workspace-pane/workspace-pane-tab-target.ts'
+import { gitWorkspaceNavigatorRows } from '#/web/components/workspace-navigator/git-workspace-navigator-model.ts'
 
 interface Props {
   repoId: WorkspaceId
   onSelectBranch?: (branch: string) => void
   currentBranchName?: string | null
+  currentWorktreePath?: string | null
   onAfterSelect?: (branch: string) => void
   onAfterOpenStatus?: (branch: string) => void
 }
 
-export const BranchView = defineComponent<Props>({
-  name: 'BranchView',
-  props: ['repoId', 'onSelectBranch', 'currentBranchName', 'onAfterSelect', 'onAfterOpenStatus'],
+export const GitWorkspaceNavigatorView = defineComponent<Props>({
+  name: 'GitWorkspaceNavigatorView',
+  props: ['repoId', 'onSelectBranch', 'currentBranchName', 'currentWorktreePath', 'onAfterSelect', 'onAfterOpenStatus'],
 
   setup(props) {
     const storeProjection = useStoreSelector(
@@ -40,7 +43,7 @@ export const BranchView = defineComponent<Props>({
       (left, right) =>
         left.workspaces === right.workspaces && left.branchViewModeByWorkspace === right.branchViewModeByWorkspace,
     )
-    const repo = computed<BranchListRepoShell | null>(() => {
+    const repo = computed<GitWorkspaceNavigatorRepoShell | null>(() => {
       const workspace = storeProjection.value.workspaces[props.repoId]
       return workspace?.capability.kind === 'git'
         ? {
@@ -55,55 +58,75 @@ export const BranchView = defineComponent<Props>({
 
     return () =>
       repo.value ? (
-        <BranchViewReadModel
+        <GitWorkspaceNavigatorViewReadModel
           repo={repo.value}
           onSelectBranch={props.onSelectBranch}
           currentBranchName={props.currentBranchName}
+          currentWorktreePath={props.currentWorktreePath}
           onAfterSelect={props.onAfterSelect}
           onAfterOpenStatus={props.onAfterOpenStatus}
         />
       ) : (
-        <BranchNavigatorSkeleton />
+        <GitWorkspaceNavigatorSkeleton />
       )
   },
 })
 
-interface BranchViewReadModelProps extends Omit<Props, 'repoId'> {
-  repo: BranchListRepoShell
+interface GitWorkspaceNavigatorViewReadModelProps extends Omit<Props, 'repoId'> {
+  repo: GitWorkspaceNavigatorRepoShell
 }
 
-const BranchViewReadModel = defineComponent<BranchViewReadModelProps>({
-  name: 'BranchViewReadModel',
+const GitWorkspaceNavigatorViewReadModel = defineComponent<GitWorkspaceNavigatorViewReadModelProps>({
+  name: 'GitWorkspaceNavigatorViewReadModel',
   inheritAttrs: false,
-  props: ['repo', 'onSelectBranch', 'currentBranchName', 'onAfterSelect', 'onAfterOpenStatus'],
+  props: ['repo', 'onSelectBranch', 'currentBranchName', 'currentWorktreePath', 'onAfterSelect', 'onAfterOpenStatus'],
   setup(props) {
     const t = useT()
     const navigation = useAppNavigation()
-    const { repo, snapshotReadModel, statusReadModel } = useBranchListReadModel(() => props.repo)
-    const branches = computed(() =>
-      repo.value
-        ? visibleBranches({
-            branches: repo.value.snapshot.branches,
-            viewMode: repo.value.branchViewMode,
-          })
-        : [],
-    )
+    const { repo, snapshotReadModel, statusReadModel } = useGitWorkspaceNavigatorReadModel(() => props.repo)
+    const rows = computed(() => {
+      if (!repo.value) return []
+      return gitWorkspaceNavigatorRows({
+        branches: repo.value.snapshot.branches,
+        worktrees: repo.value.snapshot.worktrees,
+        viewMode: repo.value.branchViewMode,
+      })
+    })
+    const highlightedBranch = computed(() => {
+      if (props.currentBranchName) return props.currentBranchName
+      const currentWorktree = repo.value?.snapshot.worktrees.find(
+        (worktree) => worktree.path === props.currentWorktreePath,
+      )
+      return currentWorktree?.head.kind === 'branch' ? currentWorktree.head.branchName : null
+    })
 
     function selectBranch(branch: string): void {
       if (props.onSelectBranch) props.onSelectBranch(branch)
-      else navigation.selectRepoBranch(props.repo.id, branch)
+      else navigation.selectRepoBranch(gitBranchPaneTargetLease(props.repo.id, props.repo.workspaceRuntimeId, branch))
       props.onAfterSelect?.(branch)
     }
 
     function openBranchStatus(branchName: string): void {
       void dispatchShowWorkspacePaneStaticTabAction({
         workspaceId: props.repo.id,
+        workspaceRuntimeId: props.repo.workspaceRuntimeId,
         branchName,
         type: 'status',
         workspacePaneRoute: undefined,
         navigation,
       })
       props.onAfterOpenStatus?.(branchName)
+    }
+
+    function selectWorktree(worktreePath: string): void {
+      navigation.selectRepoWorktree(
+        gitWorktreePaneTargetLease(props.repo.id, props.repo.workspaceRuntimeId, worktreePath),
+      )
+    }
+
+    function openWorktreeStatus(worktreePath: string): void {
+      const target = gitWorktreePaneTargetLease(props.repo.id, props.repo.workspaceRuntimeId, worktreePath)
+      void navigation.commitFilesystemWorkspacePaneRoute(target, { kind: 'static', tab: 'status' })
     }
 
     function retryStatus(): void {
@@ -125,7 +148,7 @@ const BranchViewReadModel = defineComponent<BranchViewReadModelProps>({
           />
         )
       }
-      if (!currentRepo) return <BranchNavigatorSkeleton />
+      if (!currentRepo) return <GitWorkspaceNavigatorSkeleton />
 
       const readFailures = [
         repoQueryReadFailure(
@@ -152,12 +175,15 @@ const BranchViewReadModel = defineComponent<BranchViewReadModelProps>({
       return (
         <>
           <RepoReadNotice failures={readFailures} />
-          <BranchList
+          <GitWorkspaceNavigatorList
             repo={currentRepo}
-            branches={branches.value}
-            highlightedBranch={props.currentBranchName ?? null}
+            rows={rows.value}
+            highlightedBranch={highlightedBranch.value}
+            highlightedWorktreePath={props.currentWorktreePath ?? null}
             onSelectBranch={selectBranch}
             onOpenBranchStatus={openBranchStatus}
+            onSelectWorktree={selectWorktree}
+            onOpenWorktreeStatus={openWorktreeStatus}
             emptyState={<EmptyState title={t(emptyLabelKey)} />}
           />
         </>

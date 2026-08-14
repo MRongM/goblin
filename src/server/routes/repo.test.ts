@@ -295,17 +295,75 @@ describe('repo routes — POST body validation (read endpoints)', () => {
       new Request('http://localhost/log', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ cwd: WORKSPACE_ID, workspaceRuntimeId, branch: 'feature/work', count: 50 }),
+        body: JSON.stringify({
+          cwd: WORKSPACE_ID,
+          workspaceRuntimeId,
+          target: { kind: 'branch', branchName: 'feature/work' },
+          count: 50,
+        }),
       }),
     )
 
     expect(response.status).toBe(500)
-    expect(mocks.getRepoLog).toHaveBeenCalledWith(WORKSPACE_ID, 'feature/work', {
-      count: 50,
-      skip: 0,
-      signal: expect.any(AbortSignal),
-      workspaceRuntimeId,
-    })
+    expect(mocks.getRepoLog).toHaveBeenCalledWith(
+      WORKSPACE_ID,
+      { kind: 'branch', branchName: 'feature/work' },
+      {
+        count: 50,
+        skip: 0,
+        signal: expect.any(AbortSignal),
+        workspaceRuntimeId,
+      },
+    )
+  })
+
+  test('passes an authoritative commit log target through the route boundary', async () => {
+    const oid = '2222222222222222222222222222222222222222'
+    mocks.getRepoLog.mockResolvedValueOnce([])
+    const app = createTestRepoRoutes()
+    const workspaceRuntimeId = await openTestWorkspaceRuntime()
+    const response = await app.request(
+      new Request('http://localhost/log', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          cwd: WORKSPACE_ID,
+          workspaceRuntimeId,
+          target: { kind: 'commit', oid },
+        }),
+      }),
+    )
+
+    expect(response.status).toBe(200)
+    expect(mocks.getRepoLog).toHaveBeenCalledWith(
+      WORKSPACE_ID,
+      { kind: 'commit', oid },
+      {
+        count: 100,
+        skip: 0,
+        signal: expect.any(AbortSignal),
+        workspaceRuntimeId,
+      },
+    )
+  })
+
+  test.each([
+    { kind: 'branch', branchName: '../feature' },
+    { kind: 'commit', oid: 'not-an-object-id' },
+    { kind: 'commit', oid: '0'.repeat(40) },
+  ])('rejects an invalid repository log target at the protocol boundary', async (target) => {
+    const app = createTestRepoRoutes()
+    const workspaceRuntimeId = await openTestWorkspaceRuntime()
+    const response = await app.request(
+      new Request('http://localhost/log', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ cwd: WORKSPACE_ID, workspaceRuntimeId, target }),
+      }),
+    )
+
+    expect(response.status).toBe(400)
+    expect(mocks.getRepoLog).not.toHaveBeenCalled()
   })
 
   test('rejects stale runtime-scoped repo reads before the module layer', async () => {
@@ -316,7 +374,11 @@ describe('repo routes — POST body validation (read endpoints)', () => {
       new Request('http://localhost/log', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ cwd: WORKSPACE_ID, workspaceRuntimeId: 'repo-runtime-stale', branch: 'feature/work' }),
+        body: JSON.stringify({
+          cwd: WORKSPACE_ID,
+          workspaceRuntimeId: 'repo-runtime-stale',
+          target: { kind: 'branch', branchName: 'feature/work' },
+        }),
       }),
     )
 
@@ -351,7 +413,11 @@ describe('repo routes — POST body validation (read endpoints)', () => {
       new Request('http://localhost/log', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ cwd: repoId, workspaceRuntimeId, branch: 'feature/work' }),
+        body: JSON.stringify({
+          cwd: repoId,
+          workspaceRuntimeId,
+          target: { kind: 'branch', branchName: 'feature/work' },
+        }),
       }),
     )
 
@@ -625,7 +691,11 @@ describe('repo routes — worktree mutation responses', () => {
   test('returns the committed create result without a snapshot read-back', async () => {
     const app = createTestRepoRoutes()
     const workspaceRuntimeId = await openTestWorkspaceRuntime()
-    mocks.createRepoWorktree.mockResolvedValueOnce({ ok: true, message: 'created' })
+    mocks.createRepoWorktree.mockResolvedValueOnce({
+      ok: true,
+      message: 'created',
+      createdWorktreePath: '/private/tmp/repo-feature',
+    })
 
     const response = await app.request(
       new Request('http://localhost/create-worktree', {
@@ -634,7 +704,7 @@ describe('repo routes — worktree mutation responses', () => {
         body: JSON.stringify({
           cwd: WORKSPACE_ID,
           workspaceRuntimeId,
-          worktreePath: '/tmp/repo-feature',
+          worktreePath: '/tmp/nested/../repo-feature',
           mode: { kind: 'newBranch', newBranch: 'feature/a', baseRef: 'main' },
           worktreeBootstrap: { kind: 'skip' },
         }),
@@ -642,7 +712,11 @@ describe('repo routes — worktree mutation responses', () => {
     )
 
     expect(response.status).toBe(200)
-    await expect(response.json()).resolves.toEqual({ ok: true, message: 'created' })
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      message: 'created',
+      worktreePath: '/private/tmp/repo-feature',
+    })
     expect(mocks.readRepoSnapshot).not.toHaveBeenCalled()
   })
 

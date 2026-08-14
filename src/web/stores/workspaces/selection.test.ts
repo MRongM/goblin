@@ -3,6 +3,7 @@ import {
   seedRepoQueryDataForTest,
   seedRepoWithReadModelForTest,
   createRepoBranch as branch,
+  createRepoWorktreeSnapshotForTest,
   repoPresentationFromQueryForTest,
 } from '#/web/test-utils/repo-store.ts'
 import { beforeEach, describe, expect, test } from 'vitest'
@@ -37,14 +38,15 @@ function seedRepo(options: {
   preferredWorkspacePaneTab?: WorkspacePaneTabType | null
   workspacePaneStaticTabs?: WorkspacePaneStaticTabType[]
   branches?: BranchSnapshotInfo[]
+  worktrees?: ReturnType<typeof createRepoWorktreeSnapshotForTest>[]
 }) {
   const currentBranchName = options.currentBranchName === undefined ? 'feature/plain' : options.currentBranchName
   seedRepoWithReadModelForTest({
     id: REPO_ID,
-    branchSnapshots: options.branches ?? [
-      branch('main', { worktree: { path: '/repo', isPrimary: false, isLocked: false } }),
-      branch('feature/worktree', { worktree: { path: '/tmp/feature-worktree', isPrimary: false, isLocked: false } }),
-      branch('feature/plain'),
+    branchSnapshots: options.branches ?? [branch('main'), branch('feature/worktree'), branch('feature/plain')],
+    worktrees: options.worktrees ?? [
+      createRepoWorktreeSnapshotForTest('main', '/repo'),
+      createRepoWorktreeSnapshotForTest('feature/worktree', '/tmp/feature-worktree'),
     ],
     currentBranch: options.currentBranch ?? 'main',
     currentBranchName,
@@ -83,7 +85,10 @@ function openTabsFor(branchName: string): WorkspacePaneStaticTabType[] {
   const branchModel = repo ? repoPresentationFromQueryForTest(repo).snapshot : null
   const target =
     repo && branchModel
-      ? workspacePaneTabsTargetForRepoBranch({ workspaceId: repo.id, branches: branchModel.branches }, branchName)
+      ? workspacePaneTabsTargetForRepoBranch(
+          { workspaceId: repo.id, branches: branchModel.branches, worktrees: branchModel.worktrees },
+          branchName,
+        )
       : null
   return workspacePaneStaticTabsFromEntries(
     target ? readWorkspacePaneTabsForTarget({ ...target, workspaceRuntimeId: repo.workspaceRuntimeId }) : [],
@@ -98,7 +103,7 @@ function preferredTabFor(branchName?: string | null): WorkspacePaneTabType | nul
         repo.ui,
         branchModel
           ? workspacePaneTabsTargetForRepoBranch(
-              { workspaceId: repo.id, branches: branchModel.branches },
+              { workspaceId: repo.id, branches: branchModel.branches, worktrees: branchModel.worktrees },
               branchName ?? 'main',
             )
           : null,
@@ -166,11 +171,9 @@ describe('setBranchViewMode', () => {
       currentBranchName: 'feature/plain',
     })
     seedRepoQueryDataForTest(repo, {
-      branches: [
-        branch('main', { worktree: { path: '/repo', isPrimary: false, isLocked: false } }),
-        branch('feature/plain'),
-      ],
+      branches: [branch('main'), branch('feature/plain')],
       currentBranch: 'main',
+      worktrees: [createRepoWorktreeSnapshotForTest('main', '/repo')],
     })
 
     workspacesStore.getState().setBranchViewMode(REPO_ID, 'worktrees')
@@ -187,10 +190,8 @@ describe('setBranchViewMode', () => {
     seedRepo({
       currentBranchName: 'feature/plain',
       preferredWorkspacePaneTab: 'terminal',
-      branches: [
-        branch('main', { worktree: { path: '/repo', isPrimary: false, isLocked: false } }),
-        branch('feature/plain'),
-      ],
+      branches: [branch('main'), branch('feature/plain')],
+      worktrees: [createRepoWorktreeSnapshotForTest('main', '/repo')],
     })
 
     workspacesStore.getState().setBranchViewMode(REPO_ID, 'worktrees')
@@ -232,10 +233,9 @@ describe('setWorkspacePaneTab', () => {
       preferredWorkspacePaneTab: 'status',
     })
     seedRepoQueryDataForTest(repo, {
-      branches: [
-        branch('feature/query', { worktree: { path: '/tmp/query-worktree', isPrimary: false, isLocked: false } }),
-      ],
+      branches: [branch('feature/query')],
       currentBranch: 'feature/query',
+      worktrees: [createRepoWorktreeSnapshotForTest('feature/query', '/tmp/query-worktree')],
     })
 
     workspacesStore.getState().setWorkspacePaneTab(REPO_ID, 'feature/query', 'changes')

@@ -1,18 +1,17 @@
 import { FolderTree } from '@lucide/vue'
 import { defineComponent } from 'vue'
 import type { FunctionalComponent, VNodeChild } from 'vue'
-import type { WorkspaceId } from '#/shared/workspace-locator.ts'
+import type { RepoLogTarget } from '#/shared/git-types.ts'
 import { useT } from '#/web/stores/i18n-vue.ts'
 import { EmptyState, ScrollPane } from '#/web/components/Layout.tsx'
 import { StatusList } from '#/web/components/StatusList.tsx'
-import { useRepoLogQuery } from '#/web/repo-queries.ts'
 import { BranchStatus } from '#/web/components/repo-workspace/BranchStatus.tsx'
+import { GitHistoryPanel } from '#/web/components/repo-workspace/GitHistoryPanel.tsx'
 import { WorkspaceFilesystemTabPanel } from '#/web/components/workspace-pane/WorkspaceFilesystemTabPanel.tsx'
 import type {
   CurrentGitWorkspacePanePresentation,
   GitWorkspacePaneProjection,
 } from '#/web/components/repo-workspace/model.ts'
-import { DEFAULT_REPOSITORY_LOG_COUNT } from '#/shared/git-types.ts'
 import type { WorkspacePaneStaticTabType, WorkspacePaneTabType } from '#/shared/workspace-pane.ts'
 import { isWorkspacePaneRuntimeTabType } from '#/shared/workspace-pane.ts'
 import type {
@@ -21,14 +20,11 @@ import type {
 } from '#/web/workspace-pane/workspace-pane-tab-model.ts'
 import type { WorkspacePanePanelLabel } from '#/web/workspace-pane/tab-providers.ts'
 import { WorkspacePanePanelFrame } from '#/web/components/workspace-pane/WorkspacePanePanelFrame.tsx'
-import { HistoryCommitGraph, HistoryCommitGraphSkeleton } from '#/web/components/repo-workspace/HistoryCommitGraph.tsx'
 import { renderWorkspacePaneRuntimeTabPanel } from '#/web/workspace-pane/workspace-pane-runtime-tab-panel.tsx'
 import { gitWorktreeWorkspacePaneTabsTarget, runtimeWorkspacePaneTarget } from '#/shared/workspace-pane-tabs-target.ts'
 import { terminalGitWorktreePresentation } from '#/shared/terminal-types.ts'
 import { gitHead } from '#/shared/git-head.ts'
 import { gitWorktreePaneFilesystemTarget } from '#/web/workspace-pane/workspace-pane-filesystem-target.ts'
-
-const DEFAULT_BRANCH_HISTORY_ERROR_KEY = 'error.failed-read-repo'
 
 export interface WorkspacePanePanelRenderInput {
   type: WorkspacePaneTabType
@@ -55,22 +51,21 @@ const REPO_WORKSPACE_STATIC_PANEL_BY_TYPE: Record<WorkspacePaneStaticTabType, Wo
 export function renderGitWorkspacePanePanel(input: WorkspacePanePanelRenderInput): VNodeChild {
   if (isWorkspacePaneRuntimeTabType(input.type)) {
     const runtimeState = input.runtimeTabStateByType[input.type]
-    const branch = input.detail.branch
-    if (!branch?.worktree?.path) return null
-    const branchName = branch.name
-    const worktreePath = branch.worktree.path
+    const worktree = input.detail.worktree
+    if (!worktree) return null
+    const worktreePath = worktree.path
     const tabsTarget = gitWorktreeWorkspacePaneTabsTarget(input.repo.id, worktreePath)
-    const runtimeTarget = tabsTarget ? runtimeWorkspacePaneTarget(tabsTarget, input.repo.workspaceRuntimeId) : null
-    if (!runtimeTarget || !worktreePath) return null
+    if (!tabsTarget) return null
+    const runtimeTarget = runtimeWorkspacePaneTarget(tabsTarget, input.repo.workspaceRuntimeId)
+    if (!runtimeTarget) return null
     return renderWorkspacePaneRuntimeTabPanel({
       type: input.type,
       workspacePaneId: input.workspacePaneId,
       panelLabel: input.panelLabel,
       selectedSessionId: selectedRuntimeSessionId(input.selection, input.type),
       target: {
-        routeTarget: { kind: 'git-branch', workspaceId: input.repo.id, branchName },
         runtimeTarget,
-        presentation: terminalGitWorktreePresentation(branchName),
+        presentation: terminalGitWorktreePresentation(),
       },
       runtimeState: {
         projectionPhase: runtimeState.projectionPhase,
@@ -112,15 +107,24 @@ function StatusWorkspacePanePanel({ repo, workspacePaneId, panelLabel, detail }:
 function HistoryWorkspacePanePanel({ repo, detail, workspacePaneId, panelLabel }: WorkspacePanePanelProps) {
   const branch = detail.branch
   if (!branch) return null
+  const worktree = detail.worktree
+  const target: RepoLogTarget = worktree
+    ? { kind: 'commit', oid: requiredCommittedHeadOid(worktree.headOid) }
+    : { kind: 'branch', branchName: branch.name }
   return (
-    <BranchHistoryTab
+    <GitHistoryPanel
       repoId={repo.id}
       workspaceRuntimeId={repo.workspaceRuntimeId}
-      branchName={branch.name}
+      target={target}
       workspacePaneId={workspacePaneId}
       panelLabel={panelLabel}
     />
   )
+}
+
+function requiredCommittedHeadOid(headOid: string | null): string {
+  if (headOid === null) throw new Error('A branch workspace pane requires a committed worktree HEAD')
+  return headOid
 }
 
 function ChangesWorkspacePanePanel({ detail, workspacePaneId, panelLabel }: WorkspacePanePanelProps) {
@@ -131,6 +135,7 @@ function ChangesWorkspacePanePanel({ detail, workspacePaneId, panelLabel }: Work
       workspacePaneId={workspacePaneId}
       panelLabel={panelLabel}
       branch={branch}
+      hasWorktree={!!detail.worktree}
       currentBranchStatus={detail.currentBranchStatus}
       statusLoading={detail.loading.status}
     />
@@ -139,9 +144,9 @@ function ChangesWorkspacePanePanel({ detail, workspacePaneId, panelLabel }: Work
 
 function FilesWorkspacePanePanel({ repo, detail, workspacePaneId, panelLabel }: WorkspacePanePanelProps) {
   const branch = detail.branch
-  const worktreePath = branch?.worktree?.path
+  const worktreePath = detail.worktree?.path
   const capabilities = repo.probe.capabilities
-  if (!worktreePath || !capabilities) {
+  if (!branch || !worktreePath || !capabilities) {
     return (
       <WorkspacePanePanelFrame id={`${workspacePaneId}-files-panel`} {...panelLabel}>
         <FiletreeNoWorktreeView />
@@ -151,7 +156,6 @@ function FilesWorkspacePanePanel({ repo, detail, workspacePaneId, panelLabel }: 
   return (
     <WorkspacePanePanelFrame id={`${workspacePaneId}-files-panel`} {...panelLabel}>
       <WorkspaceFilesystemTabPanel
-        routeTarget={{ kind: 'git-branch', workspaceId: repo.id, branchName: branch.name }}
         target={gitWorktreePaneFilesystemTarget({
           workspaceId: repo.id,
           workspaceRuntimeId: repo.workspaceRuntimeId,
@@ -178,69 +182,18 @@ const FiletreeNoWorktreeView = defineComponent({
   },
 })
 
-interface BranchHistoryTabProps {
-  repoId: WorkspaceId
-  workspaceRuntimeId: string
-  branchName: string
-  workspacePaneId: string
-  panelLabel: WorkspacePanePanelLabel
-}
-
-const BranchHistoryTab = defineComponent<BranchHistoryTabProps>({
-  name: 'BranchHistoryTab',
-  props: ['repoId', 'workspaceRuntimeId', 'branchName', 'workspacePaneId', 'panelLabel'],
-
-  setup(props) {
-    const t = useT()
-    const historyQuery = useRepoLogQuery(
-      () => props.repoId,
-      () => props.workspaceRuntimeId,
-      () => props.branchName,
-      { count: DEFAULT_REPOSITORY_LOG_COUNT },
-    )
-
-    return () => {
-      const entries = historyQuery.data.value ?? []
-      const queryError = historyQuery.error.value
-      const errorTitleKey = queryError instanceof Error ? queryError.message : DEFAULT_BRANCH_HISTORY_ERROR_KEY
-      return (
-        <WorkspacePanePanelFrame
-          id={`${props.workspacePaneId}-history-panel`}
-          {...props.panelLabel}
-          busy={historyQuery.isLoading.value}
-        >
-          {historyQuery.isLoading.value ? (
-            <HistoryCommitGraphSkeleton rows={8} />
-          ) : historyQuery.isError.value ? (
-            <EmptyState title={t(errorTitleKey)} />
-          ) : entries.length === 0 ? (
-            <EmptyState title={t('log.empty-for-branch', { branch: props.branchName })} />
-          ) : (
-            <ScrollPane>
-              <HistoryCommitGraph
-                repoId={props.repoId}
-                workspaceRuntimeId={props.workspaceRuntimeId}
-                entries={entries}
-              />
-            </ScrollPane>
-          )}
-        </WorkspacePanePanelFrame>
-      )
-    }
-  },
-})
-
 interface BranchChangesTabProps {
   workspacePaneId: string
   panelLabel: WorkspacePanePanelLabel
   branch: GitWorkspacePaneBranch
+  hasWorktree: boolean
   currentBranchStatus: CurrentGitWorkspacePanePresentation['currentBranchStatus']
   statusLoading: boolean
 }
 
 const BranchChangesTab = defineComponent<BranchChangesTabProps>({
   name: 'BranchChangesTab',
-  props: ['workspacePaneId', 'panelLabel', 'branch', 'currentBranchStatus', 'statusLoading'],
+  props: ['workspacePaneId', 'panelLabel', 'branch', 'hasWorktree', 'currentBranchStatus', 'statusLoading'],
 
   setup(props) {
     const t = useT()
@@ -253,7 +206,7 @@ const BranchChangesTab = defineComponent<BranchChangesTabProps>({
           {...props.panelLabel}
           busy={props.statusLoading}
         >
-          {props.branch.worktree?.path ? (
+          {props.hasWorktree ? (
             <div class="relative flex min-h-0 flex-1 flex-col">
               {props.currentBranchStatus === undefined ? (
                 <EmptyState title={t(unavailableStatusKey)} />

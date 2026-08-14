@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, vi } from 'vitest'
-import type { PullRequestInfo } from '#/shared/git-types.ts'
+import type { PullRequestInfo, WorktreeInfo } from '#/shared/git-types.ts'
 import type { RepoSnapshot } from '#/shared/api-types.ts'
 import { normalizeRemoteWorkspaceId } from '#/shared/remote-workspace.ts'
 import type { WorkspaceId } from '#/shared/workspace-locator.ts'
@@ -126,16 +126,17 @@ const hoistedMocks = vi.hoisted(() => ({
   getBranchWorktreeIdentities: vi.fn(),
   getBranchPullRequests: vi.fn(),
   getCurrentBranch: vi.fn(),
-  getHeadHash: vi.fn(),
   getDefaultBranch: vi.fn(),
   resolveRepoCommonDir: vi.fn(),
   resolveRepoObjectsDir: vi.fn(),
   getRepoName: vi.fn(),
   getRepoRoot: vi.fn(),
+  resolveGitWorkspacePath: vi.fn(),
   getRemoteInfo: vi.fn(),
   getWorkingStatus: vi.fn(),
   getUpstream: vi.fn(),
   readWorktreeMembership: vi.fn(),
+  readRepoWorktreeSnapshots: vi.fn(),
   sampleWorktreeStatusForTarget: vi.fn(),
   isAncestor: vi.fn(),
   fetchAll: vi.fn(),
@@ -157,6 +158,7 @@ const hoistedMocks = vi.hoisted(() => ({
   getRemoteSnapshot: vi.fn(),
   getRemoteWorkspacePaneTargetIdentities: vi.fn(),
   resolveRemoteRepoCommonDir: vi.fn(),
+  resolveRemoteWorktreePath: vi.fn(),
   getRemoteWorktreeBootstrapPreview: vi.fn(),
   removeRemoteWorktree: vi.fn(),
   getServerWorkspaceSettings: vi.fn(),
@@ -173,12 +175,12 @@ vi.mock('#/system/git/branches.ts', () => ({
   getBranches: hoistedMocks.getBranches,
   getBranchWorktreeIdentities: hoistedMocks.getBranchWorktreeIdentities,
   getCurrentBranch: hoistedMocks.getCurrentBranch,
-  getHeadHash: hoistedMocks.getHeadHash,
   getDefaultBranch: hoistedMocks.getDefaultBranch,
   resolveRepoCommonDir: hoistedMocks.resolveRepoCommonDir,
   resolveRepoObjectsDir: hoistedMocks.resolveRepoObjectsDir,
   getRepoName: hoistedMocks.getRepoName,
   getRepoRoot: hoistedMocks.getRepoRoot,
+  resolveGitWorkspacePath: hoistedMocks.resolveGitWorkspacePath,
   getUpstream: hoistedMocks.getUpstream,
   isAncestor: hoistedMocks.isAncestor,
   isGitRepo: hoistedMocks.isGitRepo,
@@ -186,6 +188,10 @@ vi.mock('#/system/git/branches.ts', () => ({
 
 vi.mock('#/system/git/git-exec.ts', () => ({
   checkGitAvailable: hoistedMocks.checkGitAvailable,
+}))
+
+vi.mock('#/system/git/worktree-state.ts', () => ({
+  readRepoWorktreeSnapshots: hoistedMocks.readRepoWorktreeSnapshots,
 }))
 
 vi.mock('#/system/git/clone.ts', () => ({
@@ -268,6 +274,7 @@ vi.mock('#/system/ssh/git.ts', () => ({
   getRemoteRepoWorktreePaths: hoistedMocks.getRemoteRepoWorktreePaths,
   getRemoteWorkspacePaneTargetIdentities: hoistedMocks.getRemoteWorkspacePaneTargetIdentities,
   resolveRemoteRepoCommonDir: hoistedMocks.resolveRemoteRepoCommonDir,
+  resolveRemoteWorktreePath: hoistedMocks.resolveRemoteWorktreePath,
   getRemoteSnapshot: hoistedMocks.getRemoteSnapshot,
   getRemoteStatus: vi.fn(),
   getRemoteTrackingBranches: vi.fn(),
@@ -359,6 +366,7 @@ beforeEach(async () => {
   hoistedMocks.resolveRemoteRepoCommonDir.mockImplementation(
     async (target: { remotePath: string }) => target.remotePath,
   )
+  hoistedMocks.resolveRemoteWorktreePath.mockImplementation(async (_target, worktreePath: string) => worktreePath)
   hoistedMocks.getCurrentBranch.mockResolvedValue('main')
   hoistedMocks.resolveRepoCommonDir.mockImplementation(async (cwd: string) =>
     cwd.startsWith('/tmp/repo') ? '/tmp/repo/.git' : `${cwd}/.git`,
@@ -367,8 +375,24 @@ beforeEach(async () => {
     cwd.startsWith('/tmp/repo') ? '/tmp/repo/.git/objects' : `${cwd}/.git/objects`,
   )
   hoistedMocks.getRepoName.mockResolvedValue('repo')
-  hoistedMocks.getRepoRoot.mockResolvedValue('/tmp/repo')
+  hoistedMocks.getRepoRoot.mockImplementation(async (cwd: string) => cwd)
+  hoistedMocks.resolveGitWorkspacePath.mockImplementation(async (cwd: string) => cwd)
   hoistedMocks.readWorktreeMembership.mockResolvedValue([])
+  hoistedMocks.readRepoWorktreeSnapshots.mockImplementation(async (_repoId, worktrees: WorktreeInfo[]) =>
+    worktrees
+      .filter((worktree) => !worktree.isBare)
+      .map((worktree) => ({
+        path: worktree.path,
+        head: worktree.branch
+          ? { kind: 'branch' as const, branchName: worktree.branch }
+          : { kind: 'detached' as const },
+        headOid: worktree.headOid === undefined ? 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' : worktree.headOid,
+        operation: null,
+        materializedBranch: worktree.branch ?? null,
+        isPrimary: worktree.isPrimary,
+        isLocked: worktree.isLocked ?? false,
+      })),
+  )
   hoistedMocks.sampleWorktreeStatusForTarget.mockImplementation(async (worktree) => ({
     kind: worktree.isBare ? 'bare' : 'status',
     worktree,
@@ -385,14 +409,14 @@ afterEach(() => {
 
 export function repoSnapshot(branch = 'main'): RepoSnapshot {
   return {
+    worktrees: [],
     branches: [
       {
         name: branch,
-        isCurrent: true,
         ahead: 0,
         behind: 0,
-        lastCommitHash: 'hash-000000000000000000000000000000000000',
-        lastCommitShortHash: 'hash-0',
+        lastCommitHash: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        lastCommitShortHash: 'aaaaaaa',
         lastCommitMessage: 'commit 0',
         lastCommitDate: '2024-01-01T00:00:00.000Z',
         lastCommitAuthor: 'dev',

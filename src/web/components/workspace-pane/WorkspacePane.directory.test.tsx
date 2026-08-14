@@ -5,6 +5,7 @@ import { flushTestUpdates } from '#/test-utils/render.tsx'
 import { VueQueryClientScope } from '#/web/test-utils/VueQueryClientScope.tsx'
 import { beforeEach, describe, expect, test, vi } from 'vitest'
 import { WorkspacePane } from '#/web/components/workspace-pane/WorkspacePane.tsx'
+import type { WorkspacePaneRouteContext } from '#/web/components/workspace-pane/workspace-pane-types.ts'
 import {
   TerminalSessionCommandScope,
   TerminalSessionReadScope,
@@ -12,9 +13,17 @@ import {
 import { AppNavigationProvider } from '#/web/app-navigation.tsx'
 import { terminalProjectionHydrationStore } from '#/web/stores/terminal-projection-hydration.ts'
 import { workspacesStore } from '#/web/stores/workspaces/store.ts'
-import { seedRepoWithReadModelForTest } from '#/web/test-utils/repo-store.ts'
+import {
+  createBranchSnapshot,
+  createRepoWorktreeSnapshotForTest,
+  seedRepoWithReadModelForTest,
+} from '#/web/test-utils/repo-store.ts'
 import { appQueryClient } from '#/web/app-query-client.ts'
-import { setRepoWorktreeStatusQueryData } from '#/web/repo-query-cache.ts'
+import {
+  getRepoSnapshotQueryData,
+  setRepoSnapshotQueryData,
+  setRepoWorktreeStatusQueryData,
+} from '#/web/repo-query-cache.ts'
 import { workspaceDirectoryOverviewQueryKey } from '#/web/workspace-directory-overview-query.ts'
 import { workspacePaneRuntimeTabEntry, workspacePaneStaticTabEntry } from '#/shared/workspace-pane.ts'
 import { formatTerminalFilesystemTargetKeyForPath } from '#/shared/terminal-filesystem-target-key.ts'
@@ -26,8 +35,9 @@ import {
 import { preferredWorkspacePaneTabForTarget } from '#/web/stores/workspaces/workspace-pane-preferences.ts'
 import { gitWorktreeWorkspacePaneTabsTarget } from '#/shared/workspace-pane-tabs-target.ts'
 import { workspaceIdForTest } from '#/test-utils/workspace-id.ts'
+import type { WorkspaceId } from '#/shared/workspace-locator.ts'
 import { externalAppsQueryKey } from '#/web/settings-query-cache.ts'
-import { repoWorktreeStatusQueryKey } from '#/web/repo-query-keys.ts'
+import { repoLogQueryKey, repoSnapshotQueryKey, repoWorktreeStatusQueryKey } from '#/web/repo-query-keys.ts'
 import { hostInfoStore } from '#/web/stores/host-info.ts'
 import {
   directoryWorkspaceProbe,
@@ -54,6 +64,55 @@ beforeEach(() => {
 
 function queryObserverCount(queryKey: readonly unknown[]): number {
   return appQueryClient.getQueryCache().find({ queryKey, exact: true })?.getObserversCount() ?? 0
+}
+
+function detachedWorktreeSnapshot(path: string) {
+  return {
+    path,
+    head: { kind: 'detached' as const },
+    headOid: '1111111111111111111111111111111111111111',
+    operation: null,
+    materializedBranch: null,
+    isPrimary: false,
+    isLocked: false,
+  }
+}
+
+function failWorktreeStatusQuery(workspaceId: WorkspaceId, workspaceRuntimeId: string, message: string) {
+  const statusQuery = appQueryClient.getQueryCache().find({
+    queryKey: repoWorktreeStatusQueryKey(workspaceId, workspaceRuntimeId),
+    exact: true,
+  })
+  if (!statusQuery) throw new Error('missing worktree-status query')
+  statusQuery.setState({
+    ...statusQuery.state,
+    data: undefined,
+    dataUpdatedAt: 0,
+    status: 'error',
+    error: new Error(message),
+  })
+}
+
+function renderWorkspacePane(
+  workspaceId: WorkspaceId,
+  workspacePaneRouteContext: WorkspacePaneRouteContext,
+  navigationValue = navigation,
+) {
+  return render(
+    <VueQueryClientScope client={appQueryClient}>
+      <AppNavigationProvider value={navigationValue}>
+        <TerminalSessionCommandScope value={terminalCommandContext}>
+          <TerminalSessionReadScope value={terminalReadContext}>
+            <WorkspacePane
+              workspaceId={workspaceId}
+              currentBranchName={null}
+              workspacePaneRouteContext={workspacePaneRouteContext}
+            />
+          </TerminalSessionReadScope>
+        </TerminalSessionCommandScope>
+      </AppNavigationProvider>
+    </VueQueryClientScope>,
+  )
 }
 
 describe('WorkspacePane directory workspaces', () => {
@@ -226,6 +285,7 @@ describe('WorkspacePane directory workspaces', () => {
     const repo = seedRepoWithReadModelForTest({
       id: workspaceId,
       branches: [],
+      worktrees: [detachedWorktreeSnapshot(worktreePath)],
       currentBranchName: null,
     })
     setRepoWorktreeStatusQueryData(workspaceId, repo.workspaceRuntimeId, {
@@ -233,6 +293,7 @@ describe('WorkspacePane directory workspaces', () => {
       status: [{ path: worktreePath, isMain: false, entries: [] }],
       loadedAt: 1,
     })
+    failWorktreeStatusQuery(workspaceId, repo.workspaceRuntimeId, 'status read failed')
     const target = gitWorktreeWorkspacePaneTabsTarget(workspaceId, worktreePath)
     if (!target) throw new Error('expected canonical detached worktree fixture')
     setWorkspacePaneTabsForTargetQueryData({
@@ -264,34 +325,127 @@ describe('WorkspacePane directory workspaces', () => {
       </VueQueryClientScope>,
     )
 
-    expect(await screen.findByTestId('detached-worktree-pane')).toBeTruthy()
+    expect(await screen.findByTestId('worktree-pane')).toBeTruthy()
     expect(screen.getByRole('tabpanel', { name: 'tab.terminal' })).toBeTruthy()
+    expect(screen.queryByText('error.failed-read-repo')).toBeNull()
   })
 
-  test('keeps a detached-worktree pane visible after a background status failure', async () => {
-    const workspaceId = workspaceIdForTest('goblin+file:///workspace/repo-stale-detached')
-    const worktreePath = '/workspace/detached-stale'
-    const repo = seedRepoWithReadModelForTest({ id: workspaceId, branches: [], currentBranchName: null })
-    setRepoWorktreeStatusQueryData(workspaceId, repo.workspaceRuntimeId, {
-      workspaceRuntimeId: repo.workspaceRuntimeId,
-      status: [{ path: worktreePath, isMain: false, entries: [] }],
-      loadedAt: 1,
+  test('keeps worktree history open at the authoritative commit when its worktree enters a detached rebase', async () => {
+    const workspaceId = workspaceIdForTest('goblin+file:///workspace/repo-rebase-transition')
+    const branchName = 'feature/rebase-transition'
+    const worktreePath = '/workspace/rebase-transition'
+    const repo = seedRepoWithReadModelForTest({
+      id: workspaceId,
+      branchSnapshots: [createBranchSnapshot(branchName)],
+      worktrees: [
+        createRepoWorktreeSnapshotForTest(branchName, worktreePath, {
+          headOid: '1111111111111111111111111111111111111111',
+        }),
+      ],
+      currentBranchName: branchName,
+      workspacePaneTabsByBranch: {
+        [branchName]: [workspacePaneStaticTabEntry('status'), workspacePaneStaticTabEntry('history')],
+      },
+    })
+
+    const result = renderWorkspacePane(workspaceId, {
+      kind: 'git-worktree',
+      worktreePath,
+      route: { kind: 'static', tab: 'history' },
+    })
+
+    expect((await screen.findByRole('tab', { name: 'tab.log' })).getAttribute('aria-selected')).toBe('true')
+    await waitFor(() =>
+      expect(
+        queryObserverCount(
+          repoLogQueryKey(
+            workspaceId,
+            repo.workspaceRuntimeId,
+            { kind: 'commit', oid: '1111111111111111111111111111111111111111' },
+            100,
+            0,
+          ),
+        ),
+      ).toBeGreaterThan(0),
+    )
+    const snapshot = getRepoSnapshotQueryData(workspaceId, repo.workspaceRuntimeId)
+    if (!snapshot) throw new Error('missing repository snapshot')
+    await flushTestUpdates(() => {
+      setRepoSnapshotQueryData(workspaceId, repo.workspaceRuntimeId, {
+        ...snapshot,
+        worktrees: [
+          {
+            path: worktreePath,
+            head: { kind: 'detached' },
+            headOid: '2222222222222222222222222222222222222222',
+            operation: { kind: 'rebase' },
+            materializedBranch: branchName,
+            isPrimary: false,
+            isLocked: false,
+          },
+        ],
+      })
+    })
+
+    expect((await screen.findByRole('tab', { name: 'tab.log' })).getAttribute('aria-selected')).toBe('true')
+    await waitFor(() =>
+      expect(
+        queryObserverCount(
+          repoLogQueryKey(
+            workspaceId,
+            repo.workspaceRuntimeId,
+            { kind: 'commit', oid: '2222222222222222222222222222222222222222' },
+            100,
+            0,
+          ),
+        ),
+      ).toBeGreaterThan(0),
+    )
+    expect(screen.queryByText('workspace-route.not-found-title')).toBeNull()
+    expect(screen.queryByText('workspace-pane-tabs.empty')).toBeNull()
+  })
+
+  test('renders an unborn worktree history as empty without requesting a commit', async () => {
+    const workspaceId = workspaceIdForTest('goblin+file:///workspace/repo-unborn')
+    const worktreePath = '/workspace/unborn'
+    const repo = seedRepoWithReadModelForTest({
+      id: workspaceId,
+      branches: [],
+      worktrees: [
+        {
+          ...createRepoWorktreeSnapshotForTest('main', worktreePath),
+          headOid: null,
+        },
+      ],
+      currentBranchName: null,
     })
     const target = gitWorktreeWorkspacePaneTabsTarget(workspaceId, worktreePath)
-    if (!target) throw new Error('expected canonical detached worktree fixture')
+    if (!target) throw new Error('expected canonical unborn worktree fixture')
     setWorkspacePaneTabsForTargetQueryData({
       ...target,
       workspaceRuntimeId: repo.workspaceRuntimeId,
-      tabs: [workspacePaneStaticTabEntry('files')],
+      tabs: [workspacePaneStaticTabEntry('status'), workspacePaneStaticTabEntry('history')],
     })
-    const statusQuery = appQueryClient.getQueryCache().find({
-      queryKey: repoWorktreeStatusQueryKey(workspaceId, repo.workspaceRuntimeId),
-      exact: true,
-    })
-    if (!statusQuery) throw new Error('missing worktree-status query')
-    statusQuery.setState({ ...statusQuery.state, status: 'error', error: new Error('status refresh failed') })
 
-    render(
+    const result = renderWorkspacePane(workspaceId, {
+      kind: 'git-worktree',
+      worktreePath,
+      route: { kind: 'static', tab: 'history' },
+    })
+
+    expect(await screen.findByRole('tabpanel', { name: 'tab.log' })).toBeTruthy()
+    expect(screen.getByText('log.empty')).toBeTruthy()
+    expect(screen.queryByText('branches.missing')).toBeNull()
+    expect(
+      appQueryClient
+        .getQueryCache()
+        .getAll()
+        .some(
+          (query) => query.queryKey[0] === 'repo-data' && query.queryKey[3] === 'log' && query.getObserversCount() > 0,
+        ),
+    ).toBe(false)
+
+    await result.rerender(
       <VueQueryClientScope client={appQueryClient}>
         <AppNavigationProvider value={navigation}>
           <TerminalSessionCommandScope value={terminalCommandContext}>
@@ -302,7 +456,7 @@ describe('WorkspacePane directory workspaces', () => {
                 workspacePaneRouteContext={{
                   kind: 'git-worktree',
                   worktreePath,
-                  route: { kind: 'static', tab: 'files' },
+                  route: { kind: 'static', tab: 'status' },
                 }}
               />
             </TerminalSessionReadScope>
@@ -310,18 +464,17 @@ describe('WorkspacePane directory workspaces', () => {
         </AppNavigationProvider>
       </VueQueryClientScope>,
     )
-
-    expect(await screen.findByTestId('detached-worktree-pane')).toBeTruthy()
-    expect(screen.getByText('status.stale-title')).toBeTruthy()
-    expect(screen.getByText(/status refresh failed/)).toBeTruthy()
+    expect(screen.queryByText('branch-status.signal.commit')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'worktree-status.open-history' })).toBeNull()
   })
 
-  test('keeps the saved detached-worktree preference on a bare filesystem route', async () => {
-    const workspaceId = workspaceIdForTest('goblin+file:///workspace/repo-bare-worktree')
-    const worktreePath = '/workspace/detached-bare'
+  test('renders detached worktree files despite an initial status failure', async () => {
+    const workspaceId = workspaceIdForTest('goblin+file:///workspace/repo-stale-detached')
+    const worktreePath = '/workspace/detached-stale'
     const repo = seedRepoWithReadModelForTest({
       id: workspaceId,
       branches: [],
+      worktrees: [detachedWorktreeSnapshot(worktreePath)],
       currentBranchName: null,
     })
     setRepoWorktreeStatusQueryData(workspaceId, repo.workspaceRuntimeId, {
@@ -334,31 +487,388 @@ describe('WorkspacePane directory workspaces', () => {
     setWorkspacePaneTabsForTargetQueryData({
       ...target,
       workspaceRuntimeId: repo.workspaceRuntimeId,
-      tabs: [workspacePaneStaticTabEntry('status'), workspacePaneStaticTabEntry('files')],
+      tabs: [workspacePaneStaticTabEntry('files')],
     })
-    workspacesStore.getState().setWorkspacePaneTabForTarget(target, 'files')
+    failWorktreeStatusQuery(workspaceId, repo.workspaceRuntimeId, 'status read failed')
 
-    render(
-      <VueQueryClientScope client={appQueryClient}>
-        <AppNavigationProvider value={navigation}>
-          <TerminalSessionCommandScope value={terminalCommandContext}>
-            <TerminalSessionReadScope value={terminalReadContext}>
-              <WorkspacePane
-                workspaceId={workspaceId}
-                currentBranchName={null}
-                workspacePaneRouteContext={{ kind: 'git-worktree', worktreePath, route: null }}
-              />
-            </TerminalSessionReadScope>
-          </TerminalSessionCommandScope>
-        </AppNavigationProvider>
-      </VueQueryClientScope>,
+    renderWorkspacePane(workspaceId, {
+      kind: 'git-worktree',
+      worktreePath,
+      route: { kind: 'static', tab: 'files' },
+    })
+
+    expect(await screen.findByTestId('worktree-pane')).toBeTruthy()
+    expect(screen.getByRole('tabpanel', { name: 'tab.files' })).toBeTruthy()
+    expect(screen.queryByText('status.stale-title')).toBeNull()
+    expect(screen.queryByText('error.failed-read-repo')).toBeNull()
+  })
+
+  test('renders a retryable error when detached worktree status initially fails', async () => {
+    const workspaceId = workspaceIdForTest('goblin+file:///workspace/repo-failed-status')
+    const worktreePath = '/workspace/detached-failed-status'
+    const repo = seedRepoWithReadModelForTest({
+      id: workspaceId,
+      branches: [],
+      worktrees: [detachedWorktreeSnapshot(worktreePath)],
+      currentBranchName: null,
+    })
+    setRepoWorktreeStatusQueryData(workspaceId, repo.workspaceRuntimeId, {
+      workspaceRuntimeId: repo.workspaceRuntimeId,
+      status: [{ path: worktreePath, isMain: false, entries: [] }],
+      loadedAt: 1,
+    })
+    const target = gitWorktreeWorkspacePaneTabsTarget(workspaceId, worktreePath)
+    if (!target) throw new Error('expected canonical detached worktree fixture')
+    setWorkspacePaneTabsForTargetQueryData({
+      ...target,
+      workspaceRuntimeId: repo.workspaceRuntimeId,
+      tabs: [workspacePaneStaticTabEntry('status')],
+    })
+    failWorktreeStatusQuery(workspaceId, repo.workspaceRuntimeId, 'status read failed')
+
+    renderWorkspacePane(workspaceId, {
+      kind: 'git-worktree',
+      worktreePath,
+      route: { kind: 'static', tab: 'status' },
+    })
+
+    expect(await screen.findByRole('alert')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'error.try-again' })).toBeTruthy()
+    expect(screen.getByText('111111111111')).toBeTruthy()
+    expect(screen.getByText('worktree-status.changes-unavailable')).toBeTruthy()
+  })
+
+  test('keeps detached worktree target status separate from file changes', async () => {
+    const workspaceId = workspaceIdForTest('goblin+file:///workspace/repo-detached-overview')
+    const worktreePath = '/workspace/detached-overview'
+    const worktree = {
+      ...detachedWorktreeSnapshot(worktreePath),
+      operation: { kind: 'rebase' as const },
+      materializedBranch: 'feature/rebase',
+      isLocked: true,
+    }
+    const repo = seedRepoWithReadModelForTest({
+      id: workspaceId,
+      branchSnapshots: [createBranchSnapshot('feature/rebase')],
+      worktrees: [worktree],
+      currentBranchName: null,
+    })
+    setRepoWorktreeStatusQueryData(workspaceId, repo.workspaceRuntimeId, {
+      workspaceRuntimeId: repo.workspaceRuntimeId,
+      status: [
+        {
+          path: worktreePath,
+          isMain: false,
+          entries: [{ x: 'M', y: ' ', path: 'changed.ts' }],
+        },
+      ],
+      loadedAt: 1,
+    })
+    const target = gitWorktreeWorkspacePaneTabsTarget(workspaceId, worktreePath)
+    if (!target) throw new Error('expected canonical detached worktree fixture')
+    setWorkspacePaneTabsForTargetQueryData({
+      ...target,
+      workspaceRuntimeId: repo.workspaceRuntimeId,
+      tabs: [workspacePaneStaticTabEntry('status')],
+    })
+    const commitFilesystemWorkspacePaneRoute = vi.fn(async (_target, _route, options) => {
+      options?.onCommit?.()
+      return true
+    })
+
+    renderWorkspacePane(
+      workspaceId,
+      { kind: 'git-worktree', worktreePath, route: { kind: 'static', tab: 'status' } },
+      { ...navigation, commitFilesystemWorkspacePaneRoute },
     )
 
-    expect(await screen.findByTestId('detached-worktree-pane')).toBeTruthy()
+    expect(await screen.findByRole('tabpanel', { name: 'tab.status' })).toBeTruthy()
+    expect(screen.getByText('111111111111')).toBeTruthy()
+    expect(screen.getByText('feature/rebase')).toBeTruthy()
+    expect(screen.getByText('worktree-state.rebase')).toBeTruthy()
+    expect(screen.getByText('branch-status.worktree.locked')).toBeTruthy()
+    expect(screen.queryByText('changed.ts')).toBeNull()
+
+    screen.getByRole('button', { name: 'worktree-status.open-history' }).click()
+
+    await waitFor(() =>
+      expect(commitFilesystemWorkspacePaneRoute).toHaveBeenCalledWith(
+        {
+          routeTarget: { kind: 'git-worktree', workspaceId, worktreePath },
+          workspaceRuntimeId: repo.workspaceRuntimeId,
+        },
+        { kind: 'static', tab: 'history' },
+        presentationOptions(),
+      ),
+    )
+
+    screen.getByRole('button', { name: 'branch-status.changes-count' }).click()
+
+    await waitFor(() =>
+      expect(commitFilesystemWorkspacePaneRoute).toHaveBeenCalledWith(
+        {
+          routeTarget: { kind: 'git-worktree', workspaceId, worktreePath },
+          workspaceRuntimeId: repo.workspaceRuntimeId,
+        },
+        { kind: 'static', tab: 'changes' },
+        presentationOptions(),
+      ),
+    )
+  })
+
+  test('renders detached worktree files only in the Changes tab', async () => {
+    const workspaceId = workspaceIdForTest('goblin+file:///workspace/repo-detached-changes')
+    const worktreePath = '/workspace/detached-changes'
+    const repo = seedRepoWithReadModelForTest({
+      id: workspaceId,
+      branches: [],
+      worktrees: [detachedWorktreeSnapshot(worktreePath)],
+      currentBranchName: null,
+    })
+    setRepoWorktreeStatusQueryData(workspaceId, repo.workspaceRuntimeId, {
+      workspaceRuntimeId: repo.workspaceRuntimeId,
+      status: [
+        {
+          path: worktreePath,
+          isMain: false,
+          entries: [{ x: 'M', y: ' ', path: 'changed.ts' }],
+        },
+      ],
+      loadedAt: 1,
+    })
+    const target = gitWorktreeWorkspacePaneTabsTarget(workspaceId, worktreePath)
+    if (!target) throw new Error('expected canonical detached worktree fixture')
+    setWorkspacePaneTabsForTargetQueryData({
+      ...target,
+      workspaceRuntimeId: repo.workspaceRuntimeId,
+      tabs: [workspacePaneStaticTabEntry('status'), workspacePaneStaticTabEntry('changes')],
+    })
+
+    renderWorkspacePane(workspaceId, {
+      kind: 'git-worktree',
+      worktreePath,
+      route: { kind: 'static', tab: 'changes' },
+    })
+
+    expect(await screen.findByRole('tabpanel', { name: 'tab.changes' })).toBeTruthy()
+    expect(screen.getByLabelText('changed.ts')).toBeTruthy()
+    expect(screen.queryByText('111111111111')).toBeNull()
+  })
+
+  test('surfaces a stale snapshot while keeping an authoritative detached-worktree pane visible', async () => {
+    const workspaceId = workspaceIdForTest('goblin+file:///workspace/repo-stale-snapshot')
+    const worktreePath = '/workspace/detached-stale-snapshot'
+    const repo = seedRepoWithReadModelForTest({
+      id: workspaceId,
+      branches: [],
+      worktrees: [detachedWorktreeSnapshot(worktreePath)],
+      currentBranchName: null,
+    })
+    const snapshotQuery = appQueryClient.getQueryCache().find({
+      queryKey: repoSnapshotQueryKey(workspaceId, repo.workspaceRuntimeId),
+      exact: true,
+    })
+    if (!snapshotQuery) throw new Error('missing repository snapshot query')
+    snapshotQuery.setState({ ...snapshotQuery.state, dataUpdatedAt: Date.now() + 60_000 })
+    setRepoWorktreeStatusQueryData(workspaceId, repo.workspaceRuntimeId, {
+      workspaceRuntimeId: repo.workspaceRuntimeId,
+      status: [{ path: worktreePath, isMain: false, entries: [] }],
+      loadedAt: 1,
+    })
+    const target = gitWorktreeWorkspacePaneTabsTarget(workspaceId, worktreePath)
+    if (!target) throw new Error('expected canonical detached worktree fixture')
+    setWorkspacePaneTabsForTargetQueryData({
+      ...target,
+      workspaceRuntimeId: repo.workspaceRuntimeId,
+      tabs: [workspacePaneStaticTabEntry('files')],
+    })
+    renderWorkspacePane(workspaceId, {
+      kind: 'git-worktree',
+      worktreePath,
+      route: { kind: 'static', tab: 'files' },
+    })
+
+    expect(await screen.findByTestId('worktree-pane')).toBeTruthy()
+    await flushTestUpdates(() => {
+      snapshotQuery.setState({
+        ...snapshotQuery.state,
+        status: 'error',
+        error: new Error('snapshot refresh failed'),
+      })
+    })
+
+    expect(screen.getByTestId('worktree-pane')).toBeTruthy()
+    expect(screen.getByText('status.stale-title')).toBeTruthy()
+    expect(screen.getByText(/snapshot refresh failed/)).toBeTruthy()
+  })
+
+  test('restores a saved History tab from a bare detached-worktree route', async () => {
+    const workspaceId = workspaceIdForTest('goblin+file:///workspace/repo-bare-worktree')
+    const worktreePath = '/workspace/detached-bare'
+    const repo = seedRepoWithReadModelForTest({
+      id: workspaceId,
+      branches: [],
+      worktrees: [detachedWorktreeSnapshot(worktreePath)],
+      currentBranchName: null,
+    })
+    setRepoWorktreeStatusQueryData(workspaceId, repo.workspaceRuntimeId, {
+      workspaceRuntimeId: repo.workspaceRuntimeId,
+      status: [{ path: worktreePath, isMain: false, entries: [] }],
+      loadedAt: 1,
+    })
+    const target = gitWorktreeWorkspacePaneTabsTarget(workspaceId, worktreePath)
+    if (!target) throw new Error('expected canonical detached worktree fixture')
+    setWorkspacePaneTabsForTargetQueryData({
+      ...target,
+      workspaceRuntimeId: repo.workspaceRuntimeId,
+      tabs: [
+        workspacePaneStaticTabEntry('status'),
+        workspacePaneStaticTabEntry('files'),
+        workspacePaneStaticTabEntry('history'),
+      ],
+    })
+    workspacesStore.getState().setWorkspacePaneTabForTarget(target, 'history')
+
+    renderWorkspacePane(workspaceId, { kind: 'git-worktree', worktreePath, route: null })
+
+    expect(await screen.findByTestId('worktree-pane')).toBeTruthy()
     await flushTestUpdates(async () => await Promise.resolve())
-    expect(screen.getByRole('tab', { name: 'tab.files' }).getAttribute('aria-selected')).toBe('true')
+    expect(screen.getByRole('tab', { name: 'tab.log' }).getAttribute('aria-selected')).toBe('true')
     const workspace = workspacesStore.getState().workspaces[workspaceId]
-    expect(workspace && preferredWorkspacePaneTabForTarget(workspace.ui, target)).toBe('files')
+    expect(workspace && preferredWorkspacePaneTabForTarget(workspace.ui, target)).toBe('history')
+  })
+
+  test.each(['merge', 'cherry-pick', 'revert'] as const)(
+    'renders attached %s operation in the worktree-aware pane',
+    async (operation) => {
+      const workspaceId = workspaceIdForTest(`goblin+file:///workspace/repo-${operation}`)
+      const branchName = `feature/${operation}`
+      const worktreePath = `/workspace/${operation}`
+      const repo = seedRepoWithReadModelForTest({
+        id: workspaceId,
+        branchSnapshots: [createBranchSnapshot(branchName)],
+        worktrees: [
+          {
+            ...createRepoWorktreeSnapshotForTest(branchName, worktreePath),
+            operation: { kind: operation },
+          },
+        ],
+        currentBranchName: branchName,
+      })
+      setRepoWorktreeStatusQueryData(workspaceId, repo.workspaceRuntimeId, {
+        workspaceRuntimeId: repo.workspaceRuntimeId,
+        status: [{ path: worktreePath, isMain: false, entries: [] }],
+        loadedAt: 1,
+      })
+      const target = gitWorktreeWorkspacePaneTabsTarget(workspaceId, worktreePath)
+      if (!target) throw new Error('expected canonical operation worktree fixture')
+      setWorkspacePaneTabsForTargetQueryData({
+        ...target,
+        workspaceRuntimeId: repo.workspaceRuntimeId,
+        tabs: [workspacePaneStaticTabEntry('status')],
+      })
+
+      renderWorkspacePane(workspaceId, {
+        kind: 'git-worktree',
+        worktreePath,
+        route: { kind: 'static', tab: 'status' },
+      })
+
+      expect(await screen.findByTestId('worktree-pane')).toBeTruthy()
+      expect(screen.getByText(`worktree-state.${operation}`)).toBeTruthy()
+    },
+  )
+
+  test('preserves canonical bare-worktree preference across attached and rebase transitions', async () => {
+    const workspaceId = workspaceIdForTest('goblin+file:///workspace/repo-bare-worktree-transition')
+    const branchName = 'feature/bare-transition'
+    const worktreePath = '/workspace/bare-transition'
+    const attachedWorktree = createRepoWorktreeSnapshotForTest(branchName, worktreePath)
+    const repo = seedRepoWithReadModelForTest({
+      id: workspaceId,
+      branchSnapshots: [createBranchSnapshot(branchName)],
+      worktrees: [attachedWorktree],
+      currentBranchName: branchName,
+    })
+    const target = gitWorktreeWorkspacePaneTabsTarget(workspaceId, worktreePath)
+    if (!target) throw new Error('expected canonical worktree fixture')
+    setWorkspacePaneTabsForTargetQueryData({
+      ...target,
+      workspaceRuntimeId: repo.workspaceRuntimeId,
+      tabs: [
+        workspacePaneStaticTabEntry('status'),
+        workspacePaneStaticTabEntry('files'),
+        workspacePaneStaticTabEntry('history'),
+      ],
+    })
+    workspacesStore.getState().setWorkspacePaneTabForTarget(target, 'history')
+
+    renderWorkspacePane(workspaceId, { kind: 'git-worktree', worktreePath, route: null })
+
+    expect((await screen.findByRole('tab', { name: 'tab.log' })).getAttribute('aria-selected')).toBe('true')
+
+    const snapshot = getRepoSnapshotQueryData(workspaceId, repo.workspaceRuntimeId)
+    if (!snapshot) throw new Error('missing repository snapshot')
+    await flushTestUpdates(() => {
+      setRepoSnapshotQueryData(workspaceId, repo.workspaceRuntimeId, {
+        ...snapshot,
+        worktrees: [
+          {
+            ...attachedWorktree,
+            head: { kind: 'detached' },
+            operation: { kind: 'rebase' },
+            materializedBranch: branchName,
+          },
+        ],
+      })
+    })
+
+    expect(await screen.findByTestId('worktree-pane')).toBeTruthy()
+    expect(screen.getByRole('tab', { name: 'tab.log' }).getAttribute('aria-selected')).toBe('true')
+    let workspace = workspacesStore.getState().workspaces[workspaceId]
+    expect(workspace && preferredWorkspacePaneTabForTarget(workspace.ui, target)).toBe('history')
+
+    await flushTestUpdates(() => {
+      setRepoSnapshotQueryData(workspaceId, repo.workspaceRuntimeId, { ...snapshot, worktrees: [attachedWorktree] })
+    })
+
+    expect((await screen.findByRole('tab', { name: 'tab.log' })).getAttribute('aria-selected')).toBe('true')
+    workspace = workspacesStore.getState().workspaces[workspaceId]
+    expect(workspace && preferredWorkspacePaneTabForTarget(workspace.ui, target)).toBe('history')
+  })
+
+  test('accepts an explicit History route on a detached worktree', async () => {
+    const tab = 'history' as const
+    const workspaceId = workspaceIdForTest('goblin+file:///workspace/repo-detached-history')
+    const worktreePath = '/workspace/detached-history'
+    const repo = seedRepoWithReadModelForTest({
+      id: workspaceId,
+      branches: [],
+      worktrees: [detachedWorktreeSnapshot(worktreePath)],
+      currentBranchName: null,
+    })
+    setRepoWorktreeStatusQueryData(workspaceId, repo.workspaceRuntimeId, {
+      workspaceRuntimeId: repo.workspaceRuntimeId,
+      status: [{ path: worktreePath, isMain: false, entries: [] }],
+      loadedAt: 1,
+    })
+    const target = gitWorktreeWorkspacePaneTabsTarget(workspaceId, worktreePath)
+    if (!target) throw new Error('expected canonical detached worktree fixture')
+    setWorkspacePaneTabsForTargetQueryData({
+      ...target,
+      workspaceRuntimeId: repo.workspaceRuntimeId,
+      tabs: [workspacePaneStaticTabEntry('status'), workspacePaneStaticTabEntry(tab)],
+    })
+
+    renderWorkspacePane(workspaceId, {
+      kind: 'git-worktree',
+      worktreePath,
+      route: { kind: 'static', tab },
+    })
+
+    expect((await screen.findByRole('tab', { name: 'tab.log' })).getAttribute('aria-selected')).toBe('true')
+    expect(screen.getByRole('tabpanel', { name: 'tab.log' })).toBeTruthy()
+    expect(screen.queryByText('workspace-route.not-found-title')).toBeNull()
   })
 
   test('uses the shared compact workspace toolbar back action for a non-Git workspace', async () => {
@@ -380,7 +890,7 @@ describe('WorkspacePane directory workspaces', () => {
               <WorkspacePane
                 workspaceId={workspaceId}
                 workspacePaneRouteContext={{ kind: 'routed', route: null }}
-                onBackToBranchNavigator={onBackToNavigator}
+                onBackToGitWorkspaceNavigator={onBackToNavigator}
               />
             </TerminalSessionReadScope>
           </TerminalSessionCommandScope>
@@ -479,7 +989,6 @@ describe('WorkspacePane directory workspaces', () => {
         {
           routeTarget: { kind: 'workspace-root', workspaceId },
           workspaceRuntimeId: repo.workspaceRuntimeId,
-          authority: { kind: 'workspace-runtime' },
         },
         { kind: 'static', tab: 'files' },
         presentationOptions(),

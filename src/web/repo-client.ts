@@ -8,7 +8,14 @@ import type {
   RepoSnapshotResponse,
   RepoWorktreeStatusSnapshot,
 } from '#/shared/api-types.ts'
-import type { ExecResult, LogEntry, RepoMutationExecResult, RepoUrlTarget } from '#/shared/git-types.ts'
+import type {
+  CreateWorktreeExecResult,
+  ExecResult,
+  LogEntry,
+  RepoMutationExecResult,
+  RepoLogTarget,
+  RepoUrlTarget,
+} from '#/shared/git-types.ts'
 import { DEFAULT_REPOSITORY_LOG_COUNT } from '#/shared/git-types.ts'
 import type { CreateWorktreeInput, RemoteTrackingBranchIdentity } from '#/shared/worktree-create.ts'
 import type { WorktreeBootstrapDecision, WorktreeBootstrapPreviewResult } from '#/shared/worktree-bootstrap-summary.ts'
@@ -21,6 +28,7 @@ import {
   decodeWith,
   ExecResultResponseSchema,
   RepoMutationExecResultResponseSchema,
+  CreateWorktreeExecResultResponseSchema,
 } from '#/shared/http-response-schema.ts'
 import {
   BackgroundSyncReposResponseSchema,
@@ -77,7 +85,7 @@ export async function cloneRepository(
 export async function getRepoLog(
   cwd: WorkspaceId,
   workspaceRuntimeId: string,
-  branch: string,
+  target: RepoLogTarget,
   options?: { count?: number; skip?: number; signal?: AbortSignal },
 ): Promise<LogEntry[]> {
   const log = await postServerJson(
@@ -85,7 +93,7 @@ export async function getRepoLog(
     {
       cwd,
       workspaceRuntimeId,
-      branch,
+      target,
       count: options?.count ?? DEFAULT_REPOSITORY_LOG_COUNT,
       skip: options?.skip ?? 0,
     },
@@ -225,11 +233,11 @@ export async function createRepoWorktree(
   input: CreateWorktreeInput,
   worktreeBootstrap: WorktreeBootstrapDecision,
   signal?: AbortSignal,
-): Promise<RepoMutationExecResult> {
+): Promise<CreateWorktreeExecResult> {
   return await postServerCommandJson(
     '/api/repo/create-worktree',
     { cwd, workspaceRuntimeId, ...input, worktreeBootstrap },
-    decodeWith(RepoMutationExecResultResponseSchema),
+    decodeWith(CreateWorktreeExecResultResponseSchema),
     // Mutation subcommands own their applicable server-side deadlines. A fixed
     // request watchdog could abort a valid queued workflow; caller cancellation remains active.
     { signal, timeoutMs: 0 },

@@ -1,4 +1,8 @@
-import { seedRepoWithReadModelForTest, createRepoBranch } from '#/web/test-utils/repo-store.ts'
+import {
+  seedRepoWithReadModelForTest,
+  createRepoBranch,
+  createRepoWorktreeSnapshotForTest,
+} from '#/web/test-utils/repo-store.ts'
 import { beforeEach, describe, expect, test, vi } from 'vitest'
 import type { WorkspaceId } from '#/shared/workspace-locator.ts'
 import { workspacesStore } from '#/web/stores/workspaces/store.ts'
@@ -7,6 +11,8 @@ import type {
   WorkspaceNavigationHistoryTraversal,
 } from '#/web/stores/workspaces/types.ts'
 import { currentAppNavigationGeneration } from '#/web/app-navigation-lifecycle.ts'
+import { appQueryClient } from '#/web/app-query-client.ts'
+import { repoSnapshotQueryKey } from '#/web/repo-query-keys.ts'
 import {
   REPO_ID,
   REPO_A_ID,
@@ -17,6 +23,7 @@ import {
   branchHistoryEntry,
   historyTraversal,
   createAppNavigationActions,
+  markRepoGitUnavailable,
   routeNavigation,
 } from '#/web/app-navigation-actions.test-utils.ts'
 
@@ -36,8 +43,6 @@ describe('createAppNavigationActions history traversal', () => {
         kind: 'branch',
         branchName: 'feature/test',
         workspacePaneTab: null,
-        terminalFilesystemTargetKey: null,
-        terminalSessionId: null,
       },
     }
     const traversal = { ...historyTraversal(target), direction }
@@ -90,6 +95,12 @@ describe('createAppNavigationActions history traversal', () => {
   test.each(['back', 'forward'] as const)(
     'restores a saved bare worktree history entry when navigating %s',
     (direction) => {
+      seedRepoWithReadModelForTest({
+        id: REPO_ID,
+        branches: [createRepoBranch(BRANCH_NAME)],
+        worktrees: [createRepoWorktreeSnapshotForTest(BRANCH_NAME, WORKTREE_PATH)],
+        currentBranchName: BRANCH_NAME,
+      })
       const navigation = routeNavigation()
       const target: WorkspaceNavigationHistoryEntry = {
         workspaceId: REPO_ID,
@@ -126,12 +137,113 @@ describe('createAppNavigationActions history traversal', () => {
     },
   )
 
+  test.each([
+    { workspacePaneTab: null, terminalSessionId: null },
+    { workspacePaneTab: 'files' as const, terminalSessionId: null },
+    { workspacePaneTab: 'terminal' as const, terminalSessionId: 'term-111111111111111111111' },
+  ])('does not restore a missing worktree history target ($workspacePaneTab)', (selection) => {
+    seedRepoWithReadModelForTest({
+      id: REPO_ID,
+      branches: [createRepoBranch(BRANCH_NAME)],
+      worktrees: [],
+      currentBranchName: BRANCH_NAME,
+    })
+    const target: WorkspaceNavigationHistoryEntry = {
+      workspaceId: REPO_ID,
+      route: { kind: 'worktree', worktreePath: WORKTREE_PATH, ...selection },
+    }
+    const traversal = historyTraversal(target)
+    const navigation = routeNavigation()
+    const commitWorkspaceNavigation = vi.fn(() => true)
+    const actions = createAppNavigationActions({
+      currentWorkspaceId: REPO_ID,
+      workspaceOrder: [REPO_ID],
+      closeWorkspace: vi.fn(),
+      peekWorkspaceNavigation: vi.fn(() => traversal),
+      commitWorkspaceNavigation,
+      routeNavigation: navigation,
+    })
+
+    actions.goBack(REPO_ID)
+
+    expect(commitWorkspaceNavigation).not.toHaveBeenCalled()
+    expect(navigation.openRepoWorktree).not.toHaveBeenCalled()
+    expect(navigation.openRepoWorktreeTab).not.toHaveBeenCalled()
+    expect(navigation.openRepoWorktreeTerminal).not.toHaveBeenCalled()
+  })
+
+  test('does not restore worktree history while the repository snapshot is unavailable', () => {
+    seedRepoWithReadModelForTest({ id: REPO_ID, branches: [], currentBranchName: null })
+    const workspace = workspacesStore.getState().workspaces[REPO_ID]
+    if (!workspace) throw new Error('missing test workspace')
+    appQueryClient.removeQueries({ queryKey: repoSnapshotQueryKey(REPO_ID, workspace.workspaceRuntimeId) })
+    const target: WorkspaceNavigationHistoryEntry = {
+      workspaceId: REPO_ID,
+      route: {
+        kind: 'worktree',
+        worktreePath: WORKTREE_PATH,
+        workspacePaneTab: null,
+        terminalSessionId: null,
+      },
+    }
+    const traversal = historyTraversal(target)
+    const navigation = routeNavigation()
+    const commitWorkspaceNavigation = vi.fn(() => true)
+    const actions = createAppNavigationActions({
+      currentWorkspaceId: REPO_ID,
+      workspaceOrder: [REPO_ID],
+      closeWorkspace: vi.fn(),
+      peekWorkspaceNavigation: vi.fn(() => traversal),
+      commitWorkspaceNavigation,
+      routeNavigation: navigation,
+    })
+
+    actions.goBack(REPO_ID)
+
+    expect(commitWorkspaceNavigation).not.toHaveBeenCalled()
+    expect(navigation.openRepoWorktree).not.toHaveBeenCalled()
+  })
+
+  test('does not restore worktree history from a stale snapshot after Git capability is lost', () => {
+    seedRepoWithReadModelForTest({
+      id: REPO_ID,
+      branches: [createRepoBranch(BRANCH_NAME)],
+      worktrees: [createRepoWorktreeSnapshotForTest(BRANCH_NAME, WORKTREE_PATH)],
+      currentBranchName: BRANCH_NAME,
+    })
+    markRepoGitUnavailable(REPO_ID)
+    const target: WorkspaceNavigationHistoryEntry = {
+      workspaceId: REPO_ID,
+      route: {
+        kind: 'worktree',
+        worktreePath: WORKTREE_PATH,
+        workspacePaneTab: null,
+        terminalSessionId: null,
+      },
+    }
+    const traversal = historyTraversal(target)
+    const navigation = routeNavigation()
+    const commitWorkspaceNavigation = vi.fn(() => true)
+    const actions = createAppNavigationActions({
+      currentWorkspaceId: REPO_ID,
+      workspaceOrder: [REPO_ID],
+      closeWorkspace: vi.fn(),
+      peekWorkspaceNavigation: vi.fn(() => traversal),
+      commitWorkspaceNavigation,
+      routeNavigation: navigation,
+    })
+
+    actions.goBack(REPO_ID)
+
+    expect(commitWorkspaceNavigation).not.toHaveBeenCalled()
+    expect(navigation.openRepoWorktree).not.toHaveBeenCalled()
+  })
+
   test('does not block bare branch history restore while tabs projection is pending', async () => {
     seedRepoWithReadModelForTest({
       id: REPO_ID,
-      branches: [
-        createRepoBranch(BRANCH_NAME, { worktree: { path: WORKTREE_PATH, isPrimary: false, isLocked: false } }),
-      ],
+      branches: [createRepoBranch(BRANCH_NAME)],
+      worktrees: [createRepoWorktreeSnapshotForTest(BRANCH_NAME, WORKTREE_PATH)],
       currentBranchName: BRANCH_NAME,
       preferredWorkspacePaneTab: 'status',
     })
@@ -141,8 +253,6 @@ describe('createAppNavigationActions history traversal', () => {
         kind: 'branch',
         branchName: BRANCH_NAME,
         workspacePaneTab: null,
-        terminalFilesystemTargetKey: null,
-        terminalSessionId: null,
       },
     } satisfies WorkspaceNavigationHistoryEntry
     const dashboard = {
@@ -168,39 +278,6 @@ describe('createAppNavigationActions history traversal', () => {
 
     expect(peekWorkspaceNavigation).toHaveBeenCalledWith(REPO_ID, 'back')
     expect(navigation.openRepoBranch).toHaveBeenCalledWith(REPO_ID, BRANCH_NAME, historyRestoreOptions())
-  })
-
-  test('restores a malformed terminal history entry as the bare branch route', () => {
-    const navigation = routeNavigation()
-    const target = {
-      workspaceId: REPO_A_ID,
-      route: {
-        kind: 'branch' as const,
-        branchName: 'feature/test',
-        workspacePaneTab: 'terminal' as const,
-        terminalFilesystemTargetKey: 'goblin+file:///tmp/repo-a\0goblin+file:///tmp/worktree',
-        terminalSessionId: null,
-      },
-    }
-    const traversal = historyTraversal(target)
-    const peekWorkspaceNavigation = vi.fn(() => traversal)
-    const commitWorkspaceNavigation = vi.fn(() => true)
-    const actions = createAppNavigationActions({
-      currentWorkspaceId: REPO_A_ID,
-      workspaceOrder: [REPO_A_ID],
-      closeWorkspace: vi.fn(),
-      peekWorkspaceNavigation,
-      commitWorkspaceNavigation,
-      routeNavigation: navigation,
-    })
-
-    actions.goBack(REPO_A_ID)
-
-    expect(peekWorkspaceNavigation).toHaveBeenCalledWith(REPO_A_ID, 'back')
-    expect(commitWorkspaceNavigation).toHaveBeenCalledWith(traversal)
-    expect(navigation.openRepoBranch).toHaveBeenCalledWith(REPO_A_ID, 'feature/test', historyRestoreOptions())
-    expect(navigation.openRepoBranchTab).not.toHaveBeenCalled()
-    expect(navigation.openRepoBranchTerminal).not.toHaveBeenCalled()
   })
 
   test.each(['back', 'forward'] as const)(

@@ -16,7 +16,7 @@ import { onScopeDispose, toValue } from 'vue'
 import type { MaybeRefOrGetter } from 'vue'
 import { workspacesStore } from '#/web/stores/workspaces/store.ts'
 import { uiTransitionStore } from '#/web/stores/ui-transition.ts'
-import { branchViewModeForWorkspace, visibleBranches } from '#/web/stores/workspaces/branch-view-mode.ts'
+import { branchViewModeForWorkspace } from '#/web/stores/workspaces/branch-view-mode.ts'
 import { isShortcutBlockingLayerOpen } from '#/web/lib/layers.ts'
 import { runBranchActionShortcut } from '#/web/keyboard/branch-action-shortcuts.ts'
 import { matchClientKeyboardShortcut } from '#/shared/shortcut-definitions.ts'
@@ -24,6 +24,7 @@ import { terminalHasKeyboardFocus } from '#/web/terminal-focus.ts'
 import type { AppNavigationActions } from '#/web/app-navigation-actions.ts'
 import type { WorkspaceState } from '#/web/stores/workspaces/types.ts'
 import type { BranchViewMode } from '#/shared/api-types.ts'
+import { gitBranchPaneTargetLease, gitWorktreePaneTargetLease } from '#/web/workspace-pane/workspace-pane-tab-target.ts'
 import { getRuntimeShortcutSettings } from '#/web/runtime-settings-shortcuts.ts'
 import { keyboardRuntimeStateFromStore } from '#/web/stores/workspaces/selector-state.ts'
 import {
@@ -44,7 +45,11 @@ import { projectBranchActionOperation } from '#/web/hooks/branch-action-state.ts
 import { workspaceTerminalAvailable, workspaceWorktreesAvailable } from '#/shared/workspace-runtime.ts'
 import type { WorkspaceId } from '#/shared/workspace-locator.ts'
 import { workspaceCanExecute } from '#/web/stores/workspaces/workspace-guards.ts'
-
+import {
+  gitWorkspaceNavigatorRowMatchesIdentity,
+  gitWorkspaceNavigatorRows,
+  type GitWorkspaceNavigatorRowIdentity,
+} from '#/web/components/workspace-navigator/git-workspace-navigator-model.ts'
 type MoveDirection = 1 | -1
 const INTERACTIVE_SHORTCUT_TARGET_SELECTOR =
   'button,a,input,textarea,select,[role="button"],[role="tab"],[role="menuitem"],[data-interactive]'
@@ -53,6 +58,7 @@ interface Options {
   navigation: MaybeRefOrGetter<AppNavigationActions>
   currentWorkspaceId: MaybeRefOrGetter<WorkspaceId | null>
   currentBranchName?: MaybeRefOrGetter<string | null>
+  currentGitWorkspaceNavigatorRowIdentity: MaybeRefOrGetter<GitWorkspaceNavigatorRowIdentity | null>
   currentWorkspacePaneCommandTarget: MaybeRefOrGetter<WorkspacePaneCommandTarget | null>
   onShowHelp: () => void
   /** Returns true when workspace shortcuts should not affect the workspace view. */
@@ -116,26 +122,36 @@ function nextIndex(current: number, length: number, direction: MoveDirection): n
   return Math.max(0, current < 0 ? 0 : current - 1)
 }
 
-function moveBranchSelection(
+function moveGitWorkspaceNavigatorSelection(
   input: {
     repo: Pick<WorkspaceState, 'id' | 'workspaceRuntimeId'>
     viewMode: BranchViewMode
-    currentBranchName: string | null
+    currentRow: GitWorkspaceNavigatorRowIdentity | null
   },
   direction: MoveDirection,
   navigation: AppNavigationActions,
 ): boolean {
   const branchModel = getRepoSnapshotQueryData(input.repo.id, input.repo.workspaceRuntimeId)
   if (!branchModel) return false
-  const branches = visibleBranches({
+  const rows = gitWorkspaceNavigatorRows({
     branches: branchModel.branches,
+    worktrees: branchModel.worktrees,
     viewMode: input.viewMode,
   })
-  if (branches.length === 0) return false
-  const index = branches.findIndex((branch) => branch.name === input.currentBranchName)
-  const next = branches[nextIndex(index, branches.length, direction)]
+  if (rows.length === 0) return false
+  const currentRow = input.currentRow
+  const index = currentRow ? rows.findIndex((row) => gitWorkspaceNavigatorRowMatchesIdentity(row, currentRow)) : -1
+  if (currentRow && index < 0) return false
+  const next = rows[nextIndex(index, rows.length, direction)]
   if (!next) return false
-  navigation.selectRepoBranch(input.repo.id, next.name)
+  if (next.kind === 'branch') {
+    navigation.selectRepoBranch(
+      gitBranchPaneTargetLease(input.repo.id, input.repo.workspaceRuntimeId, next.branch.name),
+    )
+  } else
+    navigation.selectRepoWorktree(
+      gitWorktreePaneTargetLease(input.repo.id, input.repo.workspaceRuntimeId, next.worktree.path),
+    )
   return true
 }
 
@@ -273,11 +289,11 @@ export function useKeyboard(options: Options) {
       case 'next-branch': {
         if (overlayOpen || !repo || repo.capability.kind !== 'git') break
         if (
-          moveBranchSelection(
+          moveGitWorkspaceNavigatorSelection(
             {
               repo,
               viewMode: branchViewModeForWorkspace(workspacesStore.getState().branchViewModeByWorkspace, repo.id),
-              currentBranchName: toValue(options.currentBranchName) ?? null,
+              currentRow: toValue(options.currentGitWorkspaceNavigatorRowIdentity),
             },
             1,
             navigation,
@@ -289,11 +305,11 @@ export function useKeyboard(options: Options) {
       case 'prev-branch': {
         if (overlayOpen || !repo || repo.capability.kind !== 'git') break
         if (
-          moveBranchSelection(
+          moveGitWorkspaceNavigatorSelection(
             {
               repo,
               viewMode: branchViewModeForWorkspace(workspacesStore.getState().branchViewModeByWorkspace, repo.id),
-              currentBranchName: toValue(options.currentBranchName) ?? null,
+              currentRow: toValue(options.currentGitWorkspaceNavigatorRowIdentity),
             },
             -1,
             navigation,

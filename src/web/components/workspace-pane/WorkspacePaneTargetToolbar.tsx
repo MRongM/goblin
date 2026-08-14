@@ -26,7 +26,10 @@ import type {
   WorkspacePaneFilesystemTarget,
   WorkspacePaneSurfaceTarget,
 } from '#/web/workspace-pane/workspace-pane-filesystem-target.ts'
-import { workspacePaneFilesystemTerminalBase } from '#/web/workspace-pane/workspace-pane-filesystem-target.ts'
+import {
+  workspacePaneFilesystemTerminalBase,
+  workspacePaneTabsTargetForFilesystemTarget,
+} from '#/web/workspace-pane/workspace-pane-filesystem-target.ts'
 import { showCreatedTerminalWorkspacePaneRuntimeTab } from '#/web/workspace-pane/workspace-pane-runtime-tab-create-action.ts'
 import type { CreatedTerminalRouteRequest } from '#/web/workspace-pane/workspace-pane-runtime-tab-create-action.ts'
 import { dispatchSelectWorkspacePaneTabByIdentityAction } from '#/web/workspace-pane/workspace-pane-tab-select-action.ts'
@@ -35,7 +38,7 @@ import {
   workspacePaneTabItems,
 } from '#/web/components/workspace-pane/workspace-pane-tab-items.ts'
 import { orderWorkspacePaneItemsByTabEntries } from '#/web/workspace-pane/workspace-pane-tabs.ts'
-import type { WorkspacePaneTabModel } from '#/web/workspace-pane/workspace-pane-tab-model.ts'
+import type { WorkspacePaneModelTarget, WorkspacePaneTabModel } from '#/web/workspace-pane/workspace-pane-tab-model.ts'
 import { useWorkspacePaneRuntimeTabCreateAction } from '#/web/workspace-pane/use-workspace-pane-runtime-tab-create-action.ts'
 import { useWorkspacePaneTabsReorderMutation } from '#/web/workspace-pane/workspace-pane-tabs-reorder-mutation.ts'
 import type { WorkspacePaneTabsReorderMutationInput } from '#/web/workspace-pane/workspace-pane-tabs-reorder-mutation.ts'
@@ -155,7 +158,6 @@ const WorkspacePaneTargetToolbarContent = defineComponent<WorkspacePaneTargetToo
     }
 
     const createAction = useWorkspacePaneRuntimeTabCreateAction({
-      routeTarget: () => routeTarget.value,
       base: () => (props.target.kind === 'git-branch' ? null : workspacePaneFilesystemTerminalBase(props.target)),
       runtimeTabStateByType: () => props.model.runtimeTabStateByType,
       workspacePaneRoute: () => props.workspacePaneRoute,
@@ -195,6 +197,7 @@ const WorkspacePaneTargetToolbarContent = defineComponent<WorkspacePaneTargetToo
       if (isPendingWorkspacePaneTabItem(item)) return
       void dispatchSelectWorkspacePaneTabByIdentityAction({
         workspaceId: props.target.workspaceId,
+        workspaceRuntimeId: props.target.workspaceRuntimeId,
         routeTarget: routeTarget.value,
         paneTarget: persistenceTarget.value,
         worktreeHead: worktreeHead.value,
@@ -325,7 +328,7 @@ function tabsMutationInput(
 }
 
 function requiredWorkspacePaneModelTarget(
-  target: WorkspacePaneTabModel['routeTarget'],
+  target: WorkspacePaneModelTarget,
   role: 'route' | 'persistence',
 ): WorkspacePaneTabsTarget {
   if (target.kind === 'inactive') throw new Error(`inactive workspace pane has no ${role} target`)
@@ -339,17 +342,26 @@ function workspacePaneCommandTargetForSurface(
 ): WorkspacePaneCommandTarget {
   if (target.kind === 'workspace-root') {
     if (surface.kind !== 'workspace-root') throw new Error('workspace-root route requires a workspace-root surface')
-    return { routeTarget: target, workspacePaneRoute, filesystemTarget: surface }
+    if (surface.workspaceId !== target.workspaceId) {
+      throw new Error('workspace-root route requires its canonical workspace surface')
+    }
+    return { workspacePaneRoute, filesystemTarget: surface }
   }
   if (target.kind === 'git-worktree') {
     if (surface.kind !== 'git-worktree') throw new Error('git-worktree route requires a git-worktree surface')
-    return { routeTarget: target, workspacePaneRoute, filesystemTarget: surface }
+    const surfaceTarget = workspacePaneTabsTargetForFilesystemTarget(surface)
+    if (surfaceTarget.workspaceId !== target.workspaceId || surfaceTarget.worktreePath !== target.worktreePath) {
+      throw new Error('git-worktree route requires its canonical worktree surface')
+    }
+    return { workspacePaneRoute, filesystemTarget: surface }
   }
-  if (surface.kind === 'workspace-root') throw new Error('git-branch route cannot use a workspace-root surface')
+  if (surface.kind !== 'git-branch') throw new Error('git-branch route requires a git-branch surface')
+  if (workspacePaneRoute?.kind === 'terminal') throw new Error('git-branch route cannot present a runtime tab')
   return {
+    workspaceRuntimeId: surface.workspaceRuntimeId,
     routeTarget: target,
     workspacePaneRoute,
-    filesystemTarget: surface.kind === 'git-worktree' ? surface : null,
+    filesystemTarget: null,
   }
 }
 

@@ -3,8 +3,9 @@ import { computed, defineComponent, ref } from 'vue'
 import type { VNodeChild } from 'vue'
 import { toast } from 'vue-sonner'
 import { Button } from '#/web/components/ui/button.tsx'
-import { terminalExecutionPath, terminalPresentationBranch } from '#/shared/terminal-types.ts'
+import { terminalExecutionPath } from '#/shared/terminal-types.ts'
 import type { WorkspaceId } from '#/shared/workspace-locator.ts'
+import type { RepoWorktreeSnapshot } from '#/shared/git-types.ts'
 import { TerminalBellBadge } from '#/web/components/terminal/TerminalBellBadge.tsx'
 import { TerminalOutputActivityIndicator } from '#/web/components/terminal/TerminalOutputActivityIndicator.tsx'
 import {
@@ -23,6 +24,7 @@ import { workspacesStore } from '#/web/stores/workspaces/store.ts'
 import { useRepoSnapshotReadModel } from '#/web/repo-queries.ts'
 import { useWorkspacePaneTabsQuery } from '#/web/workspace-pane/workspace-pane-tabs-query.ts'
 import { orderWorkspaceDashboardTerminals } from '#/web/components/workspace-pages/workspace-dashboard-terminal-order.ts'
+import { worktreePresentationLabel } from '#/web/worktree-presentation.ts'
 import {
   gitWorktreePaneTargetLease,
   workspaceRootPaneTargetLease,
@@ -63,7 +65,7 @@ export const WorkspaceDashboardTerminals = defineComponent<{ workspaceId: Worksp
       orderWorkspaceDashboardTerminals({
         workspaceId: props.workspaceId,
         sessions: sessions.value,
-        branches: repoSnapshot.data.value?.snapshot.branches ?? [],
+        worktrees: repoSnapshot.data.value?.snapshot.worktrees ?? [],
         paneTabs: paneTabs.data.value,
       }),
     )
@@ -76,6 +78,9 @@ export const WorkspaceDashboardTerminals = defineComponent<{ workspaceId: Worksp
     async function openTerminal(session: WorkspaceTerminalSessionSummary): Promise<void> {
       const pending = terminalOpeningLease(session)
       if (sameTerminalOpeningScope(openingTerminal.value, pending)) return
+      if (dashboardTerminalTargetAvailability(session, repoSnapshot.data.value?.snapshot.worktrees) !== 'available') {
+        return
+      }
       if (hydration.value.phase === 'failed') {
         toast.warning(t('dashboard.terminals.stale'))
         return
@@ -158,7 +163,9 @@ export const WorkspaceDashboardTerminals = defineComponent<{ workspaceId: Worksp
 
     function renderTerminalRow(session: WorkspaceTerminalSessionSummary): VNodeChild {
       const opening = sameTerminalOpeningLease(openingTerminal.value, terminalOpeningLease(session))
-      const target = terminalTargetLabel(session, t)
+      const worktrees = repoSnapshot.data.value?.snapshot.worktrees
+      const target = terminalTargetLabel(session, worktrees, t)
+      const availability = dashboardTerminalTargetAvailability(session, worktrees)
       const titleId = `dashboard-terminal-title-${session.terminalSessionId}`
       const detailsId = `dashboard-terminal-details-${session.terminalSessionId}`
       const statusId = `dashboard-terminal-status-${session.terminalSessionId}`
@@ -183,7 +190,10 @@ export const WorkspaceDashboardTerminals = defineComponent<{ workspaceId: Worksp
           aria-labelledby={titleId}
           aria-describedby={`${detailsId} ${statusId}`}
           aria-busy={opening || undefined}
-          disabled={sameTerminalOpeningScope(openingTerminal.value, terminalOpeningLease(session))}
+          disabled={
+            availability !== 'available' ||
+            sameTerminalOpeningScope(openingTerminal.value, terminalOpeningLease(session))
+          }
           onClick={() => void openTerminal(session)}
         >
           <span class="flex size-7 shrink-0 items-center justify-center rounded-md border border-border/60 bg-muted/35 text-muted-foreground">
@@ -288,21 +298,37 @@ function dashboardTerminalTargetLease(
     session.base.target.workspaceId,
     session.base.target.workspaceRuntimeId,
     terminalExecutionPath(session.base.target),
-    session.base.presentation.head,
   )
+}
+
+type DashboardTerminalTargetAvailability = 'available' | 'unknown' | 'unavailable'
+
+function dashboardTerminalTargetAvailability(
+  session: WorkspaceTerminalSessionSummary,
+  worktrees: readonly RepoWorktreeSnapshot[] | undefined,
+): DashboardTerminalTargetAvailability {
+  if (session.base.target.kind === 'workspace-root') return 'available'
+  if (session.base.presentation.kind !== 'git-worktree') return 'unavailable'
+  if (!worktrees) return 'unknown'
+  const worktreePath = terminalExecutionPath(session.base.target)
+  return worktrees.some((worktree) => worktree.path === worktreePath) ? 'available' : 'unavailable'
 }
 
 function terminalTargetLabel(
   session: WorkspaceTerminalSessionSummary,
+  worktrees: readonly RepoWorktreeSnapshot[] | undefined,
   t: DashboardTranslator,
 ): { label: string; path: string } {
   const path = terminalExecutionPath(session.base.target)
   if (session.base.target.kind === 'workspace-root') {
     return { label: t('dashboard.terminals.workspace-root'), path }
   }
-  const branch = terminalPresentationBranch(session.base.presentation)
+  if (!worktrees) return { label: t('dashboard.terminals.worktree-unknown'), path }
+  const currentWorktree = worktrees.find((worktree) => worktree.path === path)
   return {
-    label: branch ?? t('dashboard.terminals.detached-worktree'),
+    label: currentWorktree
+      ? worktreePresentationLabel(currentWorktree, t)
+      : t('dashboard.terminals.worktree-unavailable'),
     path,
   }
 }

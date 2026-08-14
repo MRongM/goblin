@@ -1,6 +1,6 @@
 import { defineComponent } from 'vue'
 import type { FunctionalComponent, PropType } from 'vue'
-import type { BranchSnapshotInfo } from '#/shared/git-types.ts'
+import type { BranchSnapshotInfo, RepoWorktreeSnapshot } from '#/shared/git-types.ts'
 import { BranchActionsMenu } from '#/web/components/BranchActionsMenu.tsx'
 import { BranchSummaryInline } from '#/web/components/repo-workspace/BranchSummaryInline.tsx'
 import { cn } from '#/web/lib/cn.ts'
@@ -8,13 +8,14 @@ import type { BranchActionRepo } from '#/web/hooks/branch-action-state.ts'
 import { useIsCompactUi } from '#/web/hooks/useResponsiveUiMode.tsx'
 import { TerminalBellBadge } from '#/web/components/terminal/TerminalBellBadge.tsx'
 import { TerminalOutputActivityIndicator } from '#/web/components/terminal/TerminalOutputActivityIndicator.tsx'
-import { BRANCH_ROW_ACTION_BOX_CLASS } from '#/web/components/branch-navigator/branch-row-metrics.ts'
-import { NavigatorRow } from '#/web/components/branch-navigator/NavigatorRow.tsx'
+import { NAVIGATOR_ROW_ACTION_BOX_CLASS } from '#/web/components/workspace-navigator/navigator-row-metrics.ts'
+import { NavigatorRow } from '#/web/components/workspace-navigator/NavigatorRow.tsx'
 import type { ElementRef } from '#/web/components/ui/refs.ts'
 
 export interface BranchRowProps {
   repo: BranchActionRepo
   branch: BranchSnapshotInfo
+  worktree?: RepoWorktreeSnapshot
   selected: string | null
   onSelectBranch: (branch: string) => void
   onOpenBranchStatus: (branch: string) => void
@@ -25,7 +26,7 @@ export interface BranchRowProps {
   terminalOutputActive?: boolean
   /**
    * Whether a branch action (queued or running) currently targets this
-   * row. Resolved by the data-binding wrapper (`BranchListRow`) from
+   * row. Resolved by the data-binding wrapper (`GitWorkspaceNavigatorBranchRow`) from
    * `branchActionDisplayPhase` so the row stays purely presentational
    * and can be reused in contexts that don't carry a live operations
    * state. Defaults to `false` when the wrapper doesn't compute it.
@@ -38,6 +39,7 @@ export const BranchRow = defineComponent<BranchRowProps>({
   props: {
     repo: { type: Object as PropType<BranchActionRepo>, required: true },
     branch: { type: Object as PropType<BranchSnapshotInfo>, required: true },
+    worktree: { type: Object as PropType<RepoWorktreeSnapshot>, default: undefined },
     selected: { type: String, default: null },
     onSelectBranch: { type: Function as PropType<(branch: string) => void>, required: true },
     onOpenBranchStatus: { type: Function as PropType<(branch: string) => void>, required: true },
@@ -80,6 +82,7 @@ export const BranchRow = defineComponent<BranchRowProps>({
             <BranchSummaryInline
               repo={props.repo}
               branch={props.branch}
+              worktree={props.worktree}
               selected={isSelected}
               leadingTerminalBellCount={leadingTerminalBellCount}
               leadingTerminalOutputActive={leadingTerminalOutputActive}
@@ -117,7 +120,7 @@ const BranchRowActionSlot: FunctionalComponent<BranchRowActionSlotProps> = (prop
   const showOutputActivity = props.terminalOutputActive && props.actionHidden && !showBellBadge
 
   return (
-    <div class={BRANCH_ROW_ACTION_BOX_CLASS}>
+    <div class={NAVIGATOR_ROW_ACTION_BOX_CLASS}>
       {showBellBadge && (
         <div class="absolute inset-0 flex items-center justify-center transition-opacity duration-100 group-hover:opacity-0 group-focus-within:opacity-0">
           <TerminalBellBadge count={props.terminalBellCount} />

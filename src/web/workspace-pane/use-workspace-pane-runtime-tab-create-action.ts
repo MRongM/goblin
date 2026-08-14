@@ -14,13 +14,9 @@ import {
 import type { ParsedWorkspacePaneRoute } from '#/web/App.tsx'
 import type { RuntimeWorkspacePaneTarget } from '#/shared/workspace-runtime.ts'
 import type { TerminalSessionBase } from '#/shared/terminal-types.ts'
-import {
-  workspacePaneTabsTargetFromRuntime,
-  type WorkspacePaneTabsTarget,
-} from '#/shared/workspace-pane-tabs-target.ts'
+import { workspacePaneTabsTargetFromRuntime } from '#/shared/workspace-pane-tabs-target.ts'
 
 export interface UseWorkspacePaneRuntimeTabCreateActionInput {
-  routeTarget: MaybeRefOrGetter<WorkspacePaneTabsTarget>
   base: MaybeRefOrGetter<TerminalSessionBase | null>
   runtimeTabStateByType: MaybeRefOrGetter<WorkspacePaneRuntimeTabCreateStateByType>
   workspacePaneRoute: MaybeRefOrGetter<ParsedWorkspacePaneRoute | null | undefined>
@@ -58,13 +54,14 @@ export function useWorkspacePaneRuntimeTabCreateAction(
           ? input.showCreatedRuntimeTab(type, sessionId, presentation, terminalBase.target, routeRequest)
           : false,
       t: input.t,
-      terminal: {
-        routeTarget: toValue(input.routeTarget),
-        base: terminalBase,
-        createTerminal: createTerminalWithAdmission,
-        captureOpenerIdentity,
-        focusTerminal,
-      },
+      terminal: terminalBase
+        ? {
+            base: terminalBase,
+            createTerminal: createTerminalWithAdmission,
+            captureOpenerIdentity,
+            focusTerminal,
+          }
+        : undefined,
     })
   })
 }

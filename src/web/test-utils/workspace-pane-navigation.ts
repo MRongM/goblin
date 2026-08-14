@@ -2,14 +2,13 @@ import { afterEach, vi } from 'vitest'
 import type { ParsedWorkspacePaneRoute, WorkspacePaneRouteTarget } from '#/web/App.tsx'
 import type { AppNavigationActions, AppNavigationOptions } from '#/web/app-navigation-actions.ts'
 import { openResolvedWorkspacePaneRoute } from '#/web/workspace-pane/repo-branch-workspace-pane-route-navigation.ts'
-import {
-  workspacePanePreferenceTargetOptions,
-  workspacePaneTabTargetForBranch,
-} from '#/web/workspace-pane/workspace-pane-tab-target.ts'
+import { workspacePaneTabTargetForPaneTarget } from '#/web/workspace-pane/workspace-pane-tab-target.ts'
 import { workspacesStore } from '#/web/stores/workspaces/store.ts'
 import { getRepoSnapshotQueryData } from '#/web/repo-query-cache.ts'
 import type { WorkspaceId } from '#/shared/workspace-locator.ts'
 import { appNavigationActionsForTest } from '#/web/test-utils/app-navigation.ts'
+import { repoWorktreeForBranch } from '#/shared/git-types.ts'
+import { requiredGitWorkspacePaneTabsTarget } from '#/shared/workspace-pane-tabs-target.ts'
 
 export interface ObservedBranchRouteNavigationForTest {
   showRepoBranchEmptyWorkspacePane: (
@@ -21,12 +20,6 @@ export interface ObservedBranchRouteNavigationForTest {
     workspaceId: WorkspaceId,
     branchName: string,
     tab: Extract<WorkspacePaneRouteTarget, { kind: 'static' }>['tab'],
-    options?: AppNavigationOptions,
-  ) => boolean
-  showRepoBranchTerminalSession: (
-    workspaceId: WorkspaceId,
-    branchName: string,
-    terminalSessionId: string,
     options?: AppNavigationOptions,
   ) => boolean
 }
@@ -72,7 +65,7 @@ export function seedInitialObservedWorkspacePaneRouteForTest(
   if (!repoId || !repo) return false
   const branchName = getRepoSnapshotQueryData(repo.id, repo.workspaceRuntimeId)?.current
   if (!branchName) return false
-  const target = workspacePaneTabTargetForBranch(repoId, branchName, workspacePanePreferenceTargetOptions)
+  const target = workspacePaneTabModelForBranchForTest(repoId, branchName)
   if (!target?.branchName) return false
   const activeTab = target.activeTab
   const route: ParsedWorkspacePaneRoute | null =
@@ -101,7 +94,7 @@ export function observedWorkspacePaneRouteCommitForTest(
     branchName: string,
     route: ParsedWorkspacePaneRoute | null,
   ): void => {
-    const target = workspacePaneTabTargetForBranch(repoId, branchName, { workspacePaneRoute: route })
+    const target = workspacePaneTabModelForBranchForTest(repoId, branchName, route)
     if (!target?.branchName) return
     const observation = {
       workspaceId: target.workspaceId,
@@ -123,8 +116,8 @@ export function observedWorkspacePaneRouteCommitForTest(
         },
       })
   }
-  const { showRepoBranchEmptyWorkspacePane, showRepoBranchWorkspacePaneTab, showRepoBranchTerminalSession } = navigation
-  if (!showRepoBranchEmptyWorkspacePane || !showRepoBranchWorkspacePaneTab || !showRepoBranchTerminalSession) {
+  const { showRepoBranchEmptyWorkspacePane, showRepoBranchWorkspacePaneTab } = navigation
+  if (!showRepoBranchEmptyWorkspacePane || !showRepoBranchWorkspacePaneTab) {
     throw new Error('Observed workspace pane route commits require branch route callbacks')
   }
   const abandonCommit = (commitOptions: AppNavigationOptions | undefined) => {
@@ -160,7 +153,6 @@ export function observedWorkspacePaneRouteCommitForTest(
       {
         openRepoBranch: showRepoBranchEmptyWorkspacePane,
         openRepoBranchTab: showRepoBranchWorkspacePaneTab,
-        openRepoBranchTerminal: showRepoBranchTerminalSession,
       },
       repoId,
       branchName,
@@ -177,30 +169,60 @@ export function observedWorkspacePaneRouteCommitForTest(
   }
 }
 
+export function observedFilesystemWorkspacePaneRouteCommitForTest(): AppNavigationActions['commitFilesystemWorkspacePaneRoute'] {
+  return vi.fn(async (target, route, commitOptions) => {
+    const observation = {
+      workspaceId: target.routeTarget.workspaceId,
+      workspaceRuntimeId: target.workspaceRuntimeId,
+      branchName: '',
+      worktreePath: target.routeTarget.kind === 'git-worktree' ? target.routeTarget.worktreePath : null,
+    }
+    const currentRoute = observedWorkspacePaneRoutes.get(workspacePaneObservationKey(observation))
+    const precondition = commitOptions?.routePrecondition
+    if (
+      (precondition?.kind === 'exact-route' &&
+        (currentRoute === undefined || !workspacePaneRoutesEqual(currentRoute, precondition.route))) ||
+      (precondition?.kind === 'current-workspace-target' && currentRoute === undefined)
+    ) {
+      commitOptions?.onAbandon?.()
+      return false
+    }
+    workspacesStore
+      .getState()
+      .setWorkspacePaneTabForTarget(
+        target.routeTarget,
+        route?.kind === 'terminal' ? 'terminal' : route?.kind === 'static' ? route.tab : null,
+      )
+    observeWorkspacePaneRouteForTest({ ...observation, route })
+    commitOptions?.onCommit?.()
+    return true
+  })
+}
+
 /** Builds a provider value whose route commit is backed by the test's observed URL projection. */
 export function observedAppNavigationActionsForTest(
   overrides: ObservedAppNavigationOverrides,
   options: ObservedWorkspacePaneRouteCommitOptions = {},
 ): ObservedAppNavigationActionsForTest {
-  const {
-    showRepoBranchEmptyWorkspacePane,
-    showRepoBranchWorkspacePaneTab,
-    showRepoBranchTerminalSession,
-    ...navigationOverrides
-  } = overrides
+  const { showRepoBranchEmptyWorkspacePane, showRepoBranchWorkspacePaneTab, ...navigationOverrides } = overrides
   const navigation = appNavigationActionsForTest(navigationOverrides)
   const observedNavigation = {
     ...navigation,
     showRepoBranchEmptyWorkspacePane,
     showRepoBranchWorkspacePaneTab,
-    showRepoBranchTerminalSession,
   }
-  if (overrides.commitWorkspacePaneRoute) return observedNavigation
+  const navigationWithFilesystemCommit = overrides.commitFilesystemWorkspacePaneRoute
+    ? observedNavigation
+    : {
+        ...observedNavigation,
+        commitFilesystemWorkspacePaneRoute: observedFilesystemWorkspacePaneRouteCommitForTest(),
+      }
+  if (overrides.commitWorkspacePaneRoute) return navigationWithFilesystemCommit
   return {
-    ...observedNavigation,
+    ...navigationWithFilesystemCommit,
     commitWorkspacePaneRoute: vi.fn(
       observedWorkspacePaneRouteCommitForTest(
-        { showRepoBranchEmptyWorkspacePane, showRepoBranchWorkspacePaneTab, showRepoBranchTerminalSession },
+        { showRepoBranchEmptyWorkspacePane, showRepoBranchWorkspacePaneTab },
         options,
       ),
     ),
@@ -211,7 +233,7 @@ export function observedWorkspacePaneRouteForTarget(
   repoId: WorkspaceId,
   branchName: string,
 ): WorkspacePaneRouteTarget | undefined {
-  const target = workspacePaneTabTargetForBranch(repoId, branchName, workspacePanePreferenceTargetOptions)
+  const target = workspacePaneTabModelForBranchForTest(repoId, branchName)
   if (!target?.branchName) return undefined
   const route = observedWorkspacePaneRoutes.get(
     workspacePaneObservationKey({
@@ -224,11 +246,31 @@ export function observedWorkspacePaneRouteForTarget(
   return route?.kind === 'invalid-static' ? undefined : route
 }
 
+export function workspacePaneTabModelForBranchForTest(
+  workspaceId: WorkspaceId,
+  branchName: string,
+  workspacePaneRoute: ParsedWorkspacePaneRoute | null | undefined = undefined,
+) {
+  const workspace = workspacesStore.getState().workspaces[workspaceId]
+  if (!workspace || workspace.capability.kind !== 'git') return null
+  const snapshot = getRepoSnapshotQueryData(workspaceId, workspace.workspaceRuntimeId)
+  if (!snapshot) return null
+  const worktree = repoWorktreeForBranch(snapshot.worktrees, branchName)
+  if (!worktree && !snapshot.branches.some((branch) => branch.name === branchName)) return null
+  const paneTarget = requiredGitWorkspacePaneTabsTarget(workspaceId, branchName, worktree?.path ?? null)
+  return workspacePaneTabTargetForPaneTarget({
+    paneTarget,
+    routeTarget: paneTarget,
+    workspacePaneRoute,
+    worktreeHead: worktree?.head,
+  })
+}
+
 function workspacePaneObservationKey(observation: Omit<WorkspacePaneNavigationObservation, 'route'>): string {
   return [
     observation.workspaceId,
     observation.workspaceRuntimeId,
-    observation.branchName,
+    observation.worktreePath ? '' : observation.branchName,
     observation.worktreePath ?? '',
   ].join('\0')
 }

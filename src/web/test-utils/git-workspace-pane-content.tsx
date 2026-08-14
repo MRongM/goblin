@@ -38,14 +38,11 @@ import {
 import type { WorkspacePaneRoute } from '#/web/App.tsx'
 import {
   observedAppNavigationActionsForTest,
+  workspacePaneTabModelForBranchForTest,
   type AppNavigationOverridesForTest,
 } from '#/web/test-utils/workspace-pane-navigation.ts'
 import { formatTerminalFilesystemTargetKeyForPath } from '#/shared/terminal-filesystem-target-key.ts'
 import { preferredWorkspacePaneTabForTarget } from '#/web/stores/workspaces/workspace-pane-preferences.ts'
-import {
-  workspacePanePreferenceTargetOptions,
-  workspacePaneTabTargetForBranch,
-} from '#/web/workspace-pane/workspace-pane-tab-target.ts'
 import { terminalSessionContextForTest } from '#/web/test-utils/terminal-session-context.ts'
 import type { AppNavigationActions } from '#/web/app-navigation-actions.ts'
 import { AppNavigationProvider } from '#/web/app-navigation.tsx'
@@ -97,7 +94,7 @@ export const GitWorkspacePaneContentHarness = defineComponent<GitWorkspacePaneCo
     'workspacePaneId',
     'readFailures',
     'onRetryStatus',
-    'onBackToBranchNavigator',
+    'onBackToGitWorkspaceNavigator',
     'workspacePaneRouteMode',
     'navigation',
   ],
@@ -112,7 +109,7 @@ export const GitWorkspacePaneContentHarness = defineComponent<GitWorkspacePaneCo
             workspacePaneId={props.workspacePaneId}
             readFailures={props.readFailures}
             onRetryStatus={props.onRetryStatus}
-            onBackToBranchNavigator={props.onBackToBranchNavigator}
+            onBackToGitWorkspaceNavigator={props.onBackToGitWorkspaceNavigator}
             workspacePaneRouteMode={props.workspacePaneRouteMode}
           />
         </VueQueryClientScope>
@@ -129,7 +126,7 @@ const GitWorkspacePaneContentInner = defineComponent<GitWorkspacePaneContentHarn
     'workspacePaneId',
     'readFailures',
     'onRetryStatus',
-    'onBackToBranchNavigator',
+    'onBackToGitWorkspaceNavigator',
     'workspacePaneRouteMode',
   ],
 
@@ -148,7 +145,7 @@ const GitWorkspacePaneContentInner = defineComponent<GitWorkspacePaneContentHarn
         workspacePaneId={props.workspacePaneId}
         readFailures={props.readFailures}
         onRetryStatus={props.onRetryStatus}
-        onBackToBranchNavigator={props.onBackToBranchNavigator}
+        onBackToGitWorkspaceNavigator={props.onBackToGitWorkspaceNavigator}
         workspacePaneTabModel={workspacePaneTabModel.value}
       />
     )
@@ -161,21 +158,22 @@ function harnessWorkspacePaneRoute(
 ): WorkspacePaneRoute | null | undefined {
   if (props.workspacePaneRouteMode === 'bare-branch') return null
   const branch = props.detail.branch
+  const worktree = props.detail.worktree ?? undefined
   const preferredTab = preferredWorkspacePaneTabForTarget(
     props.repo.ui,
     branch
-      ? branch.worktree?.path
+      ? worktree
         ? {
             kind: 'git-worktree' as const,
             workspaceId: props.repo.id,
-            worktreePath: branch.worktree.path,
+            worktreePath: worktree.path,
           }
         : { kind: 'git-branch' as const, workspaceId: props.repo.id, branchName: branch.name }
       : null,
   )
   if (preferredTab === 'terminal') {
-    const terminalFilesystemTargetKey = branch?.worktree?.path
-      ? formatTerminalFilesystemTargetKeyForPath(props.repo.id, branch.worktree.path)
+    const terminalFilesystemTargetKey = worktree
+      ? formatTerminalFilesystemTargetKeyForPath(props.repo.id, worktree.path)
       : null
     const terminalFilesystemTargetSnapshot = terminalFilesystemTargetKey
       ? readContext.terminalFilesystemTargetSnapshot(terminalFilesystemTargetKey)
@@ -223,7 +221,7 @@ export function gitWorkspacePaneProjection(repo: WorkspaceState): GitWorkspacePa
 }
 
 export function preferenceBackedWorkspacePaneTabModel(repoId: WorkspaceId, branchName: string) {
-  const model = workspacePaneTabTargetForBranch(repoId, branchName, workspacePanePreferenceTargetOptions)
+  const model = workspacePaneTabModelForBranchForTest(repoId, branchName)
   if (!model) throw new Error('missing preference-backed workspace pane tab model')
   return model
 }
@@ -343,7 +341,6 @@ export function navigationWith(overrides: AppNavigationOverridesForTest): AppNav
     selectRepoBranch: () => true,
     showRepoBranchEmptyWorkspacePane: () => true,
     showRepoBranchWorkspacePaneTab: () => true,
-    showRepoBranchTerminalSession: () => true,
     goBack: () => {},
     goForward: () => {},
     openSettings: () => {},

@@ -5,7 +5,7 @@ import type { AppNavigationGeneration } from '#/web/app-navigation-lifecycle.ts'
 import type { WorkspaceRouteView } from '#/web/App.tsx'
 import { WorkspaceLayoutPane } from '#/web/components/Layout.tsx'
 import {
-  BranchNavigatorSkeleton,
+  GitWorkspaceNavigatorSkeleton,
   EmptyWorkspacePaneSkeleton,
   WorkspaceLayoutSkeleton,
   WorkspacePaneSkeleton,
@@ -33,6 +33,8 @@ import { useStoreSelector } from '#/web/stores/store-selector.ts'
 import { uiTransitionStore } from '#/web/stores/ui-transition.ts'
 import { workspacesStore } from '#/web/stores/workspaces/store.ts'
 import { gitWorkspaceCanExecute, isWorkspaceUnavailable } from '#/web/stores/workspaces/workspace-guards.ts'
+import { useAppNavigation } from '#/web/app-navigation.tsx'
+import { gitBranchPaneTargetLease } from '#/web/workspace-pane/workspace-pane-tab-target.ts'
 
 interface WorkspaceProjectionRestoreController {
   state: WorkspaceProjectionPromotionViewState
@@ -55,12 +57,11 @@ interface WorkspaceViewProps {
   onOpenWorkspaceNavigator?: (workspaceId: WorkspaceId) => void
   onOpenWorkspaceRootPane?: (workspaceId: WorkspaceId) => void
   onOpenWorkspaceDashboard?: (workspaceId: WorkspaceId) => void
-  onOpenRepoBranch?: (workspaceId: WorkspaceId, branchName: string) => void
   onOpenRepoNewWorktree?: (workspaceId: WorkspaceId) => void
   onCancelRepoNewWorktree?: (workspaceId: WorkspaceId) => void
-  onReplaceRepoBranch?: (
+  onReplaceRepoWorktree?: (
     workspaceId: WorkspaceId,
-    branchName: string,
+    worktreePath: string,
     navigationGeneration: AppNavigationGeneration,
   ) => void
 }
@@ -74,10 +75,9 @@ export const WorkspaceView = defineComponent<WorkspaceViewProps>({
     'onOpenWorkspaceNavigator',
     'onOpenWorkspaceRootPane',
     'onOpenWorkspaceDashboard',
-    'onOpenRepoBranch',
     'onOpenRepoNewWorktree',
     'onCancelRepoNewWorktree',
-    'onReplaceRepoBranch',
+    'onReplaceRepoWorktree',
   ],
 
   setup(props) {
@@ -95,13 +95,13 @@ const WorkspaceViewContent = defineComponent<WorkspaceViewProps>({
     'onOpenWorkspaceNavigator',
     'onOpenWorkspaceRootPane',
     'onOpenWorkspaceDashboard',
-    'onOpenRepoBranch',
     'onOpenRepoNewWorktree',
     'onCancelRepoNewWorktree',
-    'onReplaceRepoBranch',
+    'onReplaceRepoWorktree',
   ],
 
   setup(props) {
+    const navigation = useAppNavigation()
     const uiMode = useResponsiveUiMode()
     const compact = computed(() => uiMode.value === 'compact')
     const view = useStoreSelector(
@@ -200,7 +200,7 @@ const WorkspaceViewContent = defineComponent<WorkspaceViewProps>({
           <WorkspaceLayoutSkeleton
             singlePane={isCompact}
             singlePaneView={activeSinglePane}
-            workspacePaneState={routeBranchName ? 'content' : 'empty'}
+            workspacePaneState={routeBranchName || currentRouteView?.kind === 'worktree' ? 'content' : 'empty'}
           />
         )
       }
@@ -213,7 +213,10 @@ const WorkspaceViewContent = defineComponent<WorkspaceViewProps>({
       const zenModeCollapsed = !isCompact && currentView.zenMode && workspacePaneActive.value
       const workspaceTrafficLightOffset = zenModeCollapsed
       const sidebarSelectBranch = currentRouteView
-        ? (branchName: string) => props.onOpenRepoBranch?.(currentWorkspace.id, branchName)
+        ? (branchName: string) =>
+            navigation.selectRepoBranch(
+              gitBranchPaneTargetLease(currentWorkspace.id, currentWorkspace.workspaceRuntimeId, branchName),
+            )
         : undefined
       const sidebarCreateWorktree = currentRouteView
         ? () => props.onOpenRepoNewWorktree?.(currentWorkspace.id)
@@ -223,7 +226,7 @@ const WorkspaceViewContent = defineComponent<WorkspaceViewProps>({
         : undefined
 
       const renderSidebarPane = (
-        branchContent?: VNodeChild,
+        navigatorContent?: VNodeChild,
         chromeRegion: 'drag' | 'none' = zenModeCollapsed ? 'none' : 'drag',
       ): VNodeChild => (
         <WorkspaceLayoutPane>
@@ -231,7 +234,9 @@ const WorkspaceViewContent = defineComponent<WorkspaceViewProps>({
             workspaceId={currentWorkspace.id}
             git={git}
             compact={isCompact}
-            branchContent={branchContent ?? (!gitCapabilitySettled ? <BranchNavigatorSkeleton /> : undefined)}
+            navigatorContent={
+              navigatorContent ?? (!gitCapabilitySettled ? <GitWorkspaceNavigatorSkeleton /> : undefined)
+            }
             chromeRegion={chromeRegion}
             onOpenSettings={props.onOpenSettings}
             onSelectBranch={sidebarSelectBranch}
@@ -240,6 +245,7 @@ const WorkspaceViewContent = defineComponent<WorkspaceViewProps>({
             dashboardSelected={currentRouteView?.kind === 'dashboard'}
             newWorktreeSelected={currentRouteView?.kind === 'newWorktree'}
             currentBranchName={routeBranchName}
+            currentWorktreePath={currentRouteView?.kind === 'worktree' ? currentRouteView.worktreePath : null}
             workspaceRootSelected={gitUnavailable && currentRouteView?.kind === 'workspace-root'}
             onSelectWorkspaceRoot={
               gitUnavailable ? () => props.onOpenWorkspaceRootPane?.(currentWorkspace.id) : undefined
@@ -296,7 +302,7 @@ const WorkspaceViewContent = defineComponent<WorkspaceViewProps>({
                 onOpenWorkspaceRoot={
                   openWorkspaceRootPane ? () => openWorkspaceRootPane(currentWorkspace.id) : undefined
                 }
-                onSelectBranch={(branchName) => props.onOpenRepoBranch?.(currentWorkspace.id, branchName)}
+                onSelectBranch={sidebarSelectBranch}
               />
             )
           case 'workspace-root':
@@ -310,7 +316,7 @@ const WorkspaceViewContent = defineComponent<WorkspaceViewProps>({
                 }}
                 shortcutsEnabled={!isCompact || activeSinglePane === 'workspace'}
                 toolbarTrafficLightOffset={workspaceTrafficLightOffset}
-                onBackToBranchNavigator={() => props.onOpenWorkspaceNavigator?.(currentWorkspace.id)}
+                onBackToGitWorkspaceNavigator={() => props.onOpenWorkspaceNavigator?.(currentWorkspace.id)}
               />
             )
           case 'worktree':
@@ -325,7 +331,7 @@ const WorkspaceViewContent = defineComponent<WorkspaceViewProps>({
                 }}
                 shortcutsEnabled={!isCompact || activeSinglePane === 'workspace'}
                 toolbarTrafficLightOffset={workspaceTrafficLightOffset}
-                onBackToBranchNavigator={() => props.onOpenWorkspaceNavigator?.(currentWorkspace.id)}
+                onBackToGitWorkspaceNavigator={() => props.onOpenWorkspaceNavigator?.(currentWorkspace.id)}
               />
             )
           case 'newWorktree':
@@ -338,8 +344,8 @@ const WorkspaceViewContent = defineComponent<WorkspaceViewProps>({
                   if (props.onCancelRepoNewWorktree) props.onCancelRepoNewWorktree(currentWorkspace.id)
                   else props.onOpenWorkspaceNavigator?.(currentWorkspace.id)
                 }}
-                onCreated={(branchName, navigationGeneration) =>
-                  props.onReplaceRepoBranch?.(currentWorkspace.id, branchName, navigationGeneration)
+                onCreated={(worktreePath, navigationGeneration) =>
+                  props.onReplaceRepoWorktree?.(currentWorkspace.id, worktreePath, navigationGeneration)
                 }
               />
             )
@@ -353,7 +359,7 @@ const WorkspaceViewContent = defineComponent<WorkspaceViewProps>({
                 workspacePaneRouteContext={workspacePaneRouteContext.value}
                 shortcutsEnabled={!isCompact || activeSinglePane === 'workspace'}
                 toolbarTrafficLightOffset={workspaceTrafficLightOffset}
-                onBackToBranchNavigator={() => props.onOpenWorkspaceNavigator?.(currentWorkspace.id)}
+                onBackToGitWorkspaceNavigator={() => props.onOpenWorkspaceNavigator?.(currentWorkspace.id)}
               />
             )
         }
@@ -393,7 +399,8 @@ const WorkspaceViewContent = defineComponent<WorkspaceViewProps>({
         }
 
         if (currentWorkspace.session.projectionState === 'stub') {
-          const branchSkeleton = isCompact && routeBranchName ? undefined : <BranchNavigatorSkeleton />
+          const gitWorkspaceNavigatorSkeleton =
+            isCompact && workspacePaneActive.value ? undefined : <GitWorkspaceNavigatorSkeleton />
           return (
             <WorkspaceLayoutShell
               workspaceId={props.workspaceId}
@@ -402,11 +409,11 @@ const WorkspaceViewContent = defineComponent<WorkspaceViewProps>({
               workspacePaneActive={workspacePaneActive.value}
               workspacePaneSize={currentView.workspacePaneSize}
               onWorkspacePaneSizeChange={setWorkspacePaneSize}
-              sidebarPane={renderSidebarPane(branchSkeleton)}
-              zenRevealSidebarPane={renderSidebarPane(branchSkeleton, 'none')}
+              sidebarPane={renderSidebarPane(gitWorkspaceNavigatorSkeleton)}
+              zenRevealSidebarPane={renderSidebarPane(gitWorkspaceNavigatorSkeleton, 'none')}
               workspacePane={
                 <WorkspaceLayoutPane>
-                  {routeBranchName ? (
+                  {workspacePaneActive.value ? (
                     <WorkspacePaneSkeleton toolbarTrafficLightOffset={workspaceTrafficLightOffset} />
                   ) : (
                     <>
@@ -416,7 +423,7 @@ const WorkspaceViewContent = defineComponent<WorkspaceViewProps>({
                   )}
                 </WorkspaceLayoutPane>
               }
-              singlePaneActivePane={routeBranchName ? 'workspace' : 'navigator'}
+              singlePaneActivePane={workspacePaneActive.value ? 'workspace' : 'navigator'}
             />
           )
         }
@@ -448,7 +455,7 @@ const WorkspaceViewContent = defineComponent<WorkspaceViewProps>({
 
 function workspaceRouteViewIsTerminal(routeView: WorkspaceRouteView | null): boolean {
   return (
-    (routeView?.kind === 'branch' || routeView?.kind === 'worktree' || routeView?.kind === 'workspace-root') &&
+    (routeView?.kind === 'worktree' || routeView?.kind === 'workspace-root') &&
     routeView.workspacePaneRoute?.kind === 'terminal'
   )
 }

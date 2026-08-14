@@ -3,9 +3,9 @@ import { defineComponent } from 'vue'
 import type { FunctionalComponent, VNodeChild } from 'vue'
 import type { WorkspaceId } from '#/shared/workspace-locator.ts'
 import { TITLE_BAR_HEIGHT_PX } from '#/shared/title-bar-chrome.ts'
-import { BranchNavigator } from '#/web/components/BranchNavigator.tsx'
+import { GitWorkspaceNavigator } from '#/web/components/GitWorkspaceNavigator.tsx'
 import { WorkspacePickerHost } from '#/web/components/WorkspacePickerHost.tsx'
-import { WorkspaceRootNavigator } from '#/web/components/branch-navigator/WorkspaceRootNavigator.tsx'
+import { WorkspaceRootNavigator } from '#/web/components/workspace-navigator/WorkspaceRootNavigator.tsx'
 import {
   BranchFilterAction,
   CreateWorktreeRowAction,
@@ -28,7 +28,7 @@ interface WorkspaceLayoutSidebarProps {
   workspaceId?: WorkspaceId
   git: GitWorkspaceClientState | null
   compact: boolean
-  branchContent?: VNodeChild
+  navigatorContent?: VNodeChild
   chromeRegion?: WorkspaceShellSidebarChromeRegion
   onOpenSettings?: () => void
   onSelectBranch?: (branch: string) => void
@@ -37,6 +37,7 @@ interface WorkspaceLayoutSidebarProps {
   dashboardSelected?: boolean
   newWorktreeSelected?: boolean
   currentBranchName?: string | null
+  currentWorktreePath?: string | null
   workspaceRootSelected?: boolean
   onSelectWorkspaceRoot?: () => void
 }
@@ -47,7 +48,7 @@ export const WorkspaceLayoutSidebar = defineComponent<WorkspaceLayoutSidebarProp
     'workspaceId',
     'git',
     'compact',
-    'branchContent',
+    'navigatorContent',
     'chromeRegion',
     'onOpenSettings',
     'onSelectBranch',
@@ -56,6 +57,7 @@ export const WorkspaceLayoutSidebar = defineComponent<WorkspaceLayoutSidebarProp
     'dashboardSelected',
     'newWorktreeSelected',
     'currentBranchName',
+    'currentWorktreePath',
     'workspaceRootSelected',
     'onSelectWorkspaceRoot',
   ],
@@ -97,12 +99,13 @@ export const WorkspaceLayoutSidebar = defineComponent<WorkspaceLayoutSidebarProp
                 gitAvailable={props.git !== null}
               />
               <div class={cn('flex min-h-0 flex-1', backgroundClass)}>
-                {props.branchContent ??
+                {props.navigatorContent ??
                   (props.git ? (
-                    <BranchNavigator
+                    <GitWorkspaceNavigator
                       repoId={props.workspaceId}
                       onSelectBranch={props.onSelectBranch}
                       currentBranchName={props.currentBranchName}
+                      currentWorktreePath={props.currentWorktreePath}
                     />
                   ) : (
                     <WorkspaceRootNavigator

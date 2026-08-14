@@ -27,7 +27,7 @@ export type WorkspaceRouteView =
       kind: 'branch'
       workspaceId: WorkspaceId
       branchName: string
-      workspacePaneRoute: ParsedWorkspacePaneRoute | null
+      workspacePaneRoute: ParsedBranchWorkspacePaneRouteTarget
     }
   | { kind: 'newWorktree'; workspaceId: WorkspaceId }
 
@@ -35,8 +35,11 @@ export type WorkspacePaneRoute =
   { kind: 'static'; tab: WorkspacePaneStaticTabType } | { kind: 'terminal'; terminalSessionId: string }
 
 export type WorkspacePaneRouteTarget = WorkspacePaneRoute | null
+export type BranchWorkspacePaneRouteTarget = Extract<WorkspacePaneRoute, { kind: 'static' }> | null
 export type ParsedWorkspacePaneRoute = WorkspacePaneRoute | { kind: 'invalid-static'; tabKey: string }
 export type ParsedWorkspacePaneRouteTarget = ParsedWorkspacePaneRoute | null
+export type ParsedBranchWorkspacePaneRouteTarget =
+  BranchWorkspacePaneRouteTarget | Extract<ParsedWorkspacePaneRoute, { kind: 'invalid-static' }>
 
 export interface AppProps {
   routeSettingsPage?: SettingsPage | null
@@ -45,12 +48,11 @@ export interface AppProps {
   onOpenWorkspaceNavigator?: (workspaceId: WorkspaceId) => void
   onOpenWorkspaceRootPane?: (workspaceId: WorkspaceId) => void
   onOpenWorkspaceDashboard?: (workspaceId: WorkspaceId) => void
-  onOpenRepoBranch?: (workspaceId: WorkspaceId, branchName: string) => void
   onOpenRepoNewWorktree?: (workspaceId: WorkspaceId) => void
   onCancelRepoNewWorktree?: (workspaceId: WorkspaceId) => void
-  onReplaceRepoBranch?: (
+  onReplaceRepoWorktree?: (
     workspaceId: WorkspaceId,
-    branchName: string,
+    worktreePath: string,
     navigationGeneration: AppNavigationGeneration,
   ) => void
 }
@@ -64,10 +66,9 @@ export const App = defineComponent<AppProps>({
     'onOpenWorkspaceNavigator',
     'onOpenWorkspaceRootPane',
     'onOpenWorkspaceDashboard',
-    'onOpenRepoBranch',
     'onOpenRepoNewWorktree',
     'onCancelRepoNewWorktree',
-    'onReplaceRepoBranch',
+    'onReplaceRepoWorktree',
   ],
 
   setup(props) {
@@ -103,10 +104,9 @@ export const App = defineComponent<AppProps>({
                 onOpenWorkspaceNavigator={props.onOpenWorkspaceNavigator}
                 onOpenWorkspaceRootPane={props.onOpenWorkspaceRootPane}
                 onOpenWorkspaceDashboard={props.onOpenWorkspaceDashboard}
-                onOpenRepoBranch={props.onOpenRepoBranch}
                 onOpenRepoNewWorktree={props.onOpenRepoNewWorktree}
                 onCancelRepoNewWorktree={props.onCancelRepoNewWorktree}
-                onReplaceRepoBranch={props.onReplaceRepoBranch}
+                onReplaceRepoWorktree={props.onReplaceRepoWorktree}
               />
             ) : !workspaceMembershipReady.value ? (
               <WorkspaceLayoutSkeleton
