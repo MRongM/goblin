@@ -11,6 +11,7 @@ import { App } from '#/web/App.tsx'
 import type { ParsedBranchWorkspacePaneRouteTarget, ParsedWorkspacePaneRoute, WorkspaceRouteView } from '#/web/App.tsx'
 import { Layout } from '#/web/Layout.tsx'
 import { EmptyState } from '#/web/components/Layout.tsx'
+import { Button } from '#/web/components/ui/button.tsx'
 import { useAppRouteNavigation } from '#/web/app-route-navigation.ts'
 import type { AppRouteNavigation } from '#/web/app-route-navigation.ts'
 import { useT } from '#/web/stores/i18n-vue.ts'
@@ -44,7 +45,19 @@ const AppNotFoundRouteView = defineComponent({
   name: 'AppNotFoundRouteView',
   setup() {
     const t = useT()
-    return () => <EmptyState title={t('route.not-found-title')} />
+    const navigation = useAppRouteNavigation()
+    return () => (
+      <EmptyState
+        title={t('route.not-found-title')}
+        body={
+          <div class="pt-2">
+            <Button type="button" variant="outline" onClick={() => navigation.openHome()}>
+              {t('route.not-found-home')}
+            </Button>
+          </div>
+        }
+      />
+    )
   },
 })
 

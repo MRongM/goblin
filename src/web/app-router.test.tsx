@@ -150,8 +150,19 @@ describe('unmatched app routes', () => {
 
       await waitFor(() => expect(appRouter.currentRoute.value.name).toBe('not-found'))
       expect(view.container.textContent).toContain('route.not-found-title')
+      expect(view.getByRole('button', { name: 'route.not-found-home' })).toBeTruthy()
     },
   )
+
+  test('returns home from the not-found surface', async () => {
+    navigateBrowser('/unknown')
+    const view = renderRouter()
+    await waitFor(() => expect(appRouter.currentRoute.value.name).toBe('not-found'))
+
+    await fireEvent.click(view.getByRole('button', { name: 'route.not-found-home' }))
+
+    await waitFor(() => expect(appRouter.currentRoute.value.name).toBe('home'))
+  })
 
   test('keeps the root Layout owner mounted while navigating through an unmatched route', async () => {
     navigateBrowser('/settings/general')

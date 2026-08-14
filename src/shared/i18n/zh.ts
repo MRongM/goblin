@@ -189,6 +189,7 @@ export const zh: Record<DictKey, string> = {
   'empty.title': '未打开工作区',
   'empty.body': '从边栏选择工作区，或拖入文件夹。',
   'route.not-found-title': '未找到页面',
+  'route.not-found-home': '返回首页',
   'workspace-route.not-found-title': '未找到工作区',
 
   // ---- Drag and drop -----------------------------------------------------
