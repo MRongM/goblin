@@ -54,8 +54,30 @@ describe('TerminalSession attachment and presentation', () => {
       rows: 30,
     })
     expect(xtermMocks.terminals[0]!.options.minimumContrastRatio).toBe(4.5)
+    expect(xtermMocks.terminals[0]!.options.cursorBlink).toBe(true)
     expect(xtermMocks.terminals[0]!.options.cursorStyle).toBe('bar')
     expect(terminalCalls.restart).not.toHaveBeenCalled()
+  })
+
+  test('keeps the Windows terminal cursor steady to avoid focus flicker', async () => {
+    const savedPlatform = navigator.platform
+    let session: TerminalSession | undefined
+    Object.defineProperty(window.navigator, 'platform', { configurable: true, value: 'Win32' })
+    try {
+      const host = createTerminalHost()
+      session = new TerminalSession(descriptor, vi.fn())
+      hydrateManagedSession(session)
+
+      session.attach(host)
+      await flushTerminalStart()
+      await flushUntil(() => session?.snapshot().phase === 'open')
+
+      expect(xtermMocks.terminals[0]!.options.cursorBlink).toBe(false)
+      expect(host.querySelector('.goblin-managed-terminal-host.goblin-terminal-static-cursor')).not.toBeNull()
+    } finally {
+      session?.dispose()
+      Object.defineProperty(window.navigator, 'platform', { configurable: true, value: savedPlatform })
+    }
   })
 
   test('reads the xterm selection instead of the visible viewport for copying', async () => {

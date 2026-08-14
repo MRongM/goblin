@@ -164,10 +164,12 @@ export class TerminalSessionView {
 
   openTerminal(): XTermTerminal {
     this.markPresentationPending()
+    const isWindows = /^Win/i.test(globalThis.navigator?.platform ?? '')
+    this.xtermHost.classList.toggle('goblin-terminal-static-cursor', isWindows)
     const theme = terminalThemeForCurrentDocument()
     const term = new Terminal({
       ...createTerminalSizingOptions(),
-      cursorBlink: true,
+      cursorBlink: !isWindows,
       cursorStyle: 'bar',
       minimumContrastRatio: 4.5,
       linkHandler: this.createLinkHandler(),

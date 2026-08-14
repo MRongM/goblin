@@ -114,6 +114,10 @@
   touch-action: pan-x pinch-zoom;
 }
 
+.goblin-managed-terminal-host.goblin-terminal-static-cursor .xterm-cursor.xterm-cursor-blink {
+  animation: none !important;
+}
+
 .goblin-managed-terminal-host .xterm-viewport {
   background: var(--goblin-terminal-background, var(--color-terminal-background)) !important;
 }
