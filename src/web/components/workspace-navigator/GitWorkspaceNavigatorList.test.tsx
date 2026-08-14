@@ -29,6 +29,24 @@ vi.mock('#/web/components/BranchActionsMenu.tsx', () => ({
   ),
 }))
 
+vi.mock('#/web/components/workspace-navigator/WorktreeActionsMenu.tsx', () => ({
+  WorktreeActionsMenu: (props: {
+    open?: boolean
+    onOpenChange?: (open: boolean) => void
+    onOpenTab: (type: 'changes') => void
+  }) => (
+    <div>
+      <button
+        type="button"
+        data-testid="worktree-actions-menu"
+        data-open={props.open ? 'true' : 'false'}
+        onClick={() => props.onOpenChange?.(true)}
+      />
+      <button type="button" data-testid="worktree-open-changes" onClick={() => props.onOpenTab('changes')} />
+    </div>
+  ),
+}))
+
 vi.mock('#/web/components/terminal/terminal-session-store.ts', () => ({
   useTerminalFilesystemTargetOutputActive: () => false,
   useTerminalFilesystemTargetBellCount: () => 0,
@@ -132,6 +150,43 @@ describe('GitWorkspaceNavigatorList', () => {
     expect(row?.textContent).toContain('main')
     row?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     expect(onSelectWorktree).toHaveBeenCalledWith(worktree.path)
+  })
+
+  test('renders a detached worktree like a branch row without its path and opens target tabs from its menu', async () => {
+    const worktree: RepoWorktreeSnapshot = {
+      ...createRepoWorktreeSnapshotForTest('feature/detached', '/tmp/detached-worktree'),
+      head: { kind: 'detached' },
+      operation: null,
+      materializedBranch: null,
+    }
+    const repo = gitWorkspaceNavigatorRepo([createRepoBranch('main')], 'main', [worktree])
+    const onOpenWorktreeTab = vi.fn()
+
+    const { container } = renderInJsdom(
+      <GitWorkspaceNavigatorList
+        repo={repo}
+        rows={[{ kind: 'worktree', branch: null, worktree }]}
+        highlightedBranch={null}
+        highlightedWorktreePath={worktree.path}
+        onSelectBranch={() => {}}
+        onOpenBranchStatus={() => {}}
+        onOpenWorktreeTab={onOpenWorktreeTab}
+        emptyState={null}
+      />,
+    )
+
+    expect(container.querySelector('li')?.textContent).toContain(worktree.headOid?.slice(0, 7))
+    expect(container.querySelector('li')?.textContent).not.toContain(worktree.path)
+
+    const menu = container.querySelector<HTMLButtonElement>('[data-testid="worktree-actions-menu"]')
+    if (!menu) throw new Error('missing worktree actions menu')
+    menu.click()
+    await nextTick()
+    expect(menu.dataset.open).toBe('true')
+
+    container.querySelector<HTMLButtonElement>('[data-testid="worktree-open-changes"]')?.click()
+    expect(onOpenWorktreeTab).toHaveBeenCalledOnce()
+    expect(onOpenWorktreeTab).toHaveBeenCalledWith(worktree.path, 'changes')
   })
 
   test('highlights the row whose name matches highlightedBranch', () => {

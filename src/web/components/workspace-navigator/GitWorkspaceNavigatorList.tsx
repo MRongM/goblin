@@ -20,6 +20,9 @@ import type { GitWorkspaceNavigatorRepo } from '#/web/components/workspace-navig
 import { WorktreeStateRow } from '#/web/components/workspace-navigator/WorktreeStateRow.tsx'
 import { NAVIGATOR_ROW_LIST_CLASS } from '#/web/components/workspace-navigator/navigator-row-metrics.ts'
 import type { GitWorkspaceNavigatorRow } from '#/web/components/workspace-navigator/git-workspace-navigator-model.ts'
+import type { WorkspacePaneStaticTabType } from '#/shared/workspace-pane.ts'
+
+type NavigatorActionMenuTarget = { kind: 'branch' | 'worktree'; identity: string }
 
 interface Props {
   /** May be null while repo data is not loaded yet; the list falls
@@ -33,6 +36,7 @@ interface Props {
   onOpenBranchStatus: (branch: string) => void
   onSelectWorktree?: (worktreePath: string) => void
   onOpenWorktreeStatus?: (worktreePath: string) => void
+  onOpenWorktreeTab?: (worktreePath: string, type: WorkspacePaneStaticTabType) => void
   /** Rendered when `rows` is empty. */
   emptyState: VNodeChild
 }
@@ -48,25 +52,20 @@ export const GitWorkspaceNavigatorList = defineComponent<Props>({
     onOpenBranchStatus: { type: Function as PropType<(branch: string) => void>, required: true },
     onSelectWorktree: Function as PropType<(worktreePath: string) => void>,
     onOpenWorktreeStatus: Function as PropType<(worktreePath: string) => void>,
+    onOpenWorktreeTab: Function as PropType<(worktreePath: string, type: WorkspacePaneStaticTabType) => void>,
     emptyState: { type: null, required: true },
   },
 
   setup(props) {
-    const actionMenuOpen = ref<string | null>(null)
+    const actionMenuOpen = ref<NavigatorActionMenuTarget | null>(null)
     const selectedRef = ref<HTMLLIElement | null>(null)
 
     // The menu owns an anchored overlay, so its state must end with the row.
     watch(
       () => props.rows,
       (rows) => {
-        if (
-          actionMenuOpen.value &&
-          !rows.some(
-            (row) =>
-              row.branch?.name === actionMenuOpen.value &&
-              (row.kind === 'branch' || (row.worktree.head.kind === 'branch' && row.worktree.operation === null)),
-          )
-        ) {
+        const openMenu = actionMenuOpen.value
+        if (openMenu && !rows.some((row) => navigatorRowOwnsActionMenu(row, openMenu))) {
           actionMenuOpen.value = null
         }
       },
@@ -98,6 +97,13 @@ export const GitWorkspaceNavigatorList = defineComponent<Props>({
                   selectedRef={selectedRef}
                   onSelect={() => props.onSelectWorktree?.(row.worktree.path)}
                   onOpenStatus={() => props.onOpenWorktreeStatus?.(row.worktree.path)}
+                  onOpenTab={(type) => props.onOpenWorktreeTab?.(row.worktree.path, type)}
+                  actionMenuOpen={
+                    actionMenuOpen.value?.kind === 'worktree' && actionMenuOpen.value.identity === row.worktree.path
+                  }
+                  onActionMenuOpenChange={(open) => {
+                    actionMenuOpen.value = open ? { kind: 'worktree', identity: row.worktree.path } : null
+                  }}
                 />
               )
             }
@@ -121,9 +127,11 @@ export const GitWorkspaceNavigatorList = defineComponent<Props>({
                   worktreePath ? () => props.onOpenWorktreeStatus?.(worktreePath) : props.onOpenBranchStatus
                 }
                 selectedRef={selectedRef}
-                actionMenuOpen={actionMenuOpen.value === branch.name}
+                actionMenuOpen={
+                  actionMenuOpen.value?.kind === 'branch' && actionMenuOpen.value.identity === branch.name
+                }
                 onActionMenuOpenChange={(open) => {
-                  actionMenuOpen.value = open ? branch.name : null
+                  actionMenuOpen.value = open ? { kind: 'branch', identity: branch.name } : null
                 }}
               />
             )
@@ -133,3 +141,17 @@ export const GitWorkspaceNavigatorList = defineComponent<Props>({
     }
   },
 })
+
+function navigatorRowOwnsActionMenu(row: GitWorkspaceNavigatorRow, target: NavigatorActionMenuTarget): boolean {
+  if (target.kind === 'branch') {
+    return (
+      row.branch?.name === target.identity &&
+      (row.kind === 'branch' || (row.worktree.head.kind === 'branch' && row.worktree.operation === null))
+    )
+  }
+  return (
+    row.kind === 'worktree' &&
+    row.worktree.path === target.identity &&
+    (row.branch === null || row.worktree.operation !== null)
+  )
+}

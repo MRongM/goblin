@@ -15,6 +15,7 @@ import { flushTestUpdates, renderInJsdom } from '#/test-utils/render.tsx'
 import { workspaceIdForTest } from '#/test-utils/workspace-id.ts'
 import { GitWorkspaceNavigatorView } from '#/web/components/workspace-navigator/GitWorkspaceNavigatorView.tsx'
 import type { AppNavigationActions } from '#/web/app-navigation-actions.ts'
+import type { RepoWorktreeSnapshot } from '#/shared/git-types.ts'
 import { AppNavigationProvider } from '#/web/app-navigation.tsx'
 import { appNavigationActionsForTest } from '#/web/test-utils/app-navigation.ts'
 import { appQueryClient } from '#/web/app-query-client.ts'
@@ -26,10 +27,12 @@ import { workspacesStore } from '#/web/stores/workspaces/store.ts'
 import { getRepoSnapshotQueryData, setRepoSnapshotQueryData } from '#/web/repo-query-cache.ts'
 
 const mocks = vi.hoisted(() => ({
+  dispatchOpenWorkspacePaneTargetStaticTabAction: vi.fn(),
   dispatchShowWorkspacePaneStaticTabAction: vi.fn(),
 }))
 
 vi.mock('#/web/workspace-pane/workspace-pane-tab-open-action.ts', () => ({
+  dispatchOpenWorkspacePaneTargetStaticTabAction: mocks.dispatchOpenWorkspacePaneTargetStaticTabAction,
   dispatchShowWorkspacePaneStaticTabAction: mocks.dispatchShowWorkspacePaneStaticTabAction,
 }))
 
@@ -233,6 +236,44 @@ describe('GitWorkspaceNavigatorView', () => {
       { kind: 'static', tab: 'status' },
     )
     expect(mocks.dispatchShowWorkspacePaneStaticTabAction).not.toHaveBeenCalled()
+  })
+
+  test('opens detached worktree tabs from the target action menu', async () => {
+    const worktree: RepoWorktreeSnapshot = {
+      path: WORKTREE_PATH,
+      head: { kind: 'detached' },
+      headOid: '0123456789abcdef0123456789abcdef01234567',
+      operation: null,
+      materializedBranch: null,
+      isPrimary: false,
+      isLocked: false,
+    }
+    const repo = seedRepoWithReadModelForTest({
+      id: REPO_ID,
+      branches: [createRepoBranch('main')],
+      currentBranchName: null,
+      worktrees: [worktree],
+    })
+
+    renderGitWorkspaceNavigatorView()
+    const worktreeRow = screen.getByText('0123456').closest('li')
+    const worktreeMenu = worktreeRow?.querySelector<HTMLButtonElement>('[data-action-popover-trigger]')
+    if (!worktreeMenu) throw new Error('missing worktree action menu')
+    await fireEvent.click(worktreeMenu)
+    await fireEvent.click(screen.getByRole('button', { name: 'tab.changes' }))
+
+    expect(mocks.dispatchOpenWorkspacePaneTargetStaticTabAction).toHaveBeenCalledOnce()
+    expect(mocks.dispatchOpenWorkspacePaneTargetStaticTabAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspaceId: REPO_ID,
+        workspaceRuntimeId: repo.workspaceRuntimeId,
+        routeTarget: { kind: 'git-worktree', workspaceId: REPO_ID, worktreePath: WORKTREE_PATH },
+        paneTarget: { kind: 'git-worktree', workspaceId: REPO_ID, worktreePath: WORKTREE_PATH },
+        worktreeHead: { kind: 'detached' },
+        type: 'changes',
+        workspacePaneRoute: undefined,
+      }),
+    )
   })
 
   test('opens an unmaterialized branch status through its branch target', async () => {

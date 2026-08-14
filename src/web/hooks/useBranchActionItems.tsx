@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowUp, Diff, FolderTree, GitBranch, History, Trash2 } from '@lucide/vue'
+import { ArrowDown, ArrowUp, GitBranch, Trash2 } from '@lucide/vue'
 import { computed, toValue } from 'vue'
 import type { ComputedRef, MaybeRefOrGetter, VNodeChild } from 'vue'
 import { repoWorktreeForBranch } from '#/shared/git-types.ts'
@@ -15,6 +15,7 @@ import { useAppNavigation } from '#/web/app-navigation.tsx'
 import type { WorkspacePaneBranchTabType, WorkspacePaneStaticTabType } from '#/shared/workspace-pane.ts'
 import { dispatchShowWorkspacePaneStaticTabAction } from '#/web/workspace-pane/workspace-pane-tab-open-action.ts'
 import type { ParsedWorkspacePaneRoute } from '#/web/App.tsx'
+import { workspacePaneTargetActionItems } from '#/web/components/workspace-pane/workspace-pane-target-action-items.tsx'
 export interface BranchActionItem {
   id: BranchActionItemId
   label: string
@@ -109,45 +110,12 @@ export function useBranchActionItems(
         icon: <ArrowUp />,
         onSelect: actions.push,
       },
-      {
-        id: 'status',
-        label: t('tab.status'),
+      ...workspacePaneTargetActionItems(t, {
         disabled: blocked,
-        visible: true,
-        icon: <GitBranch />,
-        onSelect: () => openStaticWorkspacePaneTab('status'),
-      },
-      {
-        id: 'changes',
-        label: t('tab.changes'),
-        disabled: blocked,
-        visible: !!worktree,
-        icon: <Diff />,
-        onSelect: () => openStaticWorkspacePaneTab('changes'),
-      },
-      {
-        id: 'files',
-        label: t('tab.files'),
-        disabled: blocked,
-        // Both `changes` and `files` are worktree-scoped tabs
-        // (see `WORKSPACE_PANE_STATIC_TAB_SCOPES`), so the menu item
-        // is hidden for branches that have no worktree -- mirroring
-        // the `changes` gate one entry above. The tab itself is
-        // always present on the workspace pane strip; this menu
-        // item is a discoverability shortcut for users who don't
-        // notice the tab.
-        visible: !!worktree,
-        icon: <FolderTree />,
-        onSelect: () => openStaticWorkspacePaneTab('files'),
-      },
-      {
-        id: 'history',
-        label: t('tab.log'),
-        disabled: blocked,
-        visible: true,
-        icon: <History />,
-        onSelect: () => openStaticWorkspacePaneTab('history'),
-      },
+        hasWorktree: !!worktree,
+        statusIcon: <GitBranch />,
+        onOpenTab: openStaticWorkspacePaneTab,
+      }),
     ]
 
     const destructiveItems: BranchActionItem[] = [

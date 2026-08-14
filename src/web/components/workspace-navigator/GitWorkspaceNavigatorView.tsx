@@ -16,9 +16,13 @@ import { useT } from '#/web/stores/i18n-vue.ts'
 import { branchViewModeForWorkspace } from '#/web/stores/workspaces/branch-view-mode.ts'
 import { workspacesStore } from '#/web/stores/workspaces/store.ts'
 import { refreshRepoWorktreeStatus } from '#/web/stores/workspaces/worktree-status-refresh.ts'
-import { dispatchShowWorkspacePaneStaticTabAction } from '#/web/workspace-pane/workspace-pane-tab-open-action.ts'
+import {
+  dispatchOpenWorkspacePaneTargetStaticTabAction,
+  dispatchShowWorkspacePaneStaticTabAction,
+} from '#/web/workspace-pane/workspace-pane-tab-open-action.ts'
 import { gitBranchPaneTargetLease, gitWorktreePaneTargetLease } from '#/web/workspace-pane/workspace-pane-tab-target.ts'
 import { gitWorkspaceNavigatorRows } from '#/web/components/workspace-navigator/git-workspace-navigator-model.ts'
+import type { WorkspacePaneStaticTabType } from '#/shared/workspace-pane.ts'
 
 interface Props {
   repoId: WorkspaceId
@@ -129,6 +133,22 @@ const GitWorkspaceNavigatorViewReadModel = defineComponent<GitWorkspaceNavigator
       void navigation.commitFilesystemWorkspacePaneRoute(target, { kind: 'static', tab: 'status' })
     }
 
+    function openWorktreeTab(worktreePath: string, type: WorkspacePaneStaticTabType): void {
+      const worktree = repo.value?.snapshot.worktrees.find((candidate) => candidate.path === worktreePath)
+      if (!worktree) return
+      const lease = gitWorktreePaneTargetLease(props.repo.id, props.repo.workspaceRuntimeId, worktreePath)
+      void dispatchOpenWorkspacePaneTargetStaticTabAction({
+        workspaceId: props.repo.id,
+        workspaceRuntimeId: props.repo.workspaceRuntimeId,
+        routeTarget: lease.routeTarget,
+        paneTarget: lease.routeTarget,
+        worktreeHead: worktree.head,
+        type,
+        workspacePaneRoute: undefined,
+        navigation,
+      })
+    }
+
     function retryStatus(): void {
       void refreshRepoWorktreeStatus({ get: workspacesStore.getState }, props.repo.id, props.repo.workspaceRuntimeId)
     }
@@ -184,6 +204,7 @@ const GitWorkspaceNavigatorViewReadModel = defineComponent<GitWorkspaceNavigator
             onOpenBranchStatus={openBranchStatus}
             onSelectWorktree={selectWorktree}
             onOpenWorktreeStatus={openWorktreeStatus}
+            onOpenWorktreeTab={openWorktreeTab}
             emptyState={<EmptyState title={t(emptyLabelKey)} />}
           />
         </>

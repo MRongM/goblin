@@ -1,15 +1,12 @@
 import { defineComponent } from 'vue'
-import type { FunctionalComponent, PropType } from 'vue'
+import type { PropType } from 'vue'
 import type { BranchSnapshotInfo, RepoWorktreeSnapshot } from '#/shared/git-types.ts'
 import { BranchActionsMenu } from '#/web/components/BranchActionsMenu.tsx'
 import { BranchSummaryInline } from '#/web/components/repo-workspace/BranchSummaryInline.tsx'
-import { cn } from '#/web/lib/cn.ts'
 import type { BranchActionRepo } from '#/web/hooks/branch-action-state.ts'
 import { useIsCompactUi } from '#/web/hooks/useResponsiveUiMode.tsx'
-import { TerminalBellBadge } from '#/web/components/terminal/TerminalBellBadge.tsx'
-import { TerminalOutputActivityIndicator } from '#/web/components/terminal/TerminalOutputActivityIndicator.tsx'
-import { NAVIGATOR_ROW_ACTION_BOX_CLASS } from '#/web/components/workspace-navigator/navigator-row-metrics.ts'
 import { NavigatorRow } from '#/web/components/workspace-navigator/NavigatorRow.tsx'
+import { NavigatorRowActionSlot } from '#/web/components/workspace-navigator/NavigatorRowActionSlot.tsx'
 import type { ElementRef } from '#/web/components/ui/refs.ts'
 
 export interface BranchRowProps {
@@ -90,14 +87,18 @@ export const BranchRow = defineComponent<BranchRowProps>({
             />
           }
           actions={
-            <BranchRowActionSlot
-              repo={props.repo}
-              branch={props.branch}
-              actionMenuOpen={props.actionMenuOpen}
-              onActionMenuOpenChange={props.onActionMenuOpenChange}
+            <NavigatorRowActionSlot
               actionHidden={actionHidden}
               terminalBellCount={actionTerminalBellCount}
               terminalOutputActive={actionTerminalOutputActive}
+              action={
+                <BranchActionsMenu
+                  repo={props.repo}
+                  branch={props.branch}
+                  open={props.actionMenuOpen}
+                  onOpenChange={props.onActionMenuOpenChange}
+                />
+              }
             />
           }
         />
@@ -105,57 +106,3 @@ export const BranchRow = defineComponent<BranchRowProps>({
     }
   },
 })
-
-type BranchRowActionSlotProps = Pick<
-  BranchRowProps,
-  'repo' | 'branch' | 'actionMenuOpen' | 'onActionMenuOpenChange'
-> & {
-  actionHidden: boolean
-  terminalBellCount: number
-  terminalOutputActive: boolean
-}
-
-const BranchRowActionSlot: FunctionalComponent<BranchRowActionSlotProps> = (props) => {
-  const showBellBadge = props.terminalBellCount > 0 && props.actionHidden
-  const showOutputActivity = props.terminalOutputActive && props.actionHidden && !showBellBadge
-
-  return (
-    <div class={NAVIGATOR_ROW_ACTION_BOX_CLASS}>
-      {showBellBadge && (
-        <div class="absolute inset-0 flex items-center justify-center transition-opacity duration-100 group-hover:opacity-0 group-focus-within:opacity-0">
-          <TerminalBellBadge count={props.terminalBellCount} />
-        </div>
-      )}
-      {showOutputActivity && (
-        <div class="absolute inset-0 flex items-center justify-center transition-opacity duration-100 group-hover:opacity-0 group-focus-within:opacity-0">
-          <TerminalOutputActivityIndicator />
-        </div>
-      )}
-      <div
-        class={cn(
-          'relative',
-          !props.actionHidden && 'pointer-events-auto',
-          props.actionHidden &&
-            'pointer-events-none opacity-0 transition-opacity duration-100 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100',
-        )}
-      >
-        <BranchActionsMenu
-          repo={props.repo}
-          branch={props.branch}
-          open={props.actionMenuOpen}
-          onOpenChange={props.onActionMenuOpenChange}
-        />
-      </div>
-    </div>
-  )
-}
-
-BranchRowActionSlot.props = [
-  'repo',
-  'branch',
-  'actionMenuOpen',
-  'onActionMenuOpenChange',
-  'actionHidden',
-  'terminalBellCount',
-  'terminalOutputActive',
-]
