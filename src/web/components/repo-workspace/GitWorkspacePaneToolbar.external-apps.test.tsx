@@ -259,6 +259,41 @@ describe('GitWorkspacePaneToolbar external-apps', () => {
     expect(c.querySelector('[data-workspace-toolbar-trailing-actions]')).toBeNull()
   })
 
+  test('opens a local Windows worktree in Windows Terminal', async () => {
+    hostInfoStore.setState({
+      snapshot: { homeDir: 'C:\\Users\\tester', platform: 'win32', hostname: 'test-host', pid: 1 },
+      status: 'ready',
+      error: null,
+    })
+    runtimeExternalAppSettings.value = {
+      terminalAvailable: true,
+      terminalAppAvailability: { ghostty: false, terminal: false, windowsTerminal: true },
+      editorAvailable: false,
+      editorAppAvailability: { vscode: false },
+    }
+    const { container } = renderToolbar({
+      terminalCount: 0,
+      navigation: navigationWith({}),
+    })
+
+    const primary = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="settings.terminal.windows-terminal"]',
+    )
+    if (!primary) throw new Error('missing Windows Terminal primary action')
+    await flushTestUpdates(() => primary.click())
+
+    await waitFor(() =>
+      expect(workspaceExternalAppMocks.openWorkspaceTerminal).toHaveBeenCalledWith(
+        expect.objectContaining({
+          kind: 'git-worktree',
+          workspaceId: REPO_ID,
+          root: canonicalWorkspaceLocator(`goblin+file://${WORKTREE_PATH}`),
+        }),
+        'windowsTerminal',
+      ),
+    )
+  })
+
   test('uses the first visible external app as the split-button primary action without recent state', () => {
     const { container: c } = renderToolbar({
       terminalCount: 0,

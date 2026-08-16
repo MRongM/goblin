@@ -42,6 +42,24 @@ control transfer, not simultaneous live xterm rendering in every viewer.
 - Client caches and views never prove session liveness or authorize a server
   mutation.
 
+## Host shell selection
+
+Internal and external local terminals on Windows share one host-shell policy.
+An installed default WSL distribution is preferred, followed by PowerShell 7
+and then Windows PowerShell. An explicit internal-terminal process command
+remains authoritative and bypasses this default selection.
+
+Windows Terminal is a presentation host, not the shell-selection authority.
+Goblin passes it an explicit WSL or PowerShell command instead of inheriting the
+user's default Windows Terminal profile. Windows filesystem paths are handed to
+WSL through its working-directory contract. A `wsl.localhost` or legacy `wsl$`
+target additionally preserves the distribution named by the authoritative UNC
+path and enters its corresponding Linux path.
+
+Selection happens before process launch. If the selected WSL or PowerShell
+process fails to start, the operation surfaces that failure and does not replay
+the accepted action in a different shell.
+
 ## Identities
 
 - `userId` scopes session visibility, lifecycle cleanup, and realtime fanout.

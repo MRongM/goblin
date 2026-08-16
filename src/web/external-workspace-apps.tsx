@@ -1,3 +1,4 @@
+import { SquareTerminal } from '@lucide/vue'
 import type { FunctionalComponent, SVGAttributes } from 'vue'
 import type { EditorAppAvailability, EditorApp, TerminalApp, TerminalAppAvailability } from '#/shared/settings.ts'
 import type { WorkspaceExternalAppId } from '#/shared/workspace-settings.ts'
@@ -6,7 +7,7 @@ import { FinderIcon } from '#/web/components/ExternalAppIcon/FinderIcon.tsx'
 import { GhosttyIcon } from '#/web/components/ExternalAppIcon/GhosttyIcon.tsx'
 import { VSCodeIcon } from '#/web/components/ExternalAppIcon/VSCodeIcon.tsx'
 
-export type WorkspaceExternalTerminalApp = Extract<TerminalApp, 'ghostty' | 'terminal'>
+export type WorkspaceExternalTerminalApp = Extract<TerminalApp, 'ghostty' | 'terminal' | 'windowsTerminal'>
 export type WorkspaceExternalEditorApp = EditorApp
 
 interface WorkspaceExternalAppBase<TKind extends 'terminal' | 'editor' | 'finder'> {
@@ -45,6 +46,14 @@ export const WORKSPACE_EXTERNAL_TERMINAL_APPS = [
     labelKey: 'settings.terminal.terminal',
     Icon: AppleTerminalIcon,
     supportsRemote: true,
+  },
+  {
+    kind: 'terminal',
+    app: 'windowsTerminal',
+    id: 'terminal:windowsTerminal',
+    labelKey: 'settings.terminal.windows-terminal',
+    Icon: SquareTerminal,
+    supportsRemote: false,
   },
 ] as const satisfies readonly WorkspaceExternalTerminalAppItem[]
 

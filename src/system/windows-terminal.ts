@@ -2,6 +2,7 @@ import { execa } from 'execa'
 import { existsSync, statSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { resolveWindowsTerminalShell } from '#/system/windows-shell.ts'
 
 const OPEN_TIMEOUT_MS = 10_000
 const WT_EXE = 'wt.exe'
@@ -42,7 +43,12 @@ export async function openInWindowsTerminal(p: string): Promise<{ ok: boolean; m
   if (!windowsTerminal) return { ok: false, message: 'error.terminal-not-installed' }
 
   try {
-    const child = execa(windowsTerminal, ['-d', p], {
+    const shell = resolveWindowsTerminalShell({ cwd: p })
+    const terminalArgs =
+      shell.kind === 'wsl'
+        ? ['new-tab', shell.command, ...shell.args]
+        : ['new-tab', '--startingDirectory', p, shell.command, ...shell.args]
+    const child = execa(windowsTerminal, terminalArgs, {
       detached: true,
       stdio: 'ignore',
       cleanup: false,

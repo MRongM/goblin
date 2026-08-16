@@ -1,7 +1,7 @@
 import { Arch, type Configuration } from 'electron-builder'
 import path from 'node:path'
 import { ELECTRON_SERVER_EXTRA_RESOURCES } from '#scripts/electron-packaging.ts'
-import { prepareNodePtyDarwinRuntime } from '#/system/node-pty-runtime.ts'
+import { prepareNodePtyDarwinRuntime } from '#src/system/node-pty-runtime.ts'
 
 const config: Configuration = {
   appId: 'goblin.app',

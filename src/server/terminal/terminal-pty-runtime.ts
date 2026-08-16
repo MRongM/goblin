@@ -55,8 +55,8 @@ export function spawnTerminalPtyRuntime(
       return { ok: false, message: 'startupShellCommand cannot be combined with command or args' }
     }
     const shell = input.startupShellCommand
-      ? resolveLocalShellWithStartupShellCommand(input.startupShellCommand)
-      : resolveLocalShell(input)
+      ? resolveLocalShellWithStartupShellCommand(input.startupShellCommand, input.cwd)
+      : resolveLocalShell({ command: input.command, args: input.args, cwd: input.cwd })
     const env = userShellEnvironment(input.env)
     term = pty.spawn(shell.command, shell.args, {
       name: 'xterm-256color',

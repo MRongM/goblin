@@ -1,18 +1,24 @@
 import { userInfo } from 'node:os'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { resolveLocalShell, resolveLocalShellWithStartupShellCommand } from '#/server/terminal/terminal-local-shell.ts'
+import { resolveWindowsTerminalShell } from '#/system/windows-shell.ts'
 import {
   spawnTerminalPtyRuntime as spawnTerminalPtyRuntimeWithEvents,
   type SpawnTerminalPtyRuntimeInput,
 } from '#/server/terminal/terminal-pty-runtime.ts'
 import type * as NodeOsModule from 'node:os'
 
-const { spawnMock } = vi.hoisted(() => ({
+const { spawnMock, resolveWindowsTerminalShellMock } = vi.hoisted(() => ({
   spawnMock: vi.fn(),
+  resolveWindowsTerminalShellMock: vi.fn(),
 }))
 
 vi.mock('node-pty', () => ({
   spawn: spawnMock,
+}))
+
+vi.mock('#/system/windows-shell.ts', () => ({
+  resolveWindowsTerminalShell: resolveWindowsTerminalShellMock,
 }))
 
 vi.mock('node:os', async (importOriginal) => {
@@ -24,6 +30,7 @@ vi.mock('node:os', async (importOriginal) => {
 })
 
 const originalShell = process.env.SHELL
+const originalPlatform = process.platform
 const terminalEventObserver = { onData: vi.fn(), onExit: vi.fn() }
 
 function spawnTerminalPtyRuntime(input: SpawnTerminalPtyRuntimeInput) {
@@ -32,6 +39,12 @@ function spawnTerminalPtyRuntime(input: SpawnTerminalPtyRuntimeInput) {
 
 beforeEach(() => {
   spawnMock.mockReset()
+  resolveWindowsTerminalShellMock.mockReset()
+  resolveWindowsTerminalShellMock.mockReturnValue({
+    kind: 'wsl',
+    command: 'C:\\Windows\\System32\\wsl.exe',
+    args: ['--cd', 'C:\\repo'],
+  })
   terminalEventObserver.onData.mockReset()
   terminalEventObserver.onExit.mockReset()
   vi.mocked(userInfo).mockReset()
@@ -42,9 +55,15 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true })
   if (originalShell === undefined) delete process.env.SHELL
   else process.env.SHELL = originalShell
 })
+
+function withPlatform<T>(platform: NodeJS.Platform, run: () => T): T {
+  Object.defineProperty(process, 'platform', { value: platform, configurable: true })
+  return run()
+}
 
 function ptyStub(processName = 'zsh') {
   return {
@@ -58,6 +77,86 @@ function ptyStub(processName = 'zsh') {
 }
 
 describe('spawnTerminalPtyRuntime', () => {
+  test('uses the shared Windows shell policy for a default internal terminal', () => {
+    withPlatform('win32', () => {
+      const env = { PATH: 'C:\\Windows\\System32' }
+      const resolved = resolveLocalShell({ cwd: 'C:\\repo' }, env)
+
+      expect(resolved).toEqual({
+        kind: 'wsl',
+        command: 'C:\\Windows\\System32\\wsl.exe',
+        args: ['--cd', 'C:\\repo'],
+      })
+      expect(resolveWindowsTerminalShell).toHaveBeenCalledWith({ cwd: 'C:\\repo', env })
+    })
+  })
+
+  test('passes startup commands and the working directory to the shared Windows shell policy', () => {
+    withPlatform('win32', () => {
+      const env = { PATH: 'C:\\Windows\\System32' }
+      resolveWindowsTerminalShellMock.mockReturnValue({
+        kind: 'powershell',
+        command: 'pwsh.exe',
+        args: ['-NoLogo', '-NoExit', '-Command', 'Get-ChildItem'],
+      })
+
+      expect(resolveLocalShellWithStartupShellCommand('Get-ChildItem\r\n', 'C:\\repo', env)).toEqual({
+        kind: 'powershell',
+        command: 'pwsh.exe',
+        args: ['-NoLogo', '-NoExit', '-Command', 'Get-ChildItem'],
+      })
+      expect(resolveWindowsTerminalShell).toHaveBeenCalledWith({
+        cwd: 'C:\\repo',
+        env,
+        startupShellCommand: 'Get-ChildItem',
+      })
+    })
+  })
+
+  test('spawns the Windows shell selected for the admitted terminal without a second fallback', () => {
+    withPlatform('win32', () => {
+      const selectedShell = {
+        kind: 'wsl' as const,
+        command: 'C:\\Windows\\System32\\wsl.exe',
+        args: ['--cd', 'C:\\repo'],
+      }
+      resolveWindowsTerminalShellMock.mockReturnValue(selectedShell)
+      spawnMock.mockReturnValue(ptyStub('wsl.exe'))
+
+      const result = spawnTerminalPtyRuntime({ cwd: 'C:\\repo', cols: 80, rows: 24 })
+
+      expect(result.ok).toBe(true)
+      expect(resolveWindowsTerminalShell).toHaveBeenCalledOnce()
+      expect(spawnMock).toHaveBeenCalledOnce()
+      expect(spawnMock).toHaveBeenCalledWith(
+        selectedShell.command,
+        selectedShell.args,
+        expect.objectContaining({ cwd: 'C:\\repo' }),
+      )
+    })
+  })
+
+  test('keeps an explicit process command authoritative on Windows', () => {
+    withPlatform('win32', () => {
+      spawnMock.mockReturnValue(ptyStub('fish'))
+
+      spawnTerminalPtyRuntime({
+        command: 'C:\\tools\\fish.exe',
+        args: ['--login'],
+        cwd: 'C:\\repo',
+        cols: 80,
+        rows: 24,
+      })
+
+      expect(resolveWindowsTerminalShell).not.toHaveBeenCalled()
+      expect(spawnMock).toHaveBeenCalledWith(
+        'C:\\tools\\fish.exe',
+        ['--login'],
+        expect.objectContaining({ cwd: 'C:\\repo' }),
+      )
+    })
+  })
+
   test('returns a trimmed process name when node-pty exposes a string', () => {
     spawnMock.mockReturnValue({
       process: ' zsh ',
@@ -170,7 +269,9 @@ describe('spawnTerminalPtyRuntime', () => {
   test('runs a startup shell command through the login shell and returns to an interactive shell', () => {
     vi.mocked(userInfo).mockReturnValue({ shell: '/bin/zsh' } as ReturnType<typeof userInfo>)
 
-    const resolved = resolveLocalShellWithStartupShellCommand("  bat '/repo/README.md'\r", { SHELL: '/bin/zsh' })
+    const resolved = resolveLocalShellWithStartupShellCommand("  bat '/repo/README.md'\r", '/repo', {
+      SHELL: '/bin/zsh',
+    })
 
     expect(resolved).toEqual({
       command: '/bin/zsh',
@@ -182,7 +283,7 @@ describe('spawnTerminalPtyRuntime', () => {
   test('startup shell command resolution falls back to normal shell resolution for blank commands', () => {
     vi.mocked(userInfo).mockReturnValue({ shell: '/bin/zsh' } as ReturnType<typeof userInfo>)
 
-    expect(resolveLocalShellWithStartupShellCommand(' \r\n ', { SHELL: '/bin/zsh' })).toEqual({
+    expect(resolveLocalShellWithStartupShellCommand(' \r\n ', '/repo', { SHELL: '/bin/zsh' })).toEqual({
       command: '/bin/zsh',
       args: ['-l'],
     })
@@ -282,7 +383,7 @@ describe('spawnTerminalPtyRuntime', () => {
   test('falls back to os.userInfo().shell when SHELL is not set (CI / devcontainer)', () => {
     vi.mocked(userInfo).mockReturnValue({ shell: '/usr/bin/zsh' } as ReturnType<typeof userInfo>)
 
-    const resolved = resolveLocalShell({}, { PATH: '/usr/bin' })
+    const resolved = resolveLocalShell({ cwd: '/repo' }, { PATH: '/usr/bin' })
 
     expect(resolved).toEqual({ command: '/usr/bin/zsh', args: ['-l'] })
     expect(userInfo).toHaveBeenCalledTimes(1)
@@ -291,7 +392,7 @@ describe('spawnTerminalPtyRuntime', () => {
   test('treats whitespace-only SHELL as unset and falls through to userInfo', () => {
     vi.mocked(userInfo).mockReturnValue({ shell: '/usr/bin/zsh' } as ReturnType<typeof userInfo>)
 
-    const resolved = resolveLocalShell({}, { SHELL: '   ' })
+    const resolved = resolveLocalShell({ cwd: '/repo' }, { SHELL: '   ' })
 
     expect(resolved).toEqual({ command: '/usr/bin/zsh', args: ['-l'] })
   })
@@ -299,7 +400,7 @@ describe('spawnTerminalPtyRuntime', () => {
   test('treats whitespace-only userInfo().shell as unset and falls back to /bin/sh', () => {
     vi.mocked(userInfo).mockReturnValue({ shell: '   ' } as ReturnType<typeof userInfo>)
 
-    const resolved = resolveLocalShell({}, {})
+    const resolved = resolveLocalShell({ cwd: '/repo' }, {})
 
     expect(resolved).toEqual({ command: '/bin/sh', args: ['-l'] })
   })
@@ -309,7 +410,7 @@ describe('spawnTerminalPtyRuntime', () => {
       throw new Error('userInfo unavailable')
     })
 
-    const resolved = resolveLocalShell({}, {})
+    const resolved = resolveLocalShell({ cwd: '/repo' }, {})
 
     expect(resolved).toEqual({ command: '/bin/sh', args: ['-l'] })
   })

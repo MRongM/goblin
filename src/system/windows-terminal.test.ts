@@ -1,12 +1,19 @@
-import { chmodSync, mkdtempDisposableSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { afterEach, describe, expect, test, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
-const execaMock = vi.hoisted(() => vi.fn())
+const { execaMock, resolveWindowsTerminalShellMock } = vi.hoisted(() => ({
+  execaMock: vi.fn(),
+  resolveWindowsTerminalShellMock: vi.fn(),
+}))
 
 vi.mock('execa', () => ({
   execa: execaMock,
+}))
+
+vi.mock('#/system/windows-shell.ts', () => ({
+  resolveWindowsTerminalShell: resolveWindowsTerminalShellMock,
 }))
 
 // Importing after the mock so the module under test picks up the mocked execa.
@@ -36,7 +43,13 @@ async function withPlatformAsync(platform: NodeJS.Platform, run: () => Promise<v
 }
 
 function makeTempDir() {
-  return mkdtempDisposableSync(path.join(os.tmpdir(), 'goblin-wt-test-'))
+  const temporaryDirectory = mkdtempSync(path.join(os.tmpdir(), 'goblin-wt-test-'))
+  return {
+    path: temporaryDirectory,
+    [Symbol.dispose]() {
+      rmSync(temporaryDirectory, { recursive: true, force: true })
+    },
+  }
 }
 
 function makeFakeWindowsTerminal(dir: string): string {
@@ -44,6 +57,15 @@ function makeFakeWindowsTerminal(dir: string): string {
   writeFileSync(exe, '@echo off\r\n')
   return exe
 }
+
+beforeEach(() => {
+  resolveWindowsTerminalShellMock.mockReset()
+  resolveWindowsTerminalShellMock.mockReturnValue({
+    kind: 'powershell',
+    command: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe',
+    args: ['-NoLogo'],
+  })
+})
 
 afterEach(() => {
   if (originalPath === undefined) delete process.env.PATH
@@ -155,7 +177,7 @@ describe('openInWindowsTerminal', () => {
     })
   })
 
-  test('spawns wt.exe with -d <path> on success', async () => {
+  test('spawns an explicit PowerShell command in the requested directory', async () => {
     await withPlatformAsync('win32', async () => {
       using temporaryDirectory = makeTempDir()
       const dir = temporaryDirectory.path
@@ -173,12 +195,40 @@ describe('openInWindowsTerminal', () => {
 
       expect(execaMock).toHaveBeenCalledWith(
         fake,
-        ['-d', target],
+        ['new-tab', '--startingDirectory', target, 'C:\\Program Files\\PowerShell\\7\\pwsh.exe', '-NoLogo'],
         expect.objectContaining({ detached: true, stdio: 'ignore' }),
       )
+      expect(resolveWindowsTerminalShellMock).toHaveBeenCalledWith({ cwd: target })
       expect(unref).toHaveBeenCalled()
       expect(result.ok).toBe(true)
       if (result.ok) expect(result.message).toBe(target)
+    })
+  })
+
+  test('spawns an explicit WSL command without consulting the default Windows Terminal profile', async () => {
+    await withPlatformAsync('win32', async () => {
+      using temporaryDirectory = makeTempDir()
+      const dir = temporaryDirectory.path
+      const fake = makeFakeWindowsTerminal(dir)
+      process.env.PATH = dir
+      process.env.PATHEXT = '.EXE'
+      const unref = vi.fn()
+      execaMock.mockReturnValue({ nodeChildProcess: { unref } })
+      resolveWindowsTerminalShellMock.mockReturnValue({
+        kind: 'wsl',
+        command: 'C:\\Windows\\System32\\wsl.exe',
+        args: ['--cd', dir],
+      })
+
+      const result = await openInWindowsTerminal(dir)
+
+      expect(execaMock).toHaveBeenCalledWith(
+        fake,
+        ['new-tab', 'C:\\Windows\\System32\\wsl.exe', '--cd', dir],
+        expect.objectContaining({ detached: true, stdio: 'ignore' }),
+      )
+      expect(unref).toHaveBeenCalled()
+      expect(result).toEqual({ ok: true, message: dir })
     })
   })
 
